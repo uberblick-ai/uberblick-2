@@ -50,6 +50,32 @@ export const toolHelpDetails = {
     "uberblick://help/{topic}. Help is workspace-agnostic and never opens or settles a replica; it remains " +
     "available offline and while the replica store is quarantined. Unknown topics refuse with " +
     "unknown_help_topic and list valid topic ids; choose one and retry.",
+  render_block:
+    "Read one `ablauf` code block's drawing without changing its source, block revisions or document. " +
+    "Use get_doc to find the document UUID and block id, then render after writing and fix both diagnostics " +
+    "and visible crossings, crowded labels or misplaced nodes before reporting back. This read tool " +
+    "also works on a hosted read-only connection. Wireframe, chart and other block types refuse with " +
+    "`unsupported_block_type`; only `ablauf` code blocks are supported.\n\n" +
+    "Omit `format` for one PNG image content item, 1000 pixels wide with the drawing's aspect ratio kept. " +
+    "`width` must be an integer from 100 to 2000, and applies only to PNG. `invalid_render_options` refuses " +
+    "an invalid format or width before rendering; use png or svg and a width in that range. The structured answer and its " +
+    "compact JSON text copy carry `uuid`, `block_id`, `format`, pixel `width` and `height`, and `drawing`; " +
+    "the image bytes are in the image item. `format: \"svg\"` returns `svg` text in that answer instead, " +
+    "with natural drawing dimensions and no image item. Like other structured results, the SVG is repeated " +
+    "in the compact JSON text copy.\n\n" +
+    "PNG dimensions must be finite and positive and total at most 4,000,000 pixels. The server checks " +
+    "the computed width and height before allocating a raster. `render_too_large` refuses an invalid " +
+    "or over-limit size with no image: choose a smaller `width` or `format: \"svg\"`. " +
+    "`render_failed` reports a renderer or rasterizer failure with recovery guidance; failures never " +
+    "return a blank or partial image as success.\n\n" +
+    "A source with diagnostics still returns the renderer's best-effort drawing. `drawing.status` is " +
+    "`clean`, `warnings` or `errors`; `diagnostics` carries source `line`, `severity` and `message`, " +
+    "capped at 20 entries. `diagnosticCount` gives the full count when truncated, as writing tools do. " +
+    "Flows with `play` sections show the whole drawing before playback.\n\n" +
+    "Rendering uses the editor's Ablauf renderer in its light palette, with an opaque light background " +
+    "and bundled Geist Mono for measured and drawn labels. Hues can differ slightly from the web editor's " +
+    "theme tokens; labels the web draws in its sans face use Geist Mono here, so node widths can differ " +
+    "slightly. No browser, network fetch or system font is needed.",
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
@@ -183,8 +209,7 @@ export const toolHelpDetails = {
     "Pass an entry's `id` as `revision` to get_revision or get_data. It is a hub revision ID, distinct from " +
     "get_doc's page and block `rev` content hashes. restore_revision accepts the same revision IDs. " +
     "A UUID unknown to this workspace refuses with doc_not_found before contacting the hub; a permanently " +
-    "deleted document refuses with doc_deleted. Decision records, including archived records, refuse with " +
-    "decision_no_history before cache or hub access; read the topic's records instead. See tool-contracts for history failures and recovery.",
+    "deleted document refuses with doc_deleted. Decision records use the same history, including archived records. See tool-contracts for history failures and recovery.",
   name_revision:
     "Call only when a person asks to name the current document state. Supply `uuid` and a `name` of " +
     "1 to 100 characters on one line. The hub verifies that this client's displayed title, visible blocks " +
@@ -200,7 +225,7 @@ export const toolHelpDetails = {
     "refusal reports applied: false. If a sent request loses its reply, revision_naming_outcome_unknown " +
     "reports applied: null, partial: false and synced: false. Call list_revisions with refresh: true and wait for a successful refresh before retrying; " +
     "reason unsupported means an admitted hub stayed silent, while unreachable means transport failed. " +
-    "Decision records in every state, including archived records, refuse with decision_no_history before any hub request; read the topic's records instead.",
+    "Decision records can be named in any status; archived records remain read-only.",
   restore_revision:
     "Restore a live team-hub document's title, visible blocks and structured data from a revision ID returned " +
     "by list_revisions. The hub closes the current revision and records the restore as its own closed revision, " +
@@ -219,7 +244,7 @@ export const toolHelpDetails = {
     "A sent request whose reply is lost reports revision_restore_outcome_unknown with applied: null, " +
     "partial: false and synced: false. Call list_revisions with refresh: true, wait for a successful refresh, and read get_doc before retrying: the restore may have " +
     "committed. reason unsupported means an admitted hub stayed silent; unreachable means transport failed. " +
-    "Decision records in every state, including archived records, refuse with decision_no_history before any hub request; read the topic's records instead.",
+    "Decision records follow their existing edit rules: a decided answer refuses with decision_read_only. Naming remains available independently of that answer lock.",
   get_revision:
     "Read a known document as it was at the hub revision ID from list_revisions, including an archived document. " +
     "The result returns `uuid`, `revision`, `title`, visible `blocks`, `data` and `history`, the cache status described by list_revisions. Blocks use get_doc's shape " +
@@ -234,8 +259,7 @@ export const toolHelpDetails = {
     "A snapshot outside this computer's retention limit is kept only while the read holds it. Revision IDs are distinct from get_doc's page and block `rev` content hashes. " +
     "A revision absent from the cached catalog is revalidated online before revision_not_found; offline its absence means not downloaded. " +
     "Unknown document UUIDs refuse with doc_not_found before contacting the hub, and permanently deleted " +
-    "documents refuse with doc_deleted. Decision records, including archived records, refuse with " +
-    "decision_no_history before cache or hub access; read the topic's records instead. A hub without snapshot checksums refuses with revisions_unsupported; update the hub. See tool-contracts for history failures and recovery.",
+    "documents refuse with doc_deleted. Decision records use the same history, including archived records. A hub without snapshot checksums refuses with revisions_unsupported; update the hub. See tool-contracts for history failures and recovery.",
   get_data:
     "Read structured data deliberately. Without `collection`, return `data: null` for none, or an area " +
     "summary of collection names, record counts, validity and invalid-record counts, canonical UTF-8 bytes, " +
@@ -262,8 +286,7 @@ export const toolHelpDetails = {
     "For example, `get_data({uuid, revision, collection: \"observations\", " +
     "limit: 100})` pages that revision's observations. An unknown revision, including one from another " +
     "document, refuses with revision_not_found after online catalog revalidation; offline it reports not downloaded. It never falls back to live data. See tool-contracts for " +
-    "history failures and recovery. Decision records in every state, including archived records, refuse " +
-    "historical reads with decision_no_history before cache or hub access; read the topic's records instead.\n\n" +
+    "history failures and recovery. Decision records use the same history, including archived records.\n\n" +
     "Merged invalidity is observed through the shared reader without dropping, repairing or writing values.",
   list_docs:
     "Documents in the workspace, from the synced directory document — never from locally observed creations. " +
@@ -827,7 +850,11 @@ export const toolHelpDetails = {
     "The edge shows up in backlinks without touching `meta.links`, which stays the curated doc-level list set_metadata owns.",
   sync_status:
     "What this replica holds and what the hub has acknowledged.\n\n" +
-    "`hub.status` distinguishes `hub-down`, a retryable connection or renewal failure, from `auth-failed`, an " +
+    "`hub.status: connecting` means the first hub connection is still pending and no attempt has failed. " +
+    "Changes are saved on this computer and sync once the connection opens; nothing needs repeating. " +
+    "A failed first attempt immediately reports `hub-down`; a first attempt still pending after 30 seconds " +
+    "also reports `hub-down`. Both keep `hub.recoveryClass: retry`. " +
+    "`hub-down`, a retryable connection or renewal failure, differs from `auth-failed`, an " +
     "authentication problem that needs human action. `disabled` means sync is disabled, so this server is " +
     "local-only. `local` means a local workspace whose hub runs only while `ub open` does: changes are saved " +
     "on this computer, nothing needs retrying, and `ub open` syncs them as it starts. Every hub reading carries `hub.recoveryClass`: `retry` means a missing room can still arrive as " +

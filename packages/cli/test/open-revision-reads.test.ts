@@ -147,7 +147,7 @@ it("returns a late read failure through the original continuation", async () => 
     revision: "revision-1", history: { ...history, offline: true } });
 });
 
-it.each(["deleted", "decision-no-history", "local-only", "detached", "removed"] as const)(
+it.each(["deleted", "local-only", "detached", "removed"] as const)(
   "refuses a completed continuation after its document becomes %s", async failure => {
     vi.useFakeTimers();
     const serving = engine();

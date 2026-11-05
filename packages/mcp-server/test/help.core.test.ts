@@ -73,6 +73,36 @@ it("documents inline icon names, source preservation, card labels and literal MC
   ]) expect(text, rule).toContain(rule);
 });
 
+it("teaches toggle heading syntax, section boundaries, visibility and prefix-preserving edits", async () => {
+  const rig = await local();
+  const edit = await rig.ok("get_help", { topic: "edit_doc" });
+  const essentials = edit.text.split("## Markdown essentials\n")[1]?.split("\n## ")[0];
+  expect(essentials).toContain("`## > Title` is a toggle heading whose section starts collapsed; see `markdown` for details.");
+
+  const { text } = await rig.ok("get_help", { topic: "markdown" });
+  const toggles = text.split("## Toggle headings\n")[1]?.split("\n## Callouts\n")[0];
+  expect(toggles).toBeDefined();
+  for (const rule of [
+    "heading whose text starts with `> `", "a `>` and a space", "Markdown import, use an ATX heading",
+    "    ## > Title\n    > quoted text",
+    "first line is a toggle heading; the second is a quote block, not a heading",
+    "Over MCP, use a `heading` block whose `text` starts with `> `",
+    '{ "type": "heading", "level": 2, "text": "> Title" }',
+    "every following block until the next heading with the same number of `#` or fewer, or the document's end",
+    "heading with more `#` stays inside the section and can be a toggle heading itself",
+    "starts collapsed for every reader when the page opens in the web",
+    "open state stays in that view and is never saved or shared",
+    "`get_doc` and `export_markdown` still return every block in the section",
+    "`search` still searches its full content",
+    "`> ` prefix is stored heading text", "`get_doc` and `search` retain it in returned heading text",
+    "Markdown import and export keep it as `## > Title`", "other Markdown viewers show the `>` literally",
+    "keep the prefix to keep the toggle", "Removing it makes an ordinary open heading",
+    "adding it to an existing heading folds that heading's section",
+    "section most readers can skip", "alternatives considered on an RFC page",
+    "Do not use one for content a reader needs to understand or act on the page",
+  ]) expect(toggles, rule).toContain(rule);
+});
+
 it("includes callouts in edit_doc essentials and teaches their syntax and restrained use", async () => {
   const rig = await local();
   const edit = await rig.ok("get_help", { topic: "edit_doc" });

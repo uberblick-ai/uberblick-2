@@ -1,4 +1,4 @@
-import { getMeta, isDirectoryEntryArchived, listDirectory } from "@uberblick/schema";
+import { isDirectoryEntryArchived, listDirectory } from "@uberblick/schema";
 import { readHubLogins } from "./auth-store.js";
 import { HubHistoryClock } from "./history-clock.js";
 import { HistoryMirror } from "./history-mirror.js";
@@ -44,8 +44,7 @@ export function startWorkspaceHistory(replicas: Replicas, isCurrent: () => boole
       const held = new Map(replicas.attachedReplicas().map(replica => [replica.id, replica]));
       return listDirectory(directory, { includeDeleted: true }).flatMap(entry => {
         const replica = held.get(entry.uuid);
-        if (replica === undefined || replicas.isDeleted(entry.uuid) ||
-          entry.kind === "decision" || getMeta(replica.doc).kind === "decision") return [];
+        if (replica === undefined || replicas.isDeleted(entry.uuid)) return [];
         return [{ uuid: entry.uuid, room: replica.room, sequence: replica.lastSeq,
           archived: isDirectoryEntryArchived(directory, entry.uuid) }];
       });

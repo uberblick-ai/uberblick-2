@@ -90,14 +90,16 @@ Without --all-devices, a credential the hub refuses after 30 days gets one
 renewal attempt: expiry or a confirmed device revocation removes it; exit 0.
 If revocation is not confirmed, the local login is still removed; exit 1.
 Finish with \`ub auth logout --all-devices <hub>\` from a computer still signed in.
-With --all-devices, revoke every device of your signed-in GitHub account on
-that hub, this computer last. Failure keeps the local login; exit 1.
+With --all-devices, end every hub browser sign-in of your GitHub account,
+then revoke every device and hosted agent grant, this computer last.
+Older hubs warn that browser sign-ins last until they expire (within 24 hours).
+Failure keeps the local login; exit 1.
 Retry needs a login the hub still accepts: run --all-devices again, or sign in
 again with \`ub auth login <hub>\` or use another computer still signed in.
 Workspace memberships, the project binding and local workspace copies stay.
 
 options:
-  --all-devices         revoke all of your devices on this hub
+  --all-devices         sign out all your devices and hub browser sign-ins
   -h, --help             show this help
 `;
 
@@ -304,7 +306,7 @@ class DeviceFailure extends Error {
   constructor(message: string, readonly signInRequired = false) { super(message); }
 }
 
-type DeviceAction = { operation: "list-devices" } | { operation: "revoke-device"; deviceId: string };
+type DeviceAction = { operation: "list-devices" | "revoke-browser-sessions" } | { operation: "revoke-device"; deviceId: string };
 
 async function deviceRequest(origin: string, action: DeviceAction, login: StoredHubLogin, io: Io) {
   const transport = hubTransportProblem(origin);
@@ -322,6 +324,7 @@ async function deviceRequest(origin: string, action: DeviceAction, login: Stored
       : "the hub is unreachable or the device-management request timed out");
   }
   if (body.status === "ok") return body;
+  if (action.operation === "revoke-browser-sessions" && body.status === "invalid-request") return body;
   if (body.status === "closure-failed") {
     io.err("ub auth: warning: revocation committed, but the hub could not close every active connection; repair the hub before relying on access closure.\n");
     return body;
@@ -381,28 +384,32 @@ async function logout(selection: Selection, io: Io, allDevices: boolean): Promis
       io.err(`ub auth: ${missing} for ${origin}. ${stored.diagnostic ?? ""} Run \`ub auth login ${origin}\`. Local login kept.\n`);
       return 1;
     }
-    let devices: string[];
+    let confirmed = 0;
+    let currentAttempted = false;
     try {
+      // known limit: older clients leave browser sign-ins until expiry; revisit when those clients are no longer supported.
+      const sessions = await deviceRequest(origin, { operation: "revoke-browser-sessions" }, login, io);
+      if (sessions.status === "invalid-request") {
+        io.err("ub auth: warning: this older hub cannot end browser sign-ins; they end only when they expire (within 24 hours). Update the hub to sign them out with --all-devices.\n");
+      }
+      // Consent checks its session and creates its grant synchronously. List
+      // after sign-out so every grant approved through an ended session is included.
       // Sanitized: unique device ids, and exactly this login's device is current.
       const body = await deviceRequest(origin, { operation: "list-devices" }, login, io);
-      devices = (body.devices as { deviceId: string }[]).map(device => device.deviceId);
+      let devices = (body.devices as { deviceId: string }[]).map(device => device.deviceId);
       // The key authorizes every request. Revoking its device first would
       // prevent the remaining requests from authenticating.
       devices = devices.filter(id => id !== login.credential.record.deviceId).concat(login.credential.record.deviceId);
-    } catch (error) {
-      io.err(`ub auth: ${error instanceof DeviceFailure ? error.message : "could not list devices"}. Local login kept.\n`);
-      return 1;
-    }
-    let confirmed = 0;
-    try {
       for (const deviceId of devices) {
+        currentAttempted = deviceId === login.credential.record.deviceId;
         await deviceRequest(origin, { operation: "revoke-device", deviceId }, login, io);
         confirmed++;
       }
     } catch (error) {
       authField(io, "confirmed", `${confirmed} revocations on ${origin}`);
       authField(io, "kept", `login for ${origin} on this computer`);
-      io.err(`ub auth: ${error instanceof DeviceFailure ? error.message : "device revocation failed"}. This computer's revocation is uncertain; the kept login may no longer work.\n`);
+      io.err(`ub auth: ${error instanceof DeviceFailure ? error.message : "all-device logout failed"}. ${currentAttempted
+        ? "This computer's revocation is uncertain; the kept login may no longer work." : "Local login kept."}\n`);
       io.err(`Run \`ub auth logout --all-devices ${origin}\` again with a login the hub still accepts. If the hub refuses this computer's login, sign in again with \`ub auth login ${origin}\` or use another computer still signed in.\n`);
       return 1;
     }

@@ -85,11 +85,11 @@ async function command(program, args, options = {}) {
   });
 }
 
-function request(port, path, websocket = false, host = `localhost:${port}`, method = "GET") {
+function request(port, path, websocket = false, host = `localhost:${port}`, method = "GET", headers = {}) {
   return new Promise((resolve, reject) => {
     const req = http.request({
       hostname: "127.0.0.1", port, path, method,
-      headers: { Host: host, ...(method === "POST" ? { "Content-Type": "application/json" } : {}), ...(websocket ? {
+      headers: { Host: host, ...headers, ...(method === "POST" ? { "Content-Type": "application/json" } : {}), ...(websocket ? {
         Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
         "Sec-WebSocket-Key": "c3ludGhldGljLXByb29mIQ==",
       } : {}) },
@@ -124,7 +124,8 @@ async function main() {
   const localSettings = `LOOPBACK_PORT=${loopbackPort}\nWEB_WORKSPACES=${WORKSPACE}\n`;
   const environment = { ...process.env, COMPOSE_PROJECT_NAME: project };
   for (const key of ["HUB_URL", "WORKSPACE_ID", "WORKSPACES", "HUB_AUTH_TOKEN", "HUB_GITHUB_CLIENT_ID",
-    "WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP", "COMPOSE_FILE", "COMPOSE_PROFILES", "DOCKER_DEFAULT_PLATFORM"]) delete environment[key];
+    "WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP",
+    "HUB_PUBLIC_URL", "MCP_ALLOWED_ORIGINS", "COMPOSE_FILE", "COMPOSE_PROFILES", "DOCKER_DEFAULT_PLATFORM"]) delete environment[key];
   let deployment;
   let candidateDeployment = false;
   let cleanupDeployment;
@@ -132,6 +133,7 @@ async function main() {
   let namedRoute = false;
   const extractionContainers = new Set();
   const imageProtocols = new Map();
+  const releaseServices = new Map();
   const nativeArchitecture = (await command("docker", ["version", "--format", "{{.Server.Arch}}"])).stdout.trim();
   assert.ok(["amd64", "arm64"].includes(nativeArchitecture), `unsupported Docker daemon architecture: ${nativeArchitecture}`);
   const cancel = (signal) => { if (!cleaningUp) { interrupted = signal; stopChild("SIGTERM"); } };
@@ -203,6 +205,10 @@ db.close(); console.log(JSON.stringify(result));`;
       assert.equal(labels["io.uberblick.sync-protocol-version"], String(metadata.syncProtocolVersion));
     }
     writeFileSync(join(directory, ".env"), localSettings, { mode: 0o600 });
+    const model = JSON.parse((await command("docker", ["compose", "--file", "docker-compose.yml", "config", "--format", "json"],
+      { cwd: directory, env: environment })).stdout);
+    releaseServices.set(directory, Object.keys(model.services).sort());
+    if (index === 1) assert.deepEqual(releaseServices.get(directory), ["caddy", "hub", "mcp"]);
     candidateDeployment = index === 1;
     console.log(`Extracted hub ${version} from ${metadata.sourceCommit}, sync protocol ${metadata.syncProtocolVersion}.`);
     return directory;
@@ -242,23 +248,73 @@ db.close(); console.log(JSON.stringify(result));`;
     }
     throw new Error(`stack did not serve loopback HTTP/config/WebSocket: ${interrupted ?? lastError}`);
   }
-  async function health(expected, timeout = 60_000) {
+  async function health(expected, timeout = 60_000, services = releaseServices.get(deployment)) {
     const ids = [];
-    for (const service of ["hub", "caddy"]) ids.push((await compose(["ps", "--quiet", service])).stdout.trim());
+    for (const service of services) ids.push((await compose(["ps", "--quiet", service])).stdout.trim());
     const until = Date.now() + timeout;
     let states;
     while (Date.now() < until && !interrupted) {
       states = JSON.parse((await command("docker", ["inspect", ...ids])).stdout);
       if (states.every((state) => state.State.Health?.Status === expected)) {
-        const output = (await compose(["ps", "--format", "json"])).stdout.trim();
-        const services = output.startsWith("[") ? JSON.parse(output) : output.split("\n").map((line) => JSON.parse(line));
-        assert.equal(services.length, 2);
-        assert.ok(services.every((service) => service.Health === expected), output);
+        const output = (await compose(["ps", "--format", "json", ...services])).stdout.trim();
+        const rows = output.startsWith("[") ? JSON.parse(output) : output.split("\n").map((line) => JSON.parse(line));
+        assert.equal(rows.length, services.length);
+        assert.ok(rows.every((service) => service.Health === expected), output);
         return ids;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new Error(`Docker health did not become ${expected}: ${JSON.stringify(states?.map((state) => state.State.Health))}`);
+  }
+  async function hostedRoutes(issuer) {
+    const authorizationPath = "/.well-known/oauth-authorization-server";
+    const resourcePath = `/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`;
+    const expectedMetadata = [];
+    for (const host of [`localhost:${loopbackPort}`, `127.0.0.1:${loopbackPort}`]) {
+      const authorization = await request(loopbackPort, authorizationPath, false, host);
+      const resource = await request(loopbackPort, resourcePath, false, host);
+      assert.equal(authorization.status, issuer === undefined ? 404 : 200);
+      assert.equal(resource.status, issuer === undefined ? 404 : 200);
+      const unauthenticated = await request(loopbackPort, `/mcp/${WORKSPACE}`, false, host);
+      assert.equal(unauthenticated.status, 401, "the MCP route reaches the host, rather than the app fallback");
+      const token = await request(loopbackPort, "/oauth/token", false, host);
+      assert.equal(token.status, issuer === undefined ? 404 : 405, "the OAuth route reaches the hub");
+      if (issuer === undefined) {
+        assert.equal(authorization.body, "");
+        assert.equal(resource.body, "");
+        assert.equal(unauthenticated.headers["www-authenticate"], undefined);
+      } else {
+        const authorizationMetadata = JSON.parse(authorization.body);
+        const resourceMetadata = JSON.parse(resource.body);
+        assert.equal(authorizationMetadata.issuer, issuer);
+        assert.deepEqual(resourceMetadata.authorization_servers, [issuer]);
+        assert.equal(resourceMetadata.resource, `${issuer}/mcp/${WORKSPACE}`);
+        for (const name of ["authorization_endpoint", "token_endpoint", "registration_endpoint"]) {
+          assert.equal(new URL(authorizationMetadata[name]).origin, issuer);
+        }
+        expectedMetadata.push([authorizationMetadata, resourceMetadata]);
+        assert.equal(unauthenticated.headers["www-authenticate"],
+          `Bearer resource_metadata="${issuer}${resourcePath}", scope="docs:read docs:write"`);
+      }
+    }
+    if (issuer !== undefined) assert.deepEqual(expectedMetadata[0], expectedMetadata[1], "request Host cannot change metadata URLs");
+  }
+  async function mcpStorage(writeMarker = false) {
+    for (const service of ["hub", "mcp"]) {
+      const id = (await compose(["ps", "--quiet", service])).stdout.trim();
+      assert.equal((await command("docker", ["inspect", "--format", "{{.Config.User}}", id])).stdout.trim(), "node");
+      await compose(["exec", "-T", service, "node", "-e", `const assert = require("node:assert/strict");
+const fs = require("node:fs"); const path = require("node:path").dirname(process.env.HUB_MCP_SOCKET);
+const directory = fs.lstatSync(path); assert.ok(directory.isDirectory());
+assert.equal(directory.uid, process.getuid()); assert.equal(directory.mode & 0o777, 0o700);
+assert.ok(fs.lstatSync(process.env.HUB_MCP_SOCKET).isSocket());`]);
+    }
+    await compose(["exec", "-T", "mcp", "node", "-e", `const assert = require("node:assert/strict");
+const fs = require("node:fs"); const path = require("node:path");
+assert.equal(fs.statSync(process.env.MCP_DATA_DIR).uid, process.getuid());
+const marker = path.join(process.env.MCP_DATA_DIR, "release-proof");
+${writeMarker ? 'fs.writeFileSync(marker, "synthetic MCP storage continuity\\n");' : ''}
+assert.equal(fs.readFileSync(marker, "utf8"), "synthetic MCP storage continuity\\n");`]);
   }
   try {
     deployment = await extract(versions[0], 0);
@@ -271,7 +327,13 @@ db.close(); console.log(JSON.stringify(result));`;
     for (const name of ["hub-data", "caddy-data", "caddy-config"]) {
       assert.equal(rendered.volumes[name].name, `uberblick-remote_${name}`);
     }
-    assert.deepEqual(Object.keys(rendered.services).sort(), ["caddy", "hub"]);
+    const olderHasMcp = releaseServices.get(deployment).includes("mcp");
+    assert.deepEqual(Object.keys(rendered.services).sort(), olderHasMcp ? ["caddy", "hub", "mcp"] : ["caddy", "hub"]);
+    if (olderHasMcp) {
+      assert.equal(rendered.services.mcp.image, rendered.services.hub.image);
+      assert.equal(rendered.services.mcp.ports, undefined);
+      assert.equal(rendered.services.mcp.build, undefined);
+    }
     assert.equal(rendered.services.hub.ports, undefined);
     assert.equal(rendered.services.hub.build, undefined);
     assert.equal(rendered.services.caddy.build, undefined);
@@ -289,6 +351,11 @@ db.close(); console.log(JSON.stringify(result));`;
     console.log("Plain Compose container entrypoints refuse unsafe configuration inputs by name.");
     await compose(["up", "--detach", "--no-build", "--pull", "never"]);
     await serving();
+    if (olderHasMcp) {
+      await health("healthy");
+      await hostedRoutes(undefined);
+      await mcpStorage(true);
+    }
     const fresh = await snapshot();
     assert.equal(fresh.hub_claim_state.length, 1);
     assert.equal(fresh.hub_claim_state[0].unclaimed, 1);
@@ -346,13 +413,16 @@ db.exec("COMMIT"); db.close();`);
     const before = (await compose(["ps", "--quiet", "hub"])).stdout.trim();
     const olderBackup = readFileSync(join(deployment, "backup.sqlite"));
     deployment = await extract(versions[1], 1);
+    cleanupDeployment = deployment;
     const candidateModel = JSON.parse((await compose(["config", "--format", "json"])).stdout);
-    for (const service of ["hub", "caddy"]) assert.equal(candidateModel.services[service].platform, undefined,
+    for (const service of ["hub", "mcp", "caddy"]) assert.equal(candidateModel.services[service].platform, undefined,
       "candidate Compose files leave platform selection to Docker");
     const replacedAt = Date.now();
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
     await serving();
     const healthyIds = await health("healthy");
+    await hostedRoutes(undefined);
+    await mcpStorage(!olderHasMcp);
     assert.ok(Date.now() - replacedAt < 90_000, "inherited image health arrives inside the existing client's wait");
     try {
       for (const id of healthyIds) await command("docker", ["kill", "--signal", "STOP", id]);
@@ -362,12 +432,12 @@ db.exec("COMMIT"); db.close();`);
     }
     await health("healthy");
     await serving();
-    console.log("Existing Compose health settings inherit both image probes; answering services are healthy, suspended listeners are unhealthy, and resumed services recover.");
+    console.log("Image health probes and the MCP override detect suspended listeners and recover when listeners resume; fresh node-owned socket and MCP storage are usable.");
     assert.notEqual((await compose(["ps", "--quiet", "hub"])).stdout.trim(), before);
     let upgraded = await snapshot();
     assertHubDatabaseUpgrade(upgraded, original);
     assert.equal(await certificateState(), certificates);
-    for (const [service, image] of [["hub", `ghcr.io/uberblick-ai/hub:${versions[1]}`], ["caddy", `ghcr.io/uberblick-ai/hub-web:${versions[1]}`]]) {
+    for (const [service, image] of [["hub", `ghcr.io/uberblick-ai/hub:${versions[1]}`], ["mcp", `ghcr.io/uberblick-ai/hub:${versions[1]}`], ["caddy", `ghcr.io/uberblick-ai/hub-web:${versions[1]}`]]) {
       const id = (await compose(["ps", "--quiet", service])).stdout.trim();
       assert.equal((await command("docker", ["inspect", "--format", "{{.Config.Image}}", id])).stdout.trim(), image);
     }
@@ -404,6 +474,41 @@ db.exec("COMMIT"); db.close();`);
     upgraded = restored;
     console.log("ub-hub is on PATH; online backup remains private and keeps serving; restore refuses a running hub, names the removals it undoes and brings the older release's backup back over a wiped database through standard input.");
 
+    const mcpId = (await compose(["ps", "--quiet", "mcp"])).stdout.trim();
+    await compose(["stop", "hub"]);
+    await health("unhealthy", 110_000, ["mcp"]);
+    await compose(["start", "hub"]);
+    await health("healthy");
+    assert.equal((await compose(["ps", "--quiet", "mcp"])).stdout.trim(), mcpId);
+    await serving();
+    console.log("Stopping only the hub makes MCP unhealthy; starting the hub restores MCP health without restarting its container.");
+
+    const issuer = `http://localhost:${loopbackPort}`;
+    const allowedOrigin = "https://agent.release-proof.example";
+    const originRequest = () => request(loopbackPort, `/mcp/${WORKSPACE}`, false,
+      `localhost:${loopbackPort}`, "GET", { Origin: allowedOrigin });
+    assert.equal((await originRequest()).status, 403, "unset origins allow no browser Origin");
+    writeFileSync(join(deployment, ".env"), `${localSettings}HUB_PUBLIC_URL=${issuer}\nMCP_ALLOWED_ORIGINS=${allowedOrigin}\n`, { mode: 0o600 });
+    await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate", "hub", "mcp"]);
+    await health("healthy");
+    await serving();
+    await hostedRoutes(issuer);
+    assert.equal((await originRequest()).status, 401, "the configured Origin passes admission without granting access");
+    for (const service of ["hub", "mcp"]) {
+      const configured = await compose(["exec", "-T", service, "node", "-e", 'console.log(process.env.HUB_PUBLIC_URL)']);
+      assert.equal(configured.stdout.trim(), issuer);
+      const refused = await compose(["run", "--rm", "--no-deps", "-T", "-e", "HUB_PUBLIC_URL=invalid-origin", service], { allowFailure: true });
+      assert.notEqual(refused.code, 0);
+      assert.match(refused.stdout + refused.stderr, /HUB_PUBLIC_URL/);
+    }
+    writeFileSync(join(deployment, ".env"), `${localSettings}HUB_PUBLIC_URL=\n`, { mode: 0o600 });
+    await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate", "hub", "mcp"]);
+    await health("healthy");
+    await serving();
+    await hostedRoutes(undefined);
+    await mcpStorage();
+    console.log("Caddy reaches MCP and OAuth routes; absent/empty issuer disables both metadata documents, configured metadata uses only HUB_PUBLIC_URL across Host names, invalid values refuse startup, and origins require operator configuration.");
+
     await compose(["stop"]);
     writeFileSync(join(deployment, ".env"), `${localSettings}WEB_HOST=release-proof.example.com\n`, { mode: 0o600 });
     namedRoute = true;
@@ -412,7 +517,7 @@ db.exec("COMMIT"); db.close();`);
     assert.deepEqual(named.services.caddy.ports.map(({ target, published }) => ({ target, published })),
       [{ target: 443, published: "443" }]);
     assert.equal(named.services.caddy.volumes.some(({ type }) => type === "bind"), false);
-    for (const name of ["hub-data", "caddy-data", "caddy-config"]) {
+    for (const name of ["hub-data", "mcp-data", "hub-mcp-socket", "caddy-data", "caddy-config"]) {
       assert.equal(named.volumes[name].name, `${project}_${name}`);
     }
     // Create the named route's real containers and inspect its shared volumes,
@@ -426,6 +531,8 @@ db.exec("COMMIT"); db.close();`);
     namedRoute = false;
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
     await serving();
+    await health("healthy");
+    await mcpStorage();
     assert.deepEqual(await snapshot(), upgraded);
     assert.equal(await certificateState(), certificates);
     console.log("Switching loopback to a named HTTPS configuration and back retained documents, private access, claim and synthetic certificate/configuration state.");

@@ -1,6 +1,7 @@
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import type { Io } from "./io.js";
 import type { UpdateHost } from "./update.js";
+import type { UninstallHost } from "./uninstall.js";
 
 export type CommandArgs<Options extends ParseArgsOptionsConfig = ParseArgsOptionsConfig> =
   ReturnType<typeof parseArgs<{ options: Options; allowPositionals: true }>>;
@@ -8,6 +9,7 @@ export type CommandArgs<Options extends ParseArgsOptionsConfig = ParseArgsOption
 export interface RunOptions {
   authCollectTimeoutMs?: number;
   updateHost?: UpdateHost;
+  uninstallHost?: UninstallHost;
 }
 
 export class UsageError extends Error {

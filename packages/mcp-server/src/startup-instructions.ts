@@ -4,6 +4,11 @@ import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
 import { activeTagCatalog } from "./tag-catalog.js";
 
+function guidanceTitle(title: string): string {
+  const characters = [...title.replace(/[\s\p{Cc}]+/gu, " ").trim()];
+  return characters.length > 80 ? `${characters.slice(0, 79).join("")}…` : characters.join("");
+}
+
 /** Read local discovery state once, without hydrating rooms or waiting for sync. */
 export function startupInstructions(replicas: Replicas): string {
   try {
@@ -15,7 +20,7 @@ export function startupInstructions(replicas: Replicas): string {
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
       .slice(0, 10);
     if (documents.length === 0) return STARTUP_ORIENTATION;
-    const pointers = documents.map(({ uuid, title }) => `${title} (\`${uuid}\`)`).join(", ");
+    const pointers = documents.map(({ uuid, title }) => `${guidanceTitle(title)} (\`${uuid}\`)`).join(", ");
     return `${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: ${pointers}.`;
   } catch (error) {
     log.warn("could not build the startup guidance pointers", error);

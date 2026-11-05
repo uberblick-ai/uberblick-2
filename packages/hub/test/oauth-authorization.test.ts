@@ -3,6 +3,8 @@ import { request } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { settingsRoom, setWorkspaceName } from "@uberblick/schema";
 import { workspaceResourceUrl } from "@uberblick/schema/oauth";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { importCredentialKey, mintRequestProof } from "@uberblick/schema/token";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { silentLogger } from "../src/log.js";
@@ -10,6 +12,7 @@ import { createHub, type Hub } from "../src/server.js";
 import { createTeamHub } from "../src/team.js";
 import * as metadataFetch from "../src/oauth-metadata-fetch.js";
 import { removeTempDatabases, tempDatabasePath, TEST_SECRET, WORKSPACE, OTHER_WORKSPACE } from "./helpers.js";
+import { issueCredential } from "./device-credentials.js";
 
 const ISSUER = "https://hub.example.com";
 const CLIENT_ID = "test-mcp-client";
@@ -238,6 +241,30 @@ describe("production metadata client lookup", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { redirectUri: "cursor://anysphere.cursor-mcp/oauth/callback", redirectScheme: "cursor:" },
+    { redirectUri: "com.example.app:/callback", redirectScheme: "com.example.app:" },
+  ])("names the app scheme rather than a web host for $redirectUri", async ({ redirectUri, redirectScheme }) => {
+    vi.spyOn(metadataFetch, "fetchMetadataDocument").mockResolvedValue({ ...metadata(), redirect_uris: [redirectUri] });
+    const r = await rig(true);
+    const query = params();
+    query.set("redirect_uri", redirectUri);
+    const response = await authorize(r, query);
+    expect(response.code).toBe(302);
+    const requestId = new URL(response.headers.location!).searchParams.get("request")!;
+    expect(await consent(r, "read", { requestId })).toEqual({ code: 200, result: {
+      status: "pending", clientName: "Document Agent", redirectHost: "", redirectScheme,
+      workspaceId: WORKSPACE, workspaceName: "Private workspace name", accessLevels: ["read-only", "read-write"],
+    } });
+    const denied = await consent(r, "submit", { requestId, decision: "deny" });
+    expect(denied.code).toBe(200);
+    const redirect = new URL(denied.result.redirectUrl as string);
+    expect(redirect.protocol).toBe(redirectScheme);
+    expect(redirect.searchParams.get("error")).toBe("access_denied");
+    expect(redirect.searchParams.get("state")).toBe(STATE);
+    expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
+  });
+
   it.each(["omitted", "private_key_jwt"])('shows fixed unsupported-authentication wording for %s without state or redirect', async method => {
     const value: Record<string, unknown> = metadata();
     if (method === "omitted") delete value.token_endpoint_auth_method;
@@ -323,6 +350,28 @@ describe("OAuth browser consent", () => {
     }
     expect(rows(r.path, "hub_oauth_pending_authorizations")).toHaveLength(1);
     expect(authorityRows(r.path)).toEqual({ grants: [], codes: [], credentials: [] });
+  });
+
+  it("refuses consent reads and approvals after the account's browser sessions are revoked", async () => {
+    const r = await rig();
+    const requestId = await pending(r);
+    expect(await consent(r, "read", { requestId })).toMatchObject({ code: 200 });
+    const credential = issueCredential(r.hub.credentials!, { principalId: r.principal.id,
+      deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const action = { operation: "revoke-browser-sessions" } as const;
+    const token = await mintRequestProof(await importCredentialKey(credential.keyBytes), {
+      kid: credential.record.id, ...action, lifetimeSeconds: 60,
+    });
+    const revoked = await http(r.hub, "/auth/manage", { method: "POST", headers: { "Content-Type": "application/json" },
+      text: JSON.stringify({ protocolVersion: SYNC_PROTOCOL_VERSION, token, ...action }) });
+    expect(revoked.code).toBe(200);
+    expect(JSON.parse(revoked.text)).toEqual({ status: "ok" });
+    expect(await consent(r, "read", { requestId })).toEqual({ code: 401, result: { status: "signed-out" } });
+    expect(await consent(r, "submit", { requestId, decision: "approve", accessLevel: "read-write" }))
+      .toEqual({ code: 401, result: { status: "signed-out" } });
+    expect(rows(r.path, "hub_agent_grants")).toEqual([]);
+    expect(rows(r.path, "hub_oauth_authorization_codes")).toEqual([]);
+    expect(rows(r.path, "hub_oauth_pending_authorizations")).toHaveLength(1);
   });
 
   it("rejects tampering, invalid access and denial extras without consuming the request", async () => {

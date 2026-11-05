@@ -9,6 +9,7 @@ import { startAdminSetup } from "./admin-setup.js";
 import { createOperatorControls } from "./operator-control.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { handleBrowserSignIn } from "./browser-sign-in.js";
+import { BrowserSessions } from "./browser-sessions.js";
 import { GithubAccountLookup } from "./github-account-lookup.js";
 import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
 import { HubAdminRegistry } from "./hub-admins.js";
@@ -23,6 +24,7 @@ import { handleOAuthAuthorization, type OAuthClientLookup } from "./oauth-author
 import { OAuthAuthorizations } from "./oauth-authorizations.js";
 import { handleOAuthToken } from "./oauth-token.js";
 import { OAuthMetadataClients } from "./oauth-client-metadata.js";
+import { handleOAuthRegistration, OAuthRegisteredClients } from "./oauth-registration.js";
 import { AgentGrantRegistry } from "./agent-grants.js";
 import { startMcpChannel } from "./mcp-channel.js";
 
@@ -40,6 +42,7 @@ export interface TeamHubOptions {
   hubVersion?: string;
   /** Test seam that can only make loopback admission stricter. */
   deviceCredentials?: true;
+  /** Test seam for metadata clients; dynamically registered clients remain real. */
   oauthClients?: OAuthClientLookup;
 }
 
@@ -49,6 +52,7 @@ function createTeamExtension(
 ): HubExtension & Pick<TeamHub, "credentials" | "memberships" | "principals" | "hubAdmins"> {
   const { database, server, deviceCredentials, protocolVersion, log } = context;
   let signIn: GithubSignIn | undefined;
+  let browserSessions: BrowserSessions | undefined;
   let accounts: GithubAccountLookup | undefined;
   let credentials: CredentialRegistry | undefined;
   let principals: PrincipalRegistry | undefined;
@@ -58,8 +62,13 @@ function createTeamExtension(
   let promotions: WorkspacePromotions | undefined;
   let hubAdmins: HubAdminRegistry | undefined;
   let authorizations: OAuthAuthorizations | undefined;
+  let registeredClients: OAuthRegisteredClients | undefined;
   const metadataClients = new OAuthMetadataClients();
-  const oauthClients = options.oauthClients ?? metadataClients.lookup;
+  const metadataLookup = options.oauthClients ?? metadataClients.lookup;
+  const oauthClients: OAuthClientLookup = async clientId => {
+    if (/^https:/i.test(clientId)) return metadataLookup(clientId);
+    return await registeredClients?.lookup(clientId) ?? (options.oauthClients === undefined ? null : metadataLookup(clientId));
+  };
   const workspaceNames = new WorkspaceNameReader(database, room => server().hocuspocus.documents.get(room));
   const hasLiveDocuments = (workspaceId: string) =>
     [...server().hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`));
@@ -72,9 +81,13 @@ function createTeamExtension(
     if (config.github !== undefined) {
       credentials = new CredentialRegistry(database, hubAdmins, log, undefined, workspaceNames);
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
-      signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
+      browserSessions = new BrowserSessions(database, config.github.now);
+      signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames, browserSessions);
       accounts = new GithubAccountLookup(config.github.fetch, config.github.now);
-      if (config.publicUrl !== undefined) authorizations = new OAuthAuthorizations(database, memberships, workspaceNames, credentials, config.github.now);
+      if (config.publicUrl !== undefined) {
+        authorizations = new OAuthAuthorizations(database, memberships, workspaceNames, credentials, config.github.now);
+        registeredClients = new OAuthRegisteredClients(database, config.github.now);
+      }
     }
   }
   if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
@@ -98,18 +111,19 @@ function createTeamExtension(
     revisionUsername(principalId) { return principals?.get(principalId)?.githubUsername ?? null; },
     async handleRequest(request, response) {
       if (handleAuthorizationServerMetadata(config.publicUrl, signIn !== undefined, request, response)) return true;
+      if (await handleOAuthRegistration(registeredClients, request, response, config.behindReleaseProxy)) return true;
       if (await handleOAuthAuthorization(config.publicUrl, signIn, authorizations, hubAdmins,
         oauthClients, request, response)) return true;
       if (await handleOAuthToken(config.publicUrl, signIn !== undefined, authorizations, request, response)) return true;
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
-      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion)) return true;
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion, browserSessions)) return true;
       if (await handleBrowserSignIn(signIn, request, response, config.behindReleaseProxy)) return true;
       return handleGithubSignIn(signIn, request, response, config.behindReleaseProxy);
     },
     async start() {
-      if (config.mcpSocketPath !== undefined && (authorizations === undefined || credentials === undefined || hubAdmins === undefined)) {
-        throw new Error("HUB_MCP_SOCKET requires GitHub sign-in and HUB_PUBLIC_URL");
+      if (config.mcpSocketPath !== undefined && (credentials === undefined || hubAdmins === undefined)) {
+        throw new Error("HUB_MCP_SOCKET requires GitHub sign-in");
       }
       if (options.operatorSetup) {
         if (principals === undefined || memberships === undefined || hubAdmins === undefined || isEphemeralDatabase(config.databasePath ?? "")) {
@@ -119,8 +133,8 @@ function createTeamExtension(
           github: config.github, log, hasLiveDocuments,
           operator: createOperatorControls(context, config, claims, principals, hubAdmins) });
       }
-      if (config.mcpSocketPath !== undefined && authorizations !== undefined && credentials !== undefined && hubAdmins !== undefined) {
-        mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, admins: hubAdmins,
+      if (config.mcpSocketPath !== undefined && credentials !== undefined && hubAdmins !== undefined && principals !== undefined) {
+        mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, principals, admins: hubAdmins,
           grants: new AgentGrantRegistry(database) });
       }
     },
@@ -129,6 +143,7 @@ function createTeamExtension(
       signIn?.stop();
       accounts?.stop();
       authorizations?.stop();
+      registeredClients?.stop();
       metadataClients.stop();
       await mcpChannel?.stop();
       await adminSetup?.stop();

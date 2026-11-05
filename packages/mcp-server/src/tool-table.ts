@@ -42,6 +42,7 @@ import { inputSchema as nameRevisionInput, nameRevisionOperation } from "./tools
 import { inputSchema as restoreRevisionInput, restoreRevisionOperation } from "./tools/restore-revision.js";
 import type { Operation, ToolOperation, Writes } from "./tools/operation.js";
 import { inputSchema as restoreDocInput, restoreDocOperation } from "./tools/restore-doc.js";
+import { inputSchema as renderBlockInput, renderBlockOperation } from "./tools/render-block.js";
 import { inputSchema as searchInput, searchOperation } from "./tools/search.js";
 import { inputSchema as setMetadataInput, setMetadataOperation } from "./tools/set-metadata.js";
 import { inputSchema as setStatusInput, setStatusOperation } from "./tools/set-status.js";
@@ -126,10 +127,9 @@ export const tools: readonly Tool[] = [
     name: "list_tags",
     title: "List assignable tags",
     description:
-      "List existing tag ids, names and descriptions in name order. complete:false means the hub catalog " +
-      "has not arrived. Descriptions guide LLMs on when to apply a tag. Reuse existing meanings and apply only " +
-      "tags that improve discovery; leaving a document untagged is valid. Use create_tag for missing categories " +
-      "and edit_tag to explicitly change usage guidance.",
+      "List existing tag ids, names and LLM usage guidance in name order. complete:false means the hub catalog " +
+      "has not arrived. Reuse meanings; tag only to improve discovery, or leave untagged. " +
+      "Use create_tag for missing categories and edit_tag to change guidance.",
     input: listTagsInput,
     operation: listTagsOperation,
     example: {},
@@ -140,13 +140,12 @@ export const tools: readonly Tool[] = [
     name: "create_tag",
     title: "Create or reuse a tag",
     description:
-      "Explicitly create a missing workspace catalog tag. Read list_tags and check complete first; an incomplete " +
-      "catalog can hide an existing or deleted name. Reuse existing meanings and keep the vocabulary small: create " +
-      "only reusable subjects or purposes, avoiding synonyms and one-off task, file, issue or version tags. Apply " +
-      "only tags that improve discovery; leaving a document untagged is valid. Names are trimmed and lowercased. " +
-      "An existing normalized name returns its canonical entry without changing its description; use edit_tag " +
-      "for that. Descriptions guide LLMs on when to apply the tag. Creation assigns no documents and retains " +
-      "Workspace settings permissions and offline recovery; local workspaces need no hub or sign-in.",
+      "Create a missing workspace catalog tag. Read list_tags and check complete: an incomplete catalog can hide " +
+      "existing or deleted names. Reuse meanings; keep a small vocabulary of reusable subjects/purposes, avoiding " +
+      "synonyms and one-off task, file, issue or version tags. Tag only to improve discovery, or leave untagged. " +
+      "Names trim and lowercase; an existing name returns its canonical entry without changing LLM usage guidance " +
+      "(use edit_tag). Assigns no documents. Retains Workspace settings permissions/offline recovery; " +
+      "local workspaces need no hub or sign-in.",
     input: createTagInput,
     operation: createTagOperation,
     hints: { destructive: false, idempotent: true },
@@ -158,12 +157,11 @@ export const tools: readonly Tool[] = [
     name: "edit_tag",
     title: "Edit a tag's usage guidance",
     description:
-      "Explicitly replace an existing tag's description as guidance for LLMs on when to apply it. Read list_tags " +
-      "and check complete first, then use an existing id and keep its meaning. Keeps the name, identity and document " +
-      "assignments; never creates tags. Null or blank clears the description; an identical edit has no further " +
-      "effect. Reuse a small vocabulary of subjects or purposes; avoid synonyms and one-off task, file, issue or " +
-      "version tags. Use the guidance to select tags only when they improve discovery; a document may remain untagged. Retains " +
-      "Workspace settings permissions and offline recovery; local workspaces need no hub or sign-in.",
+      "Replace an existing tag's LLM usage guidance. Read list_tags and check complete; use its id and keep its " +
+      "meaning, name and document assignments. Never creates tags. Null/blank clears; identical edits do nothing. " +
+      "Keep a small subject/purpose vocabulary, avoiding synonyms and one-off task, file, issue or version tags. " +
+      "Use guidance when tags improve discovery; documents may remain untagged. Workspace settings still govern " +
+      "permissions and offline recovery; a local workspace needs neither hub nor sign-in.",
     input: editTagInput,
     operation: editTagOperation,
     hints: { destructive: true, idempotent: true },
@@ -211,13 +209,25 @@ export const tools: readonly Tool[] = [
     details: toolHelpDetails.get_doc,
   }),
   tool({
+    name: "render_block",
+    title: "Render an Ablauf drawing",
+    description:
+      "View one ablauf code block as a PNG image (default 1000 px wide) or standalone SVG text, with drawing diagnostics. " +
+      "PNG dimensions are bounded to 4,000,000 pixels before raster allocation; reduce width or request SVG when refused. " +
+      "Uses the renderer's light palette and bundled Geist Mono. Inspect the image after writing and fix crowded or crossing geometry.",
+    input: renderBlockInput,
+    operation: renderBlockOperation,
+    example: { uuid, block_id: "<block-id>" },
+    related: [...documentContracts, "ablauf"],
+    details: toolHelpDetails.render_block,
+  }),
+  tool({
     name: "list_revisions",
     title: "List document revisions",
     description:
       "List this computer's cached revision catalog newest first, including archived documents, with cache freshness. " +
       "Missing history downloads when connected; cached reads work offline. Use refresh: true to check an unknown mutation outcome. " +
-      "IDs work with get_revision/get_data/restore_revision. Empty means a complete downloaded catalog has no history. " +
-      "Listing a decision record refuses with decision_no_history.",
+      "IDs work with get_revision/get_data/restore_revision. Empty means a complete downloaded catalog has no history.",
     input: listRevisionsInput,
     operation: listRevisionsOperation,
     example: { uuid },
@@ -230,7 +240,7 @@ export const tools: readonly Tool[] = [
     description:
       "Name the current synchronized state only when a person asks. Requires team-hub write access; " +
       "closes its stretch. One name per revision; manage it in the web. " +
-      "Naming a decision record refuses with decision_no_history.",
+      "Decision records can be named in any status.",
     input: nameRevisionInput,
     operation: nameRevisionOperation,
     hints: { destructive: false, idempotent: true },
@@ -244,7 +254,7 @@ export const tools: readonly Tool[] = [
     description:
       "Restore title, blocks and data from a hub revision as a new revision. Requires synchronized write access " +
       "to a live document; history and other metadata stay. An identical state writes nothing. " +
-      "Restoring a decision record refuses with decision_no_history.",
+      "A decided decision record refuses with decision_read_only.",
     input: restoreRevisionInput,
     operation: restoreRevisionOperation,
     hints: { destructive: true, idempotent: true },
@@ -257,8 +267,7 @@ export const tools: readonly Tool[] = [
     title: "Read a document revision",
     description:
       "Read a cached revision from list_revisions: title, visible blocks without rev, data summary and cache freshness. " +
-      "Missing snapshots download when connected; downloaded history works offline. Archived documents work. Page records with get_data and the same revision. " +
-      "Reading a decision record's revision refuses with decision_no_history.",
+      "Missing snapshots download when connected; downloaded history works offline. Archived documents work. Page records with get_data and the same revision.",
     input: getRevisionInput,
     operation: getRevisionOperation,
     example: { uuid, revision: "revision-id-from-list_revisions" },
@@ -271,8 +280,7 @@ export const tools: readonly Tool[] = [
     description:
       "Read a data summary, or name collection for bounded records and diagnostics. limit: 0 reads schema; " +
       "follow next_after until complete. Optional revision reads this computer's cached snapshot using an ID from list_revisions, " +
-      "fetching it when connected if missing, including archived documents; omission reads live data. Live data and open revisions can change between calls. " +
-      "Historical decision data refuses with decision_no_history.",
+      "fetching it when connected if missing, including archived documents; omission reads live data. Live data and open revisions can change between calls.",
     input: getDataInput,
     operation: getDataOperation,
     example: { uuid, collection: "tasks", limit: 20 },
@@ -342,15 +350,14 @@ export const tools: readonly Tool[] = [
     name: "search",
     title: "Search documents",
     description:
-      "Find live documents containing any query word in titles, descriptions, content, assigned tag names or code block languages. " +
-      "English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * " +
-      "matches stem prefixes. A prefix past the stem can miss: `decisi*` can miss `decision`; search the whole word or a shorter prefix, `decis*`. " +
-      "Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, " +
-      "without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or " +
-      "decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag " +
-      "matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical " +
-      "tags; decision hits include current record state, including superseded and conflict. No hits does not " +
-      "prove the index is empty or the replica complete. If a needed page is missing, ask whether to create it.",
+      "Find live documents matching any query word in titles, descriptions, content, assigned tag names or code block languages. " +
+      "English word forms match; case/accents fold, underscores join adjacent words, trailing * matches stem prefixes. " +
+      "Use whole words or short prefixes: `decisi*` can miss `decision`, unlike `decis*`. Punctuation/emoji alone " +
+      "matches nothing. Title-weighted bm25 ranks without strict title-first or matched-word-count order. " +
+      "kind narrows to regular documents or decisions. tag accepts a catalog id/current name (case ignored) " +
+      "or list: any listed tag matches, more boost relevance; unknown tags refuse. Hits carry kind and canonical " +
+      "tags; decisions carry current state, including superseded/conflict. No hits proves neither an empty index " +
+      "nor replica completeness. Ask whether to create a missing needed page.",
     input: searchInput,
     operation: searchOperation,
     example: { query: "release checklist", kind: "regular", tag: ["mcp", "cli"], limit: 10 },
@@ -422,15 +429,13 @@ export const tools: readonly Tool[] = [
     name: "insert_block",
     title: "Insert blocks",
     description:
-      "Insert a nonempty blocks array consecutively after after_block_id, or at the top when omitted. " +
-      "Use the same entries as create_doc; one block is a one-entry array. Returns the new blocks in " +
-      "order, each with id and rev. Every entry is checked before anything is written: a refusal keeps " +
-      "its error code, names the 1-based entry_index and says nothing was written. Decision answers " +
-      "must keep their supported shape across the whole batch. Success sends one document update " +
-      "and moves the cursor once, to the end of the last inserted block's stored text. Lists use " +
-      "adjacent list-item entries with list/indent (default bullet/0). Container syntax lives in " +
-      "each entry's text field. Document-link targets must be known locally; chart source stays literal. " +
-      "Tables accept column_widths for immediate sizing. For column sizing, links and GitHub references, see markdown.",
+      "Insert a nonempty blocks array consecutively after after_block_id, or first when omitted. Entries match create_doc; " +
+      "one block is a one-entry array. Returns ordered blocks with id/rev. Every entry is checked before writing: " +
+      "refusals retain their code and name the 1-based entry_index; nothing is written. Decision answers " +
+      "must keep their supported shape across the batch. Success sends one document update and moves the cursor " +
+      "once to the final block's stored text end. Adjacent list-item entries take list/indent (bullet/0 by " +
+      "default). Container syntax goes in text; chart source stays literal. Document-link targets must be " +
+      "known locally. Tables accept column_widths; sizing, links and GitHub references are in markdown help.",
     input: insertBlockInput,
     operation: insertBlockOperation,
     // Adds blocks; repeating adds another batch.
@@ -610,13 +615,12 @@ export const tools: readonly Tool[] = [
     name: "link_range",
     title: "Link a range of a block to another document",
     description:
-      "Mark selected prose text as a document reference without changing its characters or rev. start/end are " +
-      "character offsets measured against the required rev; stale_block returns currentText/currentRev for " +
-      "remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document " +
-      "references are retargeted; external links, source blocks, tables, cards and Figma blocks refuse. Write card and Figma caption links " +
-      "as inline Markdown in their container text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses " +
-      "before writing; archived targets are accepted. The answer includes the target title, but the label stays " +
-      "the selected text and does not follow renames. Backlinks update without changing curated meta.links.",
+      "Link selected prose without changing characters/rev. start/end are character offsets at the required " +
+      "rev; stale_block returns currentText/currentRev to remeasure. Offsets clamp and swap if reversed; " +
+      "empty ranges refuse. Retargets document links; external links, source, tables, cards and Figma refuse. " +
+      "Use inline Markdown for card/Figma caption links. doc_id must be in this replica's directory or " +
+      "doclink_target_not_known_locally refuses before writing; archived targets work. Returns the target " +
+      "title; the label keeps selected text through renames. Updates backlinks, never curated meta.links.",
     input: linkRangeInput,
     operation: linkRangeOperation,
     // Retargets a document link; unchanged rev lets repeats write the same mark.
@@ -652,15 +656,15 @@ export const tools: readonly Tool[] = [
     name: "sync_status",
     title: "Sync status",
     description:
-      "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes " +
-      "local, disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. " +
-      "hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion " +
-      "identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; " +
-      "inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. " +
-      "lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves " +
-      "backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary " +
-      "replica tools are quarantined until restart. See this tool's help for counter units and lastSync " +
-      "conditions.",
+      "Inspect sync state. hub.status: connecting means the first attempt is pending without failures; " +
+      "hub-down means retryable connection/renewal failure or a first attempt pending for 30s; auth-failed " +
+      "needs action; update-required means protocol mismatch; local and disabled are local-only. " +
+      "Applied writes are saved here and sync once connected; do not repeat. hub.recoveryClass, authRecovery " +
+      "and reason guide recovery; protocolVersion and hubProtocolVersion identify the incompatible side. " +
+      "Tools work locally. unsyncedChanges counts durable pending rooms; inFlightUpdates counts provider sync " +
+      "messages, resetting on reconnect. lastSync is this machine's stored UTC when the full replica caught " +
+      "up, or null; never backwards across processes. persistence reports a failed log append and stays " +
+      "readable while ordinary replica tools are quarantined until restart.",
     input: syncStatusInput,
     operation: syncStatusOperation,
     example: {},
@@ -671,9 +675,8 @@ export const tools: readonly Tool[] = [
     name: "get_sidebar",
     title: "Read the sidebar",
     description:
-      "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. This " +
-      "is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, links " +
-      "and backlinks. Unpinned documents are simply not entry points.",
+      "Read named groups of pinned documents in stored order. Unpinned documents remain live and reachable " +
+      "through list_docs, search, links and backlinks; they are absent only from curated navigation.",
     input: getSidebarInput,
     operation: getSidebarOperation,
     example: {},
@@ -683,12 +686,9 @@ export const tools: readonly Tool[] = [
     name: "pin_doc",
     title: "Pin a document into a sidebar group",
     description:
-      "Pin a document into a group, creating the group when no group carries that name. `index` places it; omit " +
-      "it to append.\n\n" +
-      "One pin per document across the whole sidebar, so this is also how a pinned document is moved or " +
-      "reordered: pinning one that is already pinned moves it to `index` in the named group — carrying the pin " +
-      "as it stands rather than re-pinning it, so a concurrent unpin still wins — and `index` then counts " +
-      "positions in the target group after the document has been taken out of it.",
+      "Pin into a named group, creating it if absent. `index` places the document; omission appends. One pin " +
+      "per document: pinning an existing pin moves it without re-pinning, so concurrent unpin wins. " +
+      "`index` counts target-group positions after removing the document.",
     input: pinDocInput,
     operation: pinDocOperation,
     // Moves an existing pin; repeating leaves it in the requested place.
@@ -715,14 +715,10 @@ export const tools: readonly Tool[] = [
     name: "sidebar_group",
     title: "Rename, delete or move a sidebar group",
     description:
-      "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, " +
-      "because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n" +
-      "`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses " +
-      "`index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field " +
-      "belonging to another action is refused at the input boundary before the sidebar is touched, rather than " +
-      "ignored — so a call that says two things is a failure you can see, not a silent half-success.\n\n" +
-      "There is no create action: pin_doc creates a group by naming one that does not exist, which is how a " +
-      "group comes into being with something in it rather than empty.",
+      "Rename, move or delete a group. Deletion removes its pins, leaving documents unchanged and reachable through list_docs " +
+      "and search. `action` selects fields: rename requires `name` and refuses `index`; move takes `index` " +
+      "(omitted: last) and refuses `name`; delete takes neither. Mixed shapes refuse before any sidebar change. " +
+      "No create action: pin_doc creates a missing named group with its first pin.",
     input: sidebarGroupInput,
     operation: sidebarGroupOperation,
     // Renames, moves or deletes groups/pins; repeated rename/delete by name can reach a namesake.

@@ -764,21 +764,64 @@ body {
   text-align: center;
 }
 
-/* A newer release is news, not a fault: the calm brand tint, closable. */
+/* A newer release is news, not a fault: the calm brand tint, closable. The
+   strip reads at UI size as one centred row, and wraps between its parts. */
 .ub-update-notice {
   position: relative;
   flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 1rem;
+  row-gap: 0.25rem;
   margin: 0;
-  padding: 0.4rem 2.5rem;
-  border-bottom: 1px solid var(--sidebar-border);
+  padding: 0.5rem 2.5rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--brand) 30%, transparent);
   background: var(--brand-subtle);
   color: var(--foreground);
-  line-height: inherit;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
   text-align: center;
+}
+
+.ub-update-notice-badge {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--brand);
+  color: var(--brand-foreground);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-ui-leading);
+  font-weight: 500;
+}
+
+.ub-update-notice-current {
+  color: var(--muted-foreground);
+}
+
+/* Commands are something to type: a mono chip on the page ground, never
+   broken across lines. */
+.ub-update-notice code {
+  display: inline-block;
+  margin-inline: 0.1rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  white-space: nowrap;
 }
 
 .ub-update-notice a {
   color: var(--brand-ink);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ub-update-notice a:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -825,7 +868,6 @@ body {
   font-weight: 500;
 }
 
-.ub-update-notice code,
 .ub-rebound-notice code,
 .ub-notice code {
   font-family: var(--font-mono);

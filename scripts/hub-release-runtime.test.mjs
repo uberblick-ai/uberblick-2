@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -20,6 +20,28 @@ function execute(script, overrides = {}, args = [], cwd = root) {
 		cwd, env: { ...process.env, ...settings, ...overrides }, encoding: "utf8",
 	});
 }
+
+test("hub release frontend and base images cannot float with upstream tags", () => {
+	const dockerfile = readFileSync(join(root, "Dockerfile.hub-release"), "utf8");
+	const references = [
+		dockerfile.match(/^# syntax=(\S+)$/m)?.[1],
+		...[...dockerfile.matchAll(/^FROM (?:--platform=\S+ )?(\S+) AS /gm)].map((match) => match[1]),
+	];
+	assert.equal(references.length, 4);
+	for (const reference of references) {
+		assert.match(reference ?? "", /:[\w.-]+@sha256:[a-f0-9]{64}$/);
+	}
+});
+
+const releaseWorkflow = join(root, ".github/workflows/release-hub.yml");
+test("QEMU setup runs an explicitly versioned and digest-pinned privileged image", {
+	skip: !existsSync(releaseWorkflow) && ".github/workflows is absent from the isolated review context",
+}, () => {
+	const workflow = readFileSync(releaseWorkflow, "utf8");
+	const qemu = workflow.match(/^ {8}uses: docker\/setup-qemu-action@[^\n]+\n((?: {8,}[^\n]*\n)*)/m)?.[1];
+	assert.match(qemu ?? "", /^ {8}with:\n/);
+	assert.match(qemu, /^ {10}image: (?:docker\.io\/)?tonistiigi\/binfmt:qemu-v[\w.-]+@sha256:[a-f0-9]{64}$/m);
+});
 
 test("web deployment imports the generated policy for the app and its deep-link fallback", () => {
 	const caddyfile = readFileSync(join(root, "Caddyfile"), "utf8");
@@ -117,7 +139,25 @@ test("both runtime images declare fast local health checks inherited by existing
 	assert.match(readFileSync(join(root, "Dockerfile.hub-release.dockerignore"), "utf8"), /^!hub-healthcheck\.mjs$/m);
 	assert.match(stages[1], /CMD \["wget", "-q", "-Y", "off", "-T", "4", "-O", "\/dev\/null", "http:\/\/127\.0\.0\.1:2019\/config\/"\]/);
 	assert.match(readFileSync(join(root, "Caddyfile"), "utf8"), /admin 127\.0\.0\.1:2019/);
-	assert.doesNotMatch(readFileSync(join(root, "compose.release.yml"), "utf8"), /healthcheck:/);
+	const compose = readFileSync(join(root, "compose.release.yml"), "utf8");
+	assert.doesNotMatch(compose.split("  mcp:")[0], /healthcheck:/, "existing hub service inherits the image check");
+	assert.doesNotMatch(compose.split("  caddy:")[1].split("\nvolumes:")[0], /healthcheck:/, "existing caddy service inherits the image check");
+	assert.match(compose, /test: \["CMD", "node", "\/usr\/local\/bin\/mcp-healthcheck\.mjs"\]/);
+});
+
+test("the shared image copies node-owned mount points with an explicit private socket mode", () => {
+	const dockerfile = readFileSync(join(root, "Dockerfile.hub-release"), "utf8");
+	assert.match(dockerfile, /COPY --from=build --chown=node:node \/out\/mounts\/data \/data/);
+	assert.match(dockerfile, /COPY --from=build --chown=node:node --chmod=0700 \/out\/mounts\/socket \/run\/uberblick-mcp/);
+});
+
+test("the shared image entrypoint omits empty public URLs and preserves configured URLs", () => {
+	for (const value of [undefined, "", "https://hub.example.com", "invalid-url"]) {
+		const result = execute("hub-release-entrypoint.sh", { HUB_PUBLIC_URL: value },
+			[process.execPath, "-e", "console.log(JSON.stringify({value:process.env.HUB_PUBLIC_URL}))"]);
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(JSON.parse(result.stdout), value ? { value } : {});
+	}
 });
 
 test("service entrypoints refuse every unsafe document setting before executing their service", () => {

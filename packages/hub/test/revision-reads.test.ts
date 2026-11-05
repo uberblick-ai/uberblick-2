@@ -655,8 +655,7 @@ describe("revision replies on admitted document rooms", () => {
     expect(broadcast).not.toHaveBeenCalled();
   });
 
-  it.each(["open", "decided", "rejected", "withdrawn"] as const)("refuses every revision operation for %s decisions before directory updates and while archived", async status => {
-    const broadcast = vi.spyOn(Document.prototype, "broadcastStateless");
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("serves and manages %s decision history across kind changes, with the usual archive rules", async status => {
     const db = database();
     const uuid = randomUUID();
     const room = `${WORKSPACE}/${uuid}`;
@@ -673,40 +672,60 @@ describe("revision replies on admitted document rooms", () => {
     });
     const reads = new RevisionReads({ database: db, assertCurrent() {}, username: id => id });
     const reader = receiver();
+    const list = () => request(reads, reader.connection, room,
+      { operation: "list", includeNames: true, includeTitles: true }, reader.sent, saved.doc);
+    expect(await list()).toMatchObject({ ok: true, revisions: [
+      { title: "Converted decision", name: null },
+      { id: saved.id, title: "Earlier regular page", name: { text: "Before conversion", canManage: true } },
+    ] });
+    expect(await request(reads, reader.connection, room, { operation: "get", revisionId: saved.id }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, state: db.revisions.get(room, saved.id) });
+    expect(await request(reads, reader.connection, room,
+      { operation: "name", name: "After conversion", checksum: checksum(), surface: { kind: "browser", name: "browser" } }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, revision: { name: { text: "After conversion" } } });
+    expect(await request(reads, reader.connection, room,
+      { operation: "rename", revisionId: saved.id, name: "Earlier page" }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, revision: { id: saved.id, name: { text: "Earlier page" } } });
+    expect(await request(reads, reader.connection, room,
+      { operation: "remove-name", revisionId: saved.id }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, revision: { id: saved.id, name: null } });
+    expect(await request(reads, reader.connection, room,
+      { operation: "restore", revisionId: saved.id, checksum: checksum(), surface: { kind: "browser", name: "browser" } }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, applied: true });
+    expect(getMeta(saved.doc)).toMatchObject({ title: "Earlier regular page", kind: "decision", status });
     const directory = new Document(directoryRoom(WORKSPACE));
     documents.push(directory);
     await db.onLoadDocument({ document: directory, documentName: directoryRoom(WORKSPACE) });
+    getDirectoryMap(directory).set(uuid, { title: "Converted decision", tags: [], kind: "decision", topic: uuid, status });
+    const converted = db.revisions.list(room).find(row => db.revisions.names(room).get(row.id)?.text === "After conversion")!;
+    expect(await request(reads, reader.connection, room,
+      { operation: "get", revisionId: converted.id }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, state: db.revisions.get(room, converted.id) });
+    tombstoneDirectoryEntry(directory, uuid);
+    expect(await list()).toMatchObject({ ok: true, revisions: [
+      { title: "Earlier regular page", name: null },
+      { id: converted.id, title: "Converted decision", name: { text: "After conversion", canManage: false } },
+      { id: saved.id, title: "Earlier regular page", name: null },
+    ] });
+    expect(await request(reads, reader.connection, room,
+      { operation: "get", revisionId: converted.id }, reader.sent, saved.doc))
+      .toMatchObject({ ok: true, state: db.revisions.get(room, converted.id) });
     const operations: Array<Omit<RevisionRequest, "requestId">> = [
-      { operation: "list", includeNames: true, includeTitles: true },
-      { operation: "get", revisionId: saved.id },
       { operation: "name", name: "New name", checksum: checksum(), surface: { kind: "browser", name: "browser" } },
-      { operation: "rename", revisionId: saved.id, name: "Changed name" },
-      { operation: "remove-name", revisionId: saved.id },
-      { operation: "restore", revisionId: saved.id, checksum: checksum(), surface: { kind: "browser", name: "browser" } },
+      { operation: "rename", revisionId: converted.id, name: "Changed name" },
+      { operation: "remove-name", revisionId: converted.id },
+      { operation: "restore", revisionId: converted.id, checksum: checksum(), surface: { kind: "browser", name: "browser" } },
     ];
-    const accesses = [vi.spyOn(db.revisions, "list"), vi.spyOn(db.revisions, "get"), vi.spyOn(db.revisions, "names"),
-      vi.spyOn(db.revisions, "name"), vi.spyOn(db.revisions, "rename"), vi.spyOn(db.revisions, "removeName"),
-      vi.spyOn(db, "restoreRevision")];
-    for (const archived of [false, true]) {
-      if (archived) {
-        getDirectoryMap(directory).set(uuid, { title: "Converted decision", tags: [], kind: "decision", topic: uuid, status });
-        tombstoneDirectoryEntry(directory, uuid);
-      }
-      const content = Y.encodeStateAsUpdate(saved.doc);
-      const revisions = db.connection.prepare("SELECT * FROM document_revisions WHERE room = ?").all(room);
-      const heads = db.connection.prepare("SELECT * FROM document_revision_heads WHERE room = ?").all(room);
-      const names = db.connection.prepare("SELECT * FROM document_revision_names WHERE room = ?").all(room);
-      for (const operation of operations) {
-        expect(await request(reads, reader.connection, room, operation, reader.sent, saved.doc))
-          .toMatchObject({ ok: false, error: "unsupported" });
-        expect(Y.encodeStateAsUpdate(saved.doc)).toEqual(content);
-        expect(db.connection.prepare("SELECT * FROM document_revisions WHERE room = ?").all(room)).toEqual(revisions);
-        expect(db.connection.prepare("SELECT * FROM document_revision_heads WHERE room = ?").all(room)).toEqual(heads);
-        expect(db.connection.prepare("SELECT * FROM document_revision_names WHERE room = ?").all(room)).toEqual(names);
-      }
+    const content = Y.encodeStateAsUpdate(saved.doc);
+    const revisions = db.revisions.list(room);
+    const names = db.revisions.names(room);
+    for (const operation of operations) {
+      expect(await request(reads, reader.connection, room, operation, reader.sent, saved.doc))
+        .toMatchObject({ ok: false, error: "archived" });
+      expect(Y.encodeStateAsUpdate(saved.doc)).toEqual(content);
+      expect(db.revisions.list(room)).toEqual(revisions);
+      expect(db.revisions.names(room)).toEqual(names);
     }
-    for (const access of accesses) expect(access).not.toHaveBeenCalled();
-    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it("keeps archived history readable, then returns deleted without a stale snapshot", async () => {

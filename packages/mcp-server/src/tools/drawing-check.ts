@@ -8,6 +8,19 @@ const MAX_DIAGNOSTICS = 20;
 
 type Diagnostic = { line: number; severity: "error" | "warning"; message: string };
 
+/** Use the diagnostics from the render being shown, with the write feedback's cap. */
+export function summarizeDrawing(diagnostics: readonly Diagnostic[]): DrawingWriteSummary {
+  const status = diagnostics.some(diagnostic => diagnostic.severity === "error") ? "errors"
+    : diagnostics.length > 0 ? "warnings" : "clean";
+  const shown = diagnostics.slice(0, MAX_DIAGNOSTICS)
+    .map(({ line, severity, message }) => ({ line, severity, message }));
+  return {
+    status,
+    diagnostics: shown,
+    ...(shown.length < diagnostics.length ? { diagnosticCount: diagnostics.length } : {}),
+  };
+}
+
 function diagnosticsOf(language: string, source: string): Diagnostic[] {
   return language === "ablauf" ? render(source).diagnostics : parseWireframe(source).diagnostics;
 }
@@ -29,13 +42,5 @@ export function checkDrawing(language: "ablauf" | "wireframe", source: string): 
   } catch {
     return { status: "unchecked", message: "The drawing could not be checked; the web editor shows its diagnostics." };
   }
-  const status = diagnostics.some(diagnostic => diagnostic.severity === "error") ? "errors"
-    : diagnostics.length > 0 ? "warnings" : "clean";
-  const shown = diagnostics.slice(0, MAX_DIAGNOSTICS)
-    .map(({ line, severity, message }) => ({ line, severity, message }));
-  return {
-    status,
-    diagnostics: shown,
-    ...(shown.length < diagnostics.length ? { diagnosticCount: diagnostics.length } : {}),
-  };
+  return summarizeDrawing(diagnostics);
 }

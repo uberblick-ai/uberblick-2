@@ -17,6 +17,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -209,6 +211,43 @@ describe("the versioned install payload", () => {
     }
     expect(failed.stderr).not.toMatch(/mcp\.mjs:\d+:\d+/);
     expect(failed.stderr).not.toContain(REPO_ROOT);
+  });
+
+  it("prints the hosted registration from the installed binary with only Node on PATH", async () => {
+    const hostedUrl = `https://public.example.test/mcp/${WORKSPACE}`;
+    const server = createServer((request, response) => {
+      if (request.url !== `/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`) {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ resource: hostedUrl }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const box = sandbox({ projectBinding: {
+        workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws`,
+      } });
+      const child = spawn("ub", ["mcp", "install", "codex", "--remote", "--print"], {
+        cwd: box.cwd, env: runtimeEnv(box), timeout: 10_000,
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", chunk => { stdout += String(chunk); });
+      child.stderr.on("data", chunk => { stderr += String(chunk); });
+      const status = await new Promise<number | null>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", resolve);
+      });
+      expect(status, stderr).toBe(0);
+      expect(stdout).toBe(`[mcp_servers.uberblick]\nurl = "${hostedUrl}"\n`);
+      expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => error ? reject(error) : resolve());
+        server.closeAllConnections();
+      });
+    }
   });
 
   it.each([
@@ -462,6 +501,49 @@ exit 0
     expect(run.stderr).toContain("neither a Homebrew installation nor a checkout");
     expect(run.stderr).toContain("only updates Homebrew installations");
     expect(run.stderr).toContain("brew install uberblick-ai/tap/uberblick");
+  });
+
+  it.each([0, 23])("finishes uninstall after Homebrew removes its running payload (status %s)", status => {
+    const prefix = join(scratch, `homebrew-uninstall-${status}`);
+    const keg = join(prefix, "Cellar", "uberblick", VERSION, "libexec");
+    mkdirSync(dirname(keg), { recursive: true });
+    cpSync(payload, keg, { recursive: true });
+    const fakeBin = join(scratch, `uninstall-bin-${status}`);
+    mkdirSync(fakeBin);
+    const box = sandbox({ userConfig: { displayName: "Uninstall fixture" } });
+    const data = join(box.dataHome, "uberblick");
+    const config = join(box.configHome, "uberblick");
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, "hub.sqlite"), "disposable hub data");
+    writeFileSync(join(fakeBin, "brew"), `#!${process.execPath}
+import { existsSync, rmSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === "--prefix") {
+  process.stdout.write(${JSON.stringify(prefix)} + "\\n");
+} else if (args.join(" ") === "uninstall uberblick-ai/tap/uberblick") {
+  if (existsSync(${JSON.stringify(data)}) || existsSync(${JSON.stringify(config)})) process.exit(99);
+  rmSync(${JSON.stringify(keg)}, { recursive: true });
+  process.stdout.write("Homebrew stdout\\n");
+  process.stderr.write("Homebrew stderr\\n");
+  process.exit(${status});
+} else process.exit(98);
+`, { mode: 0o755 });
+    const removed = spawnSync("ub", ["uninstall", "--yes", "--delete-data"], {
+      cwd: box.cwd,
+      env: { ...runtimeEnv(box, keg), PATH: `${fakeBin}:${join(keg, "bin")}:${nodeBin}` },
+      encoding: "utf8", timeout: 30_000,
+    });
+    expect(removed.status, removed.stderr).toBe(status);
+    expect(existsSync(keg)).toBe(false);
+    expect(existsSync(config)).toBe(false);
+    expect(existsSync(data)).toBe(false);
+    expect(removed.stdout).toMatch(/data.*deleted/i);
+    expect(removed.stdout).not.toContain("Homebrew stdout");
+    expect(removed.stderr).toContain("Homebrew stdout\nHomebrew stderr\n");
+    if (status !== 0) {
+      expect(removed.stderr).toMatch(/exited 23/);
+      expect(removed.stderr).toMatch(/data.*deleted/i);
+    }
   });
 
   it("refuses an unpacked payload even when it sits inside a checkout", () => {

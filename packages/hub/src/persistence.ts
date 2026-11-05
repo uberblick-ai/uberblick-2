@@ -31,6 +31,7 @@ import {
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { addCredentialCeiling, revokeHmacCredentials } from "./credentials-schema.js";
 import { writeDatabaseRelease } from "./database-release.js";
+import type { HubLogger } from "./log.js";
 import { HubRevisions } from "./revisions.js";
 import type { RestoreRevisionResult } from "./revisions.js";
 import type { UpdateAuthor } from "./update-attribution.js";
@@ -114,7 +115,7 @@ export class HubDatabase implements Extension {
   constructor(
     databasePath: string,
     onStoreFailed: (error: unknown) => void,
-    private readonly options: { revisions?: boolean; now?: () => number } = {},
+    private readonly options: { revisions?: boolean; now?: () => number; log?: HubLogger } = {},
   ) {
     this.databasePath = databasePath;
     this.onStoreFailed = onStoreFailed;
@@ -153,7 +154,7 @@ export class HubDatabase implements Extension {
         upsert: db.prepare(UPSERT_DOCUMENT),
       };
       this.revisionStore = new HubRevisions(db, this.options.revisions ?? false,
-        room => this.isDeletedRoom(room), this.onStoreFailed, this.options.now);
+        room => this.isDeletedRoom(room), this.onStoreFailed, this.options.now, this.options.log);
     } catch (error) {
       db.close();
       throw error;

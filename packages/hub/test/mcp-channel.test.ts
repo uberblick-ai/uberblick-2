@@ -5,15 +5,17 @@ import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writ
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEVICE_CREDENTIAL_LIFETIME_MS } from "@uberblick/schema/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentGrantRegistry } from "../src/agent-grants.js";
 import { resolveCoreHubConfig } from "../src/config.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
-import { introspectMcpToken, MCP_SOCKET_TIMEOUT_MS, requestMcpCredential, startMcpChannel } from "../src/mcp-channel.js";
+import { inspectMcpGrant, introspectMcpToken, MCP_SOCKET_TIMEOUT_MS, requestMcpCredential, startMcpChannel } from "../src/mcp-channel.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { OAuthAuthorizations, type OAuthCodeExchange } from "../src/oauth-authorizations.js";
 import { HubDatabase } from "../src/persistence.js";
+import { PrincipalRegistry } from "../src/principals.js";
 import { createTeamHub } from "../src/team.js";
 import { WorkspaceNameReader } from "../src/workspace-names.js";
 import { generateTestCredentialKeyPair } from "./device-credentials.js";
@@ -45,18 +47,21 @@ afterEach(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-function state() {
+function state(databasePath = ":memory:") {
   const clock = { now: 1000 };
-  const database = new HubDatabase(":memory:", error => { throw error; });
+  const database = new HubDatabase(databasePath, error => { throw error; });
   database.open();
   databases.push(database);
+  const principals = new PrincipalRegistry(database);
+  database.connection.prepare("INSERT INTO hub_principals (id, github_account_id, github_username) VALUES (?, ?, ?)")
+    .run(PRINCIPAL, "1234", "consenting-person");
   const memberships = new MembershipRegistry(database);
   memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
   const admins = new HubAdminRegistry(database);
   const credentials = new CredentialRegistry(database, admins, undefined, () => clock.now);
   const grants = new AgentGrantRegistry(database, () => clock.now);
   const authorizations = new OAuthAuthorizations(database, memberships, new WorkspaceNameReader(database), credentials, () => clock.now);
-  return { database, memberships, admins, credentials, grants, authorizations, clock };
+  return { database, memberships, admins, credentials, grants, authorizations, principals, clock };
 }
 
 function issue(context: ReturnType<typeof state>) {
@@ -173,6 +178,96 @@ describe("private MCP hub channel", () => {
     expect(context.database.connection.prepare("SELECT * FROM hub_credentials").all()).toEqual(before);
   });
 
+  it("inspects current grant credentials and their public keys without issuing or mutating authority", async () => {
+    const context = await rig();
+    const token = issue(context);
+    const identity = context.principals.get(PRINCIPAL);
+    const active = { status: "active", current: false, hasCredential: false, now: context.clock.now, identity };
+    expect(await inspectMcpGrant(PATH, token.grantId)).toEqual(active);
+    const pair = generateTestCredentialKeyPair();
+    const record = await requestMcpCredential(PATH, token.grantId, pair.publicKey);
+    if (record === null) throw new Error("issuance failed");
+    const stored = { id: record.id, publicKey: pair.publicKey };
+    const snapshot = () => ({ credentials: context.database.connection.prepare("SELECT * FROM hub_credentials").all(),
+      grants: context.database.connection.prepare("SELECT * FROM hub_agent_grants").all(),
+      proofs: context.database.connection.prepare("SELECT * FROM hub_used_request_proofs").all() });
+    const before = snapshot();
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual({ ...active, current: true, hasCredential: true });
+    expect(await inspectMcpGrant(PATH, token.grantId)).toEqual({ ...active, hasCredential: true });
+    expect(await inspectMcpGrant(PATH, token.grantId, { ...stored, id: "unknown-credential" })).toEqual({ ...active, hasCredential: true });
+    expect(await inspectMcpGrant(PATH, token.grantId, { ...stored, publicKey: generateTestCredentialKeyPair().publicKey }))
+      .toEqual({ ...active, hasCredential: true });
+    expect(snapshot()).toEqual(before);
+    const other = issue(context);
+    expect(await inspectMcpGrant(PATH, other.grantId, stored)).toEqual(active);
+    await requestMcpCredential(PATH, token.grantId, generateTestCredentialKeyPair().publicKey);
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual({ ...active, hasCredential: true });
+    expect(context.grants.isLive(token.grantId)).toBe(true);
+    const currentPair = generateTestCredentialKeyPair();
+    const currentRecord = await requestMcpCredential(PATH, token.grantId, currentPair.publicKey);
+    if (currentRecord === null) throw new Error("issuance failed");
+    context.clock.now += DEVICE_CREDENTIAL_LIFETIME_MS;
+    expect(await inspectMcpGrant(PATH, token.grantId, { id: currentRecord.id, publicKey: currentPair.publicKey }))
+      .toEqual({ ...active, hasCredential: true, now: context.clock.now });
+    context.credentials.revoke(currentRecord.id);
+    expect(await inspectMcpGrant(PATH, token.grantId)).toEqual({ ...active, hasCredential: true, now: context.clock.now });
+  });
+
+  it("distinguishes ended grants from temporarily inaccessible grants without changing their keys", async () => {
+    const context = await rig();
+    const token = issue(context);
+    const pair = generateTestCredentialKeyPair();
+    const record = await requestMcpCredential(PATH, token.grantId, pair.publicKey);
+    if (record === null) throw new Error("issuance failed");
+    const stored = { id: record.id, publicKey: pair.publicKey };
+    const active = { status: "active", current: true, hasCredential: true, now: context.clock.now, identity: context.principals.get(PRINCIPAL) };
+    const before = context.database.connection.prepare("SELECT * FROM hub_credentials").all();
+    context.memberships.remove({ principalId: PRINCIPAL, workspaceId: WORKSPACE });
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual({ ...active, status: "inaccessible" });
+    context.memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "member" });
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual(active);
+    context.admins.setWorkspaceStatus(WORKSPACE, "suspended");
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual({ ...active, status: "inaccessible" });
+    context.admins.setWorkspaceStatus(WORKSPACE, "active");
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual(active);
+    expect(context.database.connection.prepare("SELECT * FROM hub_credentials").all()).toEqual(before);
+    context.grants.revoke(token.grantId);
+    const ended = { status: "ended", current: false, now: context.clock.now };
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toEqual(ended);
+    expect(await inspectMcpGrant(PATH, "unknown-grant")).toEqual(ended);
+  });
+
+  it("refuses malformed grant inspection inputs and never treats a failed probe as ended", async () => {
+    const context = await rig();
+    const token = issue(context);
+    const request = { action: "inspect-grant", grantId: token.grantId };
+    const publicKey = Buffer.from(generateTestCredentialKeyPair().publicKey).toString("base64url");
+    for (const extra of [{ credentialId: "credential" }, { publicKey }, { token: "private-token" },
+      { credentialId: "credential", publicKey, unexpected: true }, { credentialId: "", publicKey },
+      { credentialId: "credential", publicKey: "a".repeat(43) }]) {
+      expect(await raw(PATH, { ...request, ...extra })).toEqual({ status: "invalid-request" });
+    }
+    expect(await inspectMcpGrant(PATH, token.grantId, { id: "credential", publicKey: new Uint8Array(31) }))
+      .toEqual({ status: "unavailable" });
+    vi.spyOn(context.principals, "get").mockImplementation(() => { throw new Error("private-token"); });
+    expect(await inspectMcpGrant(PATH, token.grantId)).toEqual({ status: "unavailable" });
+    expect(context.database.connection.prepare("SELECT COUNT(*) AS count FROM hub_credentials").get()?.count).toBe(0);
+    await context.control.stop();
+    expect(await inspectMcpGrant(PATH, token.grantId)).toEqual({ status: "unavailable" });
+  });
+
+  it.each([
+    { status: "ended", current: true, now: 1000 },
+    { status: "ended", current: false, now: 1000, token: "private-token" },
+    { status: "active", current: true, hasCredential: false, now: 1000,
+      identity: { id: PRINCIPAL, githubAccountId: "1234", githubUsername: "consenting-person" } },
+    { status: "active", current: true, hasCredential: true, now: 1000,
+      identity: { id: PRINCIPAL, githubAccountId: "not-an-account", githubUsername: "consenting-person" } },
+  ])("treats an invalid grant status reply as unavailable: %j", async reply => {
+    await fakeHub(socket => socket.once("data", () => socket.end(`${JSON.stringify(reply)}\n`)));
+    expect(await inspectMcpGrant(PATH, "private-grant")).toEqual({ status: "unavailable" });
+  });
+
   it("refuses every extra issuance field and invalid public key without invoking issuance", async () => {
     const context = await rig();
     const token = issue(context);
@@ -268,6 +363,7 @@ describe("private MCP hub channel", () => {
     await fakeHub(socket => socket.once("data", () => socket.end(reply)));
     expect(await introspectMcpToken(PATH, "private-token")).toEqual({ status: "unavailable" });
     await expect(requestMcpCredential(PATH, "private-token", new Uint8Array(32))).rejects.toThrow(/^hub MCP channel unavailable$/);
+    expect(await inspectMcpGrant(PATH, "private-token")).toEqual({ status: "unavailable" });
   });
 
   it("enforces an absolute round-trip deadline even while reply bytes arrive", async () => {
@@ -284,16 +380,21 @@ describe("private MCP hub channel", () => {
     expect(await response).toEqual({ status: "unavailable" });
   });
 
-  it("wires only the configured private socket into a team hub and exposes no TCP operation", async () => {
+  it.each([undefined, "https://hub.example"])("wires the private socket with issuer %j and exposes no TCP operation", async publicUrl => {
     const config = resolveCoreHubConfig({ HUB_HOST: "127.0.0.1", HUB_AUTH_TOKEN: "local-secret", HUB_MCP_SOCKET: PATH }, ":memory:");
     expect(config.mcpSocketPath).toBe(PATH);
     expect(resolveCoreHubConfig({ HUB_HOST: "127.0.0.1", HUB_AUTH_TOKEN: "local-secret" }, ":memory:")).not.toHaveProperty("mcpSocketPath");
-    const hub = await createTeamHub({ ...config, port: 0, publicUrl: "https://hub.example", github: { clientId: "Iv23AbCdEF0123456789" }, log: () => {} });
+    const hub = await createTeamHub({ ...config, port: 0, ...(publicUrl === undefined ? {} : { publicUrl }),
+      github: { clientId: "Iv23AbCdEF0123456789" }, log: () => {} });
     stops.push(() => hub.stop());
     expect(await introspectMcpToken(PATH, "unknown-token")).toEqual({ status: "negative" });
+    expect(await requestMcpCredential(PATH, "unknown-grant", generateTestCredentialKeyPair().publicKey)).toBeNull();
+    const metadata = await fetch(`http://127.0.0.1:${hub.port}/.well-known/oauth-authorization-server`);
+    expect(metadata.status).toBe(publicUrl === undefined ? 404 : 200);
+    await metadata.text();
     const baseline = await fetch(`http://127.0.0.1:${hub.port}/unrelated-route`, { method: "POST" });
     const baselineText = await baseline.text();
-    for (const path of ["/introspect", "/issue-credential", "/mcp/introspect", "/mcp/issue-credential"]) {
+    for (const path of ["/introspect", "/issue-credential", "/inspect-grant", "/mcp/introspect", "/mcp/issue-credential", "/mcp/inspect-grant"]) {
       const reply = await fetch(`http://127.0.0.1:${hub.port}${path}`, {
         method: "POST", body: JSON.stringify({ action: "introspect", token: "private-token" }), headers: { "content-type": "application/json" },
       });
@@ -302,5 +403,50 @@ describe("private MCP hub channel", () => {
     }
     await hub.stop();
     expect(await introspectMcpToken(PATH, "unknown-token")).toEqual({ status: "unavailable" });
+  });
+
+  it("keeps persisted tokens and grants inaccessible while hosted sign-in is off and restores them when enabled", async () => {
+    const databasePath = join(directory, "hub.sqlite");
+    const context = state(databasePath);
+    context.clock.now = Date.now();
+    const token = issue(context);
+    const refreshed = context.authorizations.refresh({ refreshToken: token.refreshToken, clientId: "registered-agent", scope: "docs:read" });
+    if (refreshed.status !== "issued") throw new Error("refresh failed");
+    const pair = generateTestCredentialKeyPair();
+    const config = { databasePath, port: 0, authSecret: "local-secret", mcpSocketPath: PATH,
+      github: { clientId: "Iv23AbCdEF0123456789" }, log: () => {} };
+    const start = async (publicUrl?: string) => {
+      const hub = await createTeamHub({ ...config, ...(publicUrl === undefined ? {} : { publicUrl }) });
+      stops.push(() => hub.stop());
+      return hub;
+    };
+    const enabled = await start("https://hub.example");
+    expect(await introspectMcpToken(PATH, token.accessToken)).toHaveProperty("status", "positive");
+    expect(await introspectMcpToken(PATH, refreshed.accessToken)).toHaveProperty("status", "positive");
+    const record = await requestMcpCredential(PATH, token.grantId, pair.publicKey);
+    if (record === null) throw new Error("issuance failed");
+    const stored = { id: record.id, publicKey: pair.publicKey };
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toMatchObject({ status: "active", current: true, hasCredential: true,
+      identity: { id: PRINCIPAL, githubAccountId: "1234", githubUsername: "consenting-person" } });
+    await enabled.stop();
+    const snapshot = () => ({ tokens: context.database.connection.prepare("SELECT * FROM hub_oauth_access_tokens").all(),
+      refreshTokens: context.database.connection.prepare("SELECT * FROM hub_oauth_refresh_access_tokens").all(),
+      grants: context.database.connection.prepare("SELECT * FROM hub_agent_grants").all(),
+      credentials: context.database.connection.prepare("SELECT * FROM hub_credentials").all() });
+    const before = snapshot();
+    const disabled = await start();
+    for (const value of [token.accessToken, refreshed.accessToken, "unknown-token", "\nmalformed-token\0"]) {
+      expect(await introspectMcpToken(PATH, value)).toEqual({ status: "negative" });
+    }
+    expect(await requestMcpCredential(PATH, token.grantId, pair.publicKey)).toBeNull();
+    expect(await requestMcpCredential(PATH, token.grantId, generateTestCredentialKeyPair().publicKey)).toBeNull();
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toMatchObject({ status: "inaccessible", current: true, hasCredential: true });
+    expect(snapshot()).toEqual(before);
+    await disabled.stop();
+    await start("https://hub.example");
+    expect(await introspectMcpToken(PATH, token.accessToken)).toHaveProperty("status", "positive");
+    expect(await introspectMcpToken(PATH, refreshed.accessToken)).toHaveProperty("status", "positive");
+    expect(await inspectMcpGrant(PATH, token.grantId, stored)).toMatchObject({ status: "active", current: true, hasCredential: true });
+    expect(await requestMcpCredential(PATH, token.grantId, pair.publicKey)).not.toBeNull();
   });
 });

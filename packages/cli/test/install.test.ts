@@ -24,6 +24,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
 import { INSTALL_HELP } from "../src/install.js";
 import { type Sandbox, type SandboxFiles, removeTempDirs, sandbox as boundSandbox, unboundSandbox } from "./helpers.js";
@@ -65,6 +67,7 @@ const REPORTED = [
 const SECRET = "tok-must-never-be-printed-4a1f";
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
+const HOSTED_URL = `https://public.example.test/mcp/${WORKSPACE}`;
 const LOCAL_BINDING_ENV = { UB_HUB_URL: "local", UB_WORKSPACE_ID: WORKSPACE };
 // Whole words: output names temporary paths, and one like uberblick-cli-5SjPIn
 // contains the letters without mentioning a pin.
@@ -146,6 +149,137 @@ function entrySnippet(program: string): string {
       uberblick: { command: "ub", args: ["mcp", "serve"] },
     } }, null, 2)}\n`;
 }
+
+function remoteSnippet(program: string): string {
+  return program === "codex"
+    ? `[mcp_servers.uberblick]\nurl = "${HOSTED_URL}"\n`
+    : `${JSON.stringify({ mcpServers: { uberblick: {
+      ...(program === "claude" ? { type: "http" } : {}), url: HOSTED_URL,
+    } } }, null, 2)}\n`;
+}
+
+async function hostedHub(mode: "hosted" | "absent" | "silent" = "hosted") {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? "");
+    if (mode === "silent") return;
+    response.writeHead(mode === "hosted" ? 200 : 404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ resource: HOSTED_URL }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const hubUrl = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/ws`;
+  return {
+    hubUrl, requests,
+    stop: () => new Promise<void>((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    }),
+  };
+}
+
+describe("ub mcp install --remote", () => {
+  it.each(["claude", "codex"])("registers %s's HTTP entry for the project and recognises it on the second run", async (program) => {
+    const hub = await hostedHub();
+    try {
+      const box = boundSandbox({ projectBinding: { workspaceId: `shared-${WORKSPACE}`, hubUrl: hub.hubUrl } });
+      const nested = subfolder(box);
+      const destination = program === "codex" ? '"$CODEX_HOME/config.toml"' : ".mcp.json";
+      const stub = stubVendor(box, program,
+        `printf '%s\\n' '${remoteSnippet(program).trimEnd()}' > ${destination}\n`);
+      const env = { ...stub.env, HUB_AUTH_TOKEN: SECRET,
+        UB_WORKSPACE_ID: "invalid-ambient-workspace", UB_HUB_URL: "invalid-ambient-hub" };
+      const run = await runInProcess(["mcp", "install", program, "--remote"], nested, env);
+      expect(run.status, run.output).toBe(0);
+      expect(read(stub.record).trimEnd().split("\n")).toEqual(program === "claude"
+        ? ["mcp", "add", "--transport", "http", "--scope", "project", "uberblick", HOSTED_URL]
+        : ["mcp", "add", "uberblick", "--url", HOSTED_URL]);
+      expect(read(stub.cwd).trim()).toBe(box.cwd);
+      if (program === "codex") expect(read(stub.home).trim()).toBe(join(box.cwd, ".codex"));
+      expect(run.stdout).toMatch(new RegExp(`^workspace\\s+${WORKSPACE}, from `, "m"));
+      expect(run.stdout).toContain(join(box.cwd, ".uberblick.json"));
+      expect(run.stdout).toContain(program === "claude" ? "/mcp in Claude Code" : "codex mcp login uberblick");
+      expect(run.stdout).toContain(HOSTED_URL);
+      expect(run.output).not.toContain(SECRET);
+      expect(read(stub.environment)).toContain("HUB_AUTH_TOKEN=absent");
+      const file = program === "codex" ? join(box.cwd, ".codex", "config.toml") : join(box.cwd, ".mcp.json");
+      expect(read(file)).toBe(remoteSnippet(program));
+      writeFileSync(stub.record, "not run twice\n");
+      const again = await runInProcess(["mcp", "install", program, "--remote"], nested, env);
+      expect(again.status, again.output).toBe(0);
+      expect(again.stdout).toContain("already installed");
+      expect(again.stdout).toContain(program === "claude" ? "/mcp in Claude Code" : "codex mcp login uberblick");
+      expect(read(stub.record)).toBe("not run twice\n");
+      expect(read(file)).toBe(remoteSnippet(program));
+      expect(hub.requests).toEqual(Array(2).fill(`/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`));
+    } finally { await hub.stop(); }
+  });
+
+  it.each(["claude", "codex", "cursor"])("prints only %s's remote form and runs nothing", async (program) => {
+    const hub = await hostedHub();
+    try {
+      const box = boundSandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: hub.hubUrl } });
+      const stub = stubVendor(box, program);
+      const before = readdirSync(box.cwd);
+      const run = await runInProcess(["mcp", "install", program, "--print", "--remote"], box, stub.env);
+      expect(run.status, run.output).toBe(0);
+      expect(run.stdout).toBe(remoteSnippet(program));
+      expect(existsSync(stub.record)).toBe(false);
+      expect(readdirSync(box.cwd)).toEqual(before);
+    } finally { await hub.stop(); }
+  });
+
+  it.each(["claude", "codex"])("preserves %s's plain entry instead of switching it to remote", async (program) => {
+    const hub = await hostedHub();
+    try {
+      const box = boundSandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: hub.hubUrl } });
+      const file = program === "codex" ? join(codexHome(box, join(box.cwd, ".codex")), "config.toml") : join(box.cwd, ".mcp.json");
+      writeFileSync(file, entrySnippet(program));
+      const stub = stubVendor(box, program);
+      const run = await runInProcess(["mcp", "install", program, "--remote"], box, stub.env);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("something other than this");
+      expect(run.stdout).toBe(remoteSnippet(program));
+      expect(read(file)).toBe(entrySnippet(program));
+      expect(existsSync(stub.record)).toBe(false);
+    } finally { await hub.stop(); }
+  });
+
+  it.each(["absent", "local"])("refuses a project whose workspace is %s without printing an entry", async (state) => {
+    const box = state === "absent" ? unboundSandbox() : sandbox();
+    const stub = stubVendor(box, "claude");
+    const run = await runInProcess(["mcp", "install", "claude", "--remote"], box, {
+      ...stub.env, UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://shell.example.test/ws",
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain(state === "absent" ? "needs a workspace selected" : "workspace is local");
+    expect(existsSync(stub.record)).toBe(false);
+    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
+  });
+
+  it.each(["absent", "silent"] as const)("registers and prints nothing when hosted discovery is %s", async (mode) => {
+    const hub = await hostedHub(mode);
+    try {
+      const box = boundSandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: hub.hubUrl } });
+      const stub = stubVendor(box, "codex");
+      const run = await runInProcess(["mcp", "install", "codex", "--remote", "--print"], box, stub.env);
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("did not confirm hosted MCP access");
+      expect(existsSync(stub.record)).toBe(false);
+      expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+    } finally { await hub.stop(); }
+  });
+
+  it("rejects --remote with --user as a usage error before consulting the project", async () => {
+    const box = unboundSandbox();
+    const run = await runInProcess(["mcp", "install", "claude", "--remote", "--user", "--print"], box);
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("cannot be combined with --user");
+    expect(run.stderr).toContain(INSTALL_HELP);
+  });
+});
 
 describe("ub mcp install --print", () => {
   it("prints a snippet for the named target and touches no file", async () => {

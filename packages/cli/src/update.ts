@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, sep } from "node:path";
+import { constants } from "node:os";
 import { fileURLToPath } from "node:url";
 import { findCheckoutRoot } from "./checkout.js";
 import { isInstallPayload } from "./version.js";
@@ -8,7 +9,7 @@ import type { Io } from "./io.js";
 import { errorMessage } from "./strings.js";
 import { useField } from "./workspace-use-output.js";
 
-const FORMULA = "uberblick-ai/tap/uberblick";
+export const FORMULA = "uberblick-ai/tap/uberblick";
 
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
@@ -41,8 +42,13 @@ export interface UpdateHost {
   installPayload: boolean;
   /** Read Homebrew's installation prefix or installed formula information. */
   capture(command: string, args: readonly string[]): CaptureResult;
-  /** Run a command to completion; `null` when it exited 0, else why not. */
-  run(command: string, args: readonly string[], cwd?: string): Promise<string | null>;
+  /** Run a command to completion; `null` when it exited 0, else its status and reason. */
+  run(command: string, args: readonly string[], cwd?: string): Promise<CommandFailure | null>;
+}
+
+export interface CommandFailure {
+  status: number;
+  message: string;
 }
 
 export interface CaptureResult {
@@ -81,19 +87,19 @@ export function processHost(): UpdateHost {
           process.on(signal, stop);
           return { signal, stop };
         });
-        const finish = (result: string | null): void => {
+        const finish = (result: CommandFailure | null): void => {
           for (const { signal, stop } of forward) process.off(signal, stop);
           done(result);
         };
 
-        child.on("error", (error) => finish(`${label} could not be run (${errorMessage(error)})`));
+        child.on("error", (error) => finish({ status: 1, message: `${label} could not be run (${errorMessage(error)})` }));
         child.on("close", (status, signal) =>
           finish(
             status === 0
               ? null
               : signal !== null
-                ? `${label} was killed by ${signal}`
-                : `${label} exited ${status ?? 1}`,
+                ? { status: 128 + constants.signals[signal], message: `${label} was killed by ${signal}` }
+                : { status: status ?? 1, message: `${label} exited ${status ?? 1}` },
           ),
         );
       });
@@ -119,7 +125,7 @@ function within(parent: string, child: string): boolean {
  * Require the payload to lie under Homebrew's reported prefix. An archive
  * unpacked elsewhere is not owned by Homebrew and brew upgrade cannot replace it.
  */
-function classify(host: UpdateHost): Installation {
+export function classify(host: UpdateHost): Installation {
   // A payload inside a checkout still belongs to the payload, not its ancestor.
   if (host.installPayload) {
     const prefix = homebrewPrefix(host);
@@ -188,7 +194,7 @@ async function updateHomebrew(io: Io, host: UpdateHost, prefix: string): Promise
   for (const args of [["update"], ["upgrade", FORMULA]]) {
     const failure = await host.run("brew", args);
     if (failure !== null) {
-      io.err(`ub update: ${failure}.\n`);
+      io.err(`ub update: ${failure.message}.\n`);
       return 1;
     }
   }

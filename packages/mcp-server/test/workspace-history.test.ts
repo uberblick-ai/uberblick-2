@@ -79,9 +79,10 @@ it("mirrors from an idle MCP server, hands cached history to a browser contender
   expect(await author.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
   await author.ok("name_revision", { uuid: archived.uuid, name: "Archived" });
   await author.ok("archive_doc", { uuid: archived.uuid });
-  const decision = await author.ok("create_doc", { title: "Which history is mirrored?", description: "Decision records use their topic timeline.",
-    kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "Mirror regular pages." }] });
+  const decision = await author.ok("create_doc", { title: "Which history is mirrored?", description: "Decision records download the same history.",
+    kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "Mirror every document." }] });
   expect(await author.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+  const decisionRevision = (await author.ok("name_revision", { uuid: decision.uuid, name: "Decision" })).revision;
   const servingConfig = config();
   const reader = await startServer(servingConfig);
   clients.push(() => reader.close());
@@ -93,14 +94,17 @@ it("mirrors from an idle MCP server, hands cached history to a browser contender
   const catalog = (uuid: string) => ready(cache.readCatalog(token, uuid));
   const snapshot = (uuid: string, revision: string) => ready(cache.readSnapshot(token, uuid, revision));
   await waitUntil("all live pages' closed snapshots to arrive without reader calls", () =>
-    snapshot(live.uuid, earlier.id) !== null && snapshot(survivor.uuid, survivorRevision.id) !== null);
+    snapshot(live.uuid, earlier.id) !== null && snapshot(survivor.uuid, survivorRevision.id) !== null &&
+    snapshot(decision.uuid, decisionRevision.id) !== null);
   expect(catalog(live.uuid)).toMatchObject({ complete: true, failed: false,
     revisions: [{ id: earlier.id, final: true, name: { text: "Earlier" } }] });
   expect(snapshotTitle(snapshot(live.uuid, earlier.id)!.state)).toBe("Never opened here");
   expect(catalog(archived.uuid)).toBeNull();
-  expect(catalog(decision.uuid)).toBeNull();
+  expect(catalog(decision.uuid)).toMatchObject({ complete: true, failed: false,
+    revisions: [{ id: decisionRevision.id, final: true, name: { text: "Decision" } }] });
+  expect(snapshotTitle(snapshot(decision.uuid, decisionRevision.id)!.state)).toBe("Which history is mirrored?");
   expect(engine.replicas.hydrated(archived.uuid)).toBe(false);
-  expect(requested.mock.calls.every(([room]) => room !== roomForDoc(WORKSPACE, archived.uuid) && room !== roomForDoc(WORKSPACE, decision.uuid))).toBe(true);
+  expect(requested.mock.calls.every(([room]) => room !== roomForDoc(WORKSPACE, archived.uuid))).toBe(true);
 
   const browser = await createMcpEngine(servingConfig, { serving: true });
   clients.push(() => browser.close());

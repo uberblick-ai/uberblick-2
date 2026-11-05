@@ -1,5 +1,6 @@
 /** Actor-facing access management; admission remains a separate authority. */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { BrowserSessions } from "./browser-sessions.js";
 import type { CredentialRegistry } from "./credentials.js";
 import type { GithubAccountLookup } from "./github-account-lookup.js";
 import type { HubLogger } from "./log.js";
@@ -24,6 +25,7 @@ type ManagementPolicy<Action extends ManagementAction> = {
 export const MANAGEMENT_OPERATIONS = {
   "list-devices": { scope: "own", role: "signed-in", target: [], changesState: false },
   "revoke-device": { scope: "own", role: "signed-in", target: ["deviceId"], changesState: true },
+  "revoke-browser-sessions": { scope: "own", role: "signed-in", target: [], changesState: true },
   "own-hub-role": { scope: "hub", role: "admin", target: [], changesState: false },
   "list-hub-admins": { scope: "hub", role: "admin", target: [], changesState: false },
   "list-hub-workspaces": { scope: "hub", role: "admin", target: [], changesState: false },
@@ -67,10 +69,11 @@ export async function handleAccessManagement(
   accounts?: GithubAccountLookup,
   hubAdmins?: HubAdminRegistry,
   hubVersion?: string,
+  browserSessions?: BrowserSessions,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
   const reply = (status: number, body: unknown): void => replyJson(response, status, body);
-  if (credentials === undefined || memberships === undefined || principals === undefined) {
+  if (credentials === undefined || memberships === undefined || principals === undefined || browserSessions === undefined) {
     reply(503, { status: "not-configured" });
     return true;
   }
@@ -203,6 +206,10 @@ export async function handleAccessManagement(
         reply(found ? 200 : 404, { status: found ? "ok" : "device-not-found" });
         break;
       }
+      case "revoke-browser-sessions":
+        browserSessions.revokeAll(current.principalId);
+        reply(200, { status: "ok" });
+        break;
       case "own-role":
         reply(200, { status: "ok", role: workspaceRole });
         break;

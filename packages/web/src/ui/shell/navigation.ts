@@ -23,7 +23,7 @@ export function useShellNavigation(env: ShellEnvironment, rooms: ShellRooms, nav
 
   // An archived answer keeps its explicit selection when it is restored.
   useEffect(() => {
-    if (route.kind !== "doc" || topic === null || route.uuid === topic.topic ||
+    if (route.kind !== "doc" || route.history !== undefined || topic === null || route.uuid === topic.topic ||
       !topic.archivedRecords.some((record) => record.uuid === route.uuid)) return;
     navigate(decisionRecordPath(route.workspace.segment, topic.topic, route.uuid), "replace");
   }, [route, topic, navigate]);

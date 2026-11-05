@@ -227,6 +227,7 @@ export function sanitizeManagementReply(
       }
       break;
     case "revoke-device":
+    case "revoke-browser-sessions":
     case "change-role":
     case "remove-member":
     case "remove-hub-admin":

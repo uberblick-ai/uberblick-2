@@ -81,7 +81,7 @@ function property(entry: ts.ObjectLiteralExpression, name: string): ts.Expressio
   return found.initializer;
 }
 
-it("every registered tool is guarded and only hub revision requests wait after opening settle", () => {
+it("every registered tool is guarded and only detached reads wait after opening settle", () => {
   const root = join(PACKAGE_ROOT, "src");
   const sources = (readdirSync(root, { recursive: true }) as string[])
     .filter((path) => path.endsWith(".ts"))
@@ -130,7 +130,12 @@ it("every registered tool is guarded and only hub revision requests wait after o
     if (operation === undefined) throw new Error(`No inspected operation for ${name}`);
     if (name === "sync_status") {
       // This read delegates its opening settle to the shared status helper.
-      expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas\)$/);
+      expectOpeningWait(operation.handler, operation.source, /^collectSyncStatus\(context\.replicas, "mcp"\)$/);
+    } else if (name === "render_block") {
+      expect(tools.find(tool => tool.name === name)?.writes).toBeNull();
+      const waits = awaits(operation.handler);
+      expect(waits).toHaveLength(1);
+      expect(waits[0]!.expression.getText(operation.source)).toMatch(/^renderDrawing\(block\.text,/);
     } else if (["list_revisions", "get_revision", "get_data", "name_revision", "restore_revision"].includes(name)) {
       expect(tools.find(tool => tool.name === name)?.writes)
         .toBe(name === "name_revision" || name === "restore_revision" ? "document" : null);

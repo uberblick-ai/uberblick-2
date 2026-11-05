@@ -122,7 +122,7 @@ function cachedResult(cached: Outcome, origin: string, workspace: string, login:
   return cached.status === "hub-down" ? offline(origin) : unavailable(origin);
 }
 
-async function readRenewalReply(response: Response): Promise<Record<string, unknown> | null> {
+export async function readRenewalReply(response: Response): Promise<Record<string, unknown> | null> {
   if (response.body === null) return null;
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];

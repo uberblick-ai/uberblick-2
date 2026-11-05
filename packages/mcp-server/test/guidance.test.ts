@@ -21,16 +21,18 @@ it("advertises guidance from the local log once at startup, without adding resou
   const config = testConfig();
   const writer = await local(config);
   const marker = createTagCatalogEntry(writer.instance.replicas.settings().doc, "guidance");
+  const title = `Writing\r\n\u2028\u0000pages ${"🧭".repeat(80)}`;
   const guide = await writer.ok("create_doc", {
-    title: "Writing pages", description: "Not part of the startup pointer.", tags: [marker.id],
+    title, description: "Not part of the startup pointer.", tags: [marker.id],
     blocks: [{ type: "paragraph", text: "Not injected into initialization." }],
   });
   expect(writer.client.getInstructions()).toBe(STARTUP_ORIENTATION);
   await writer.close();
 
   const reader = await local(config);
-  const instructions = `${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: Writing pages (\`${guide.uuid}\`).`;
+  const instructions = `${STARTUP_ORIENTATION}\n\nWorkspace guidance: before your first write, read the pages that apply to your change with \`get_doc\`: Writing pages ${"🧭".repeat(65)}… (\`${guide.uuid}\`).`;
   expect(reader.client.getInstructions()).toBe(instructions);
+  expect((await reader.ok("get_doc", { uuid: guide.uuid })).title).toBe(title);
   expect((await reader.ok("get_help", { topic: "orientation" })).text).toBe(STARTUP_ORIENTATION);
   expect((await reader.client.listResources()).resources.every(({ uri }) => uri.startsWith("uberblick://help/"))).toBe(true);
   expect((await reader.client.listResourceTemplates()).resourceTemplates.map(({ uriTemplate }) => uriTemplate))

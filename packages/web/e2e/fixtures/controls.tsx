@@ -11,6 +11,7 @@ import { Sidebar, SidebarProvider } from "../../src/ui/shadcn/sidebar.js";
 import { Button } from "../../src/ui/shadcn/button.js";
 import { Input } from "../../src/ui/shadcn/input.js";
 import { Textarea } from "../../src/ui/shadcn/textarea.js";
+import { ConnectAgent } from "../../src/ui/shell/ConnectAgent.js";
 import "../../src/ui/styles.css";
 import "../../src/ui/tailwind.css";
 
@@ -74,6 +75,7 @@ function DocumentListFixture() {
 }
 
 createRoot(root).render(
+  new URLSearchParams(location.search).has("connect-agent") ? <main className="ub-app"><ConnectAgent /></main> :
   fixture !== null ? <DocumentListFixture /> :
   <main style={{ padding: 16, background: "var(--card)", color: "var(--card-foreground)" }}>
     <section aria-label="Button recipes" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>

@@ -3,7 +3,7 @@ import { assertHubTransport, parseJoinTarget } from "@uberblick/mcp-server/remot
 import { ORIGIN_LABELS, displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
 import { readdirSync, rmSync } from "node:fs";
-import { createInterface } from "node:readline/promises";
+import { confirm } from "./confirmation.js";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
 import { acquireWorkspaceRemovalRole, defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -176,16 +176,7 @@ export async function removeWorkspaceCommand({ positionals, values }: CommandArg
           ? "This is the only copy of this local-only workspace."
           : `The hub keeps the workspace; fetch it again with \`ub workspace use ${shellArgument(`${displayWorkspaceHub(hub).replace(/\/$/, "")}/${id}`)}\`. ` +
             "Any local changes the hub has not acknowledged would be lost.";
-      const terminal = createInterface({ input: process.stdin, output: process.stderr });
-      let answer: string;
-      try {
-        answer = await terminal.question(`Delete this computer's copy of workspace ${id}? ${loss} [y/N] `);
-      } catch {
-        throw new Error("confirmation ended; nothing was removed");
-      } finally {
-        terminal.close();
-      }
-      if (!/^(y|yes)$/i.test(answer.trim())) {
+      if (!await confirm(`Delete this computer's copy of workspace ${id}? ${loss}`)) {
         io.out("cancelled; nothing was removed\n");
         return 0;
       }
@@ -267,6 +258,16 @@ export function listWorkspacesCommand({ values }: CommandArgs<typeof WORKSPACE_L
     return 1;
   }
   const { entries, warnings, selectionNote } = listed;
+  entries.sort((left, right) => {
+    const leftName = left.name?.toLowerCase() ?? null;
+    const rightName = right.name?.toLowerCase() ?? null;
+    if (leftName !== rightName) {
+      if (leftName === null) return 1;
+      if (rightName === null) return -1;
+      return leftName < rightName ? -1 : 1;
+    }
+    return left.uuid < right.uuid ? -1 : left.uuid > right.uuid ? 1 : 0;
+  });
   warn(io, warnings);
   if (selectionNote !== null) io.err(`${selectionNote}\n`);
 

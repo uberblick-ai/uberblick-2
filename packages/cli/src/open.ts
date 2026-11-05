@@ -41,6 +41,7 @@ import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
 import { openBanner } from "./open-output.js";
 import { startUpdateCheck, type UpdateCheck } from "./open-update.js";
 import { cliVersion, isInstallPayload } from "./version.js";
+import { registerOpenRun } from "./open-run.js";
 import { requestRecentDevices } from "./recent-devices.js";
 import { BrowserReplicas, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
 import { assertWorkspaceBinding, rememberWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
@@ -277,6 +278,7 @@ function openOptions({ values }: CommandArgs<typeof OPEN_OPTIONS>): Options {
 
 /** What this command started, and is therefore responsible for stopping. */
 interface Owned {
+  openRun: { close(): void } | null;
   hub: Hub | null;
   localServer: LocalBrowserServer | null;
   engine: UberblickMcpEngine | null;
@@ -418,6 +420,11 @@ function takeForeground(owned: Owned, io: Io): Foreground {
         io.err(`ub open: the hub did not shut down cleanly: ${errorMessage(error)}\n`);
         result = 1;
       }
+    }
+    try { owned.openRun?.close(); }
+    catch (error) {
+      io.err(`ub open: could not release its run lock: ${errorMessage(error)}\n`);
+      result = 1;
     }
     return result;
   };
@@ -581,6 +588,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
   let env: NodeJS.ProcessEnv = { ...initial.resolved.env, HUB_URL: hubUrl };
 
   const owned: Owned = {
+    openRun: null,
     hub: null,
     localServer: null,
     engine: null,
@@ -613,6 +621,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     projectBinding = requireBinding(initial.resolved);
     hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
     env = { ...initial.resolved.env, HUB_URL: hubUrl };
+    owned.openRun = await registerOpenRun(startupEnv);
     const decided = await ensureHub(env, hubUrl, projectBinding.workspaceId, io, options.verbose);
     owned.hub = decided.started;
     hubNote = decided.note;

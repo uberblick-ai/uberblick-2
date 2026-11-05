@@ -7,6 +7,7 @@ import type { AgentGrantRegistry } from "./agent-grants.js";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import type { HubAdminRegistry } from "./hub-admins.js";
 import type { OAuthAuthorizations } from "./oauth-authorizations.js";
+import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 
 export const MCP_SOCKET_TIMEOUT_MS = 5000;
 const MAX_FRAME_BYTES = 65_536;
@@ -14,6 +15,11 @@ const MAX_FRAME_BYTES = 65_536;
 export type HubMcpTokenResult =
   | { status: "positive"; grantId: string; principal: string; workspace: string; scope: string; expiresAt: number }
   | { status: "negative" }
+  | { status: "unavailable" };
+
+export type HubMcpGrantResult =
+  | { status: "active" | "inaccessible"; current: boolean; hasCredential: boolean; now: number; identity: PrincipalRecord }
+  | { status: "ended"; current: false; now: number }
   | { status: "unavailable" };
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -30,6 +36,12 @@ function workspace(value: unknown): value is string {
 
 function nonempty(value: unknown): value is string { return typeof value === "string" && value !== ""; }
 function timestamp(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) >= 0; }
+
+function publicKey(value: unknown): Buffer | null {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value)) return null;
+  const key = Buffer.from(value, "base64url");
+  return key.byteLength === 32 && key.toString("base64url") === value ? key : null;
+}
 
 /** Probe the existing inode before unlinking; a reachable hub always wins. */
 async function clearStaleSocket(path: string): Promise<void> {
@@ -75,12 +87,13 @@ async function clearStaleSocket(path: string): Promise<void> {
 
 export async function startMcpChannel(options: {
   path: string;
-  authorizations: OAuthAuthorizations;
+  authorizations: OAuthAuthorizations | undefined;
   grants: AgentGrantRegistry;
   admins: HubAdminRegistry;
   credentials: CredentialRegistry;
+  principals: PrincipalRegistry;
 }): Promise<{ stop(): Promise<void> }> {
-  const { path, authorizations, grants, admins, credentials } = options;
+  const { path, authorizations, grants, admins, credentials, principals } = options;
   if (path === "" || path.includes("\0") || Buffer.byteLength(path) > 103) {
     throw new Error("hub MCP: configured socket path must be nonempty and at most 103 bytes without NUL");
   }
@@ -93,6 +106,33 @@ export async function startMcpChannel(options: {
   await clearStaleSocket(path);
   let stopped = false;
   const sessions = new Set<Socket>();
+  const introspect = (presentedToken: string): HubMcpTokenResult => {
+    const token = authorizations?.getAccessToken(presentedToken) ?? null;
+    const grant = token === null ? null : grants.get(token.grantId);
+    if (token === null || grant === null || !grants.isLive(grant.id) || admins.isSuspended(grant.workspaceId)) {
+      return { status: "negative" };
+    }
+    return { status: "positive", grantId: grant.id, principal: grant.principalId, workspace: grant.workspaceId,
+      scope: token.scope, expiresAt: token.expiresAt };
+  };
+  const inspectGrant = (grantId: string, stored?: { id: string; publicKey: Uint8Array }): HubMcpGrantResult => {
+    const inspected = credentials.inspectGrantCredential(grantId, stored);
+    const grant = grants.get(grantId);
+    if (grant === null || grant.revokedAt !== null) return { status: "ended", current: false, now: inspected.now };
+    const identity = principals.get(grant.principalId);
+    if (identity === null) throw new Error();
+    return { status: authorizations === undefined || !grants.isLive(grantId) || admins.isSuspended(grant.workspaceId)
+      ? "inaccessible" : "active", ...inspected, identity };
+  };
+  const inspectGrantRequest = (message: Record<string, unknown>) => {
+    if (!nonempty(message.grantId)) return { status: "invalid-request" };
+    if (fields(message, ["action", "grantId"])) return inspectGrant(message.grantId);
+    if (!fields(message, ["action", "grantId", "credentialId", "publicKey"]) || !nonempty(message.credentialId)) {
+      return { status: "invalid-request" };
+    }
+    const key = publicKey(message.publicKey);
+    return key === null ? { status: "invalid-request" } : inspectGrant(message.grantId, { id: message.credentialId, publicKey: key });
+  };
   const server = createServer(socket => {
     if (stopped) { socket.destroy(); return; }
     sessions.add(socket);
@@ -117,19 +157,14 @@ export async function startMcpChannel(options: {
         const message: unknown = JSON.parse(input.slice(0, newline));
         if (!object(message) || input.slice(newline + 1) !== "") throw new Error();
         if (message.action === "introspect" && fields(message, ["action", "token"]) && typeof message.token === "string") {
-          const token = authorizations.getAccessToken(message.token);
-          const grant = token === null ? null : grants.get(token.grantId);
-          if (token === null || grant === null || !grants.isLive(grant.id) || admins.isSuspended(grant.workspaceId)) {
-            finish({ status: "negative" });
-          } else {
-            finish({ status: "positive", grantId: grant.id, principal: grant.principalId, workspace: grant.workspaceId,
-              scope: token.scope, expiresAt: token.expiresAt });
-          }
+          finish(introspect(message.token));
+        } else if (message.action === "inspect-grant") {
+          finish(inspectGrantRequest(message));
         } else if (message.action === "issue-credential" && fields(message, ["action", "grantId", "publicKey"]) &&
           nonempty(message.grantId) && typeof message.publicKey === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.publicKey)) {
-          const publicKey = Buffer.from(message.publicKey, "base64url");
-          if (publicKey.byteLength !== 32 || publicKey.toString("base64url") !== message.publicKey) throw new Error();
-          const issued = credentials.issueForGrant(message.grantId, publicKey);
+          const key = publicKey(message.publicKey);
+          if (key === null) throw new Error();
+          const issued = authorizations === undefined ? null : credentials.issueForGrant(message.grantId, key);
           finish(issued === null ? { status: "refused" } : { status: "issued", credential: issued.record });
         } else finish({ status: "invalid-request" });
       } catch { finish({ status: "failed" }); }
@@ -203,6 +238,29 @@ export async function introspectMcpToken(socketPath: string, token: string): Pro
         scope: reply.scope, expiresAt: reply.expiresAt };
     }
   } catch { /* Transport and parse failures have the same token-free answer. */ }
+  return { status: "unavailable" };
+}
+
+export async function inspectMcpGrant(socketPath: string, grantId: string, stored?: { id: string; publicKey: Uint8Array }): Promise<HubMcpGrantResult> {
+  try {
+    if (stored !== undefined && stored.publicKey.byteLength !== 32) throw new Error();
+    const reply = await request(socketPath, { action: "inspect-grant", grantId, ...(stored === undefined ? {} : {
+      credentialId: stored.id, publicKey: Buffer.from(stored.publicKey).toString("base64url"),
+    }) });
+    if (!object(reply) || !timestamp(reply.now)) throw new Error();
+    if (reply.status === "ended" && fields(reply, ["status", "current", "now"]) && reply.current === false) {
+      return { status: "ended", current: false, now: reply.now };
+    }
+    if ((reply.status === "active" || reply.status === "inaccessible") &&
+      fields(reply, ["status", "current", "hasCredential", "now", "identity"]) && typeof reply.current === "boolean" &&
+      typeof reply.hasCredential === "boolean" && (!reply.current || reply.hasCredential) && object(reply.identity) &&
+      fields(reply.identity, ["id", "githubAccountId", "githubUsername"]) && nonempty(reply.identity.id) &&
+      typeof reply.identity.githubAccountId === "string" && /^[1-9][0-9]*$/.test(reply.identity.githubAccountId) && nonempty(reply.identity.githubUsername)) {
+      return { status: reply.status, current: reply.current, hasCredential: reply.hasCredential, now: reply.now, identity: {
+        id: reply.identity.id, githubAccountId: reply.identity.githubAccountId, githubUsername: reply.identity.githubUsername,
+      } };
+    }
+  } catch { /* A failed probe cannot establish grant or key state. */ }
   return { status: "unavailable" };
 }
 

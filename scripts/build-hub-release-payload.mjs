@@ -5,13 +5,24 @@ import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mcpRenderAssets, writeMcpRenderNotices } from "./mcp-render-assets.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const { build } = createRequire(join(root, "packages/cli/package.json"))("esbuild");
 
-export async function bundleHubEntry(entry, output) {
+export function assertProductionBundle(metafile) {
+	for (const output of Object.values(metafile.outputs)) {
+		for (const [input, contribution] of Object.entries(output.inputs)) {
+			if (contribution.bytesInOutput > 0 && /(?:^|\/)packages\/[^/]+\/(?:.*\/)?(?:test|tests|__tests__)\//.test(input.replaceAll("\\", "/"))) {
+				throw new Error(`release bundle contains package test code: ${input}`);
+			}
+		}
+	}
+}
+
+export async function bundleHubEntry(entry, output, version = JSON.parse(readFileSync(join(root, "packages/mcp-server/package.json"), "utf8")).version) {
 	const result = await build({
-		entryPoints: [join(root, entry)],
+		entryPoints: [resolve(root, entry)],
 		outfile: output,
 		bundle: true,
 		platform: "node",
@@ -19,8 +30,11 @@ export async function bundleHubEntry(entry, output) {
 		target: "node26",
 		minify: true,
 		metafile: true,
+		plugins: [mcpRenderAssets(version)],
 		sourcemap: false,
 	});
+	assertProductionBundle(result.metafile);
+	writeMcpRenderNotices(result.metafile, dirname(output));
 	return result.metafile;
 }
 
@@ -47,8 +61,9 @@ async function main() {
 	const destination = resolve(output);
 	mkdirSync(destination, { recursive: true });
 	await Promise.all([
-		bundleHubEntry("packages/hub/src/main.ts", join(destination, "hub.mjs")),
-		bundleHubEntry("packages/hub/src/operator-command.ts", join(destination, "ub-hub.mjs")),
+		bundleHubEntry("packages/hub/src/main.ts", join(destination, "hub.mjs"), version),
+		bundleHubEntry("packages/hub/src/operator-command.ts", join(destination, "ub-hub.mjs"), version),
+		bundleHubEntry("packages/mcp-server/src/host-main.ts", join(destination, "mcp-host.mjs"), version),
 	]);
 	const release = join(destination, "release");
 	mkdirSync(release);

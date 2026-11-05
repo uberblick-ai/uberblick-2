@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   DIRECTORY_DOCS_KEY,
-  getMeta,
   isDirectoryEntryArchived,
   parseRoom,
   roomForDoc,
@@ -11,6 +10,7 @@ import {
   validRevisionName,
 } from "@uberblick/schema";
 import * as Y from "yjs";
+import { stderrLogger, type HubLogger } from "./log.js";
 import { getUpdateAttribution, type UpdateAuthor } from "./update-attribution.js";
 
 const STRETCH_MS = 15 * 60 * 1_000;
@@ -104,6 +104,7 @@ export class HubRevisions {
     private readonly isDeleted: (room: string) => boolean,
     private readonly onStoreFailed: (error: unknown) => void,
     private readonly now: () => number = Date.now,
+    private readonly log: HubLogger = stderrLogger,
   ) {
     db.exec(`CREATE TABLE IF NOT EXISTS document_revisions (
       id TEXT PRIMARY KEY NOT NULL,
@@ -153,23 +154,39 @@ export class HubRevisions {
     this.observed.add(document);
     let before = snapshot(document);
     let missedCapture = false;
+    const missedDeliverers = new Set<string>();
     document.on("afterTransaction", (transaction: Y.Transaction) => {
-      if (transaction.changed.size === 0 || this.isDeleted(room) || getMeta(document).kind === "decision") return;
+      if (transaction.changed.size === 0 || this.isDeleted(room)) return;
+      const attribution = getUpdateAttribution(transaction.origin);
+      let unknownRevisionId: string | undefined;
       try {
         const after = snapshot(document);
         if (transaction.origin === RESTORE_ORIGIN) {
           before = after;
           missedCapture = false;
+          missedDeliverers.clear();
           return;
         }
         if (before.checksum === after.checksum) return;
-        this.record(room, before, after, missedCapture ? null : getUpdateAttribution(transaction.origin)?.author ?? null);
+        const author = missedCapture ? null : attribution?.author ?? null;
+        const id = this.record(room, before, after, author);
+        if (author === null) unknownRevisionId = id;
         before = after;
         missedCapture = false;
       } catch (error) {
         missedCapture = true;
+        if (attribution?.deliveredBy !== undefined) missedDeliverers.add(attribution.deliveredBy.principalId);
         this.onStoreFailed(error);
         throw error;
+      }
+      const deliverers = new Set(missedDeliverers);
+      missedDeliverers.clear();
+      if (unknownRevisionId !== undefined) {
+        // known limit: buffered contributors are logged under the completing deliverer; revisit when updates retain buffered-source attribution.
+        if (attribution?.deliveredBy !== undefined) deliverers.add(attribution.deliveredBy.principalId);
+        for (const principalId of deliverers) {
+          this.log({ event: "hub.revision.unknownAuthor", room, revisionId: unknownRevisionId, principalId });
+        }
       }
     });
   }
@@ -268,7 +285,7 @@ export class HubRevisions {
       const at = this.now();
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const head = this.head(room);
+        const head = this.preserveEarlierContent(room, current, at);
         if (head !== undefined) this.closeHead(room, head, at);
         this.insert(room, restoredId, authorIdentity(author).label, at, at, restored);
         // Room state and its closed revision commit before any peer receives the update.
@@ -293,13 +310,12 @@ export class HubRevisions {
     if (current.checksum !== checksum) return { ok: false, error: "stale-state" };
     return this.writeName(() => {
       const at = this.now();
-      const head = this.head(room);
+      const head = this.preserveEarlierContent(room, current, at);
       const last = this.db.prepare("SELECT id, checksum FROM document_revisions WHERE room = ? ORDER BY rowid DESC LIMIT 1").get(room);
       const id = head?.id ?? (last?.checksum === current.checksum ? last.id as string : randomUUID());
       const existing = this.names(room).get(id);
       if (existing !== undefined) return { ok: false, error: "already-named", name: existing };
       if (head !== undefined) {
-        if (head.checksum !== current.checksum) throw new Error("revision capture does not match current content");
         // Naming preserves even a reverted stretch, whose automatic head has no bytes.
         this.insert(room, head.id, head.author, head.started_at, headEnd(head, at),
           { ...current, state: head.data ?? current.state });
@@ -358,33 +374,31 @@ export class HubRevisions {
     this.db.prepare("DELETE FROM document_revision_documents WHERE room = ?").run(room);
   }
 
-  private record(room: string, before: Snapshot, after: Snapshot, author: UpdateAuthor | null): void {
+  private record(room: string, before: Snapshot, after: Snapshot, author: UpdateAuthor | null): string | undefined {
     if (this.isDeleted(room)) return;
     const at = this.now();
     const identity = authorIdentity(author);
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      let head = this.head(room);
+      let head = this.preserveEarlierContent(room, before, at);
       if (head !== undefined && (head.author_key !== identity.key || at >= headDeadline(head))) {
         this.closeHead(room, head, at);
         head = undefined;
       }
+      const id = head?.id ?? randomUUID();
       if (head === undefined) {
-        const recorded = this.db.prepare("SELECT room FROM document_revision_documents WHERE room = ?").get(room);
-        if (recorded === undefined) {
-          if (!before.empty) this.insert(room, randomUUID(), null, null, at, before);
-          this.db.prepare("INSERT INTO document_revision_documents (room) VALUES (?)").run(room);
-        }
+        this.db.prepare("INSERT OR IGNORE INTO document_revision_documents (room) VALUES (?)").run(room);
         this.db.prepare(`INSERT INTO document_revision_heads
           (room, id, author, author_key, started_at, last_edited_at, checksum, previous_checksum, data)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          room, randomUUID(), identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
+          room, id, identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
         );
       } else {
         this.db.prepare("UPDATE document_revision_heads SET checksum = ?, data = ?, last_edited_at = ? WHERE room = ?")
           .run(after.checksum, after.checksum === head.previous_checksum ? null : after.state, at, room);
       }
       this.db.exec("COMMIT");
+      return id;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -393,6 +407,18 @@ export class HubRevisions {
 
   private head(room: string): Head | undefined {
     return this.db.prepare("SELECT * FROM document_revision_heads WHERE room = ?").get(room) as unknown as Head | undefined;
+  }
+
+  /** Preserve content skipped by earlier capture rules before starting another revision. */
+  private preserveEarlierContent(room: string, current: Snapshot, at: number): Head | undefined {
+    const head = this.head(room);
+    if (head?.checksum === current.checksum) return head;
+    if (head !== undefined) this.closeHead(room, head, at);
+    const last = this.db.prepare("SELECT checksum FROM document_revisions WHERE room = ? ORDER BY rowid DESC LIMIT 1").get(room);
+    if (last?.checksum !== current.checksum && (last !== undefined || !current.empty)) {
+      this.insert(room, randomUUID(), null, null, at, current);
+    }
+    return undefined;
   }
 
   private close(room: string, at: number): void {

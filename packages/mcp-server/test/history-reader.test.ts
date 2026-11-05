@@ -422,12 +422,12 @@ it("holds a read outside retention until its document is destroyed, then evicts 
   await expect(test.reader.get(PAGE, "old")).rejects.toMatchObject({ code: "not-downloaded" });
 });
 
-it("refuses known deleted pages and decisions before touching the cache", async () => {
+it("refuses known permanently deleted documents before touching the cache", async () => {
   const test = await fixture();
   const cached = vi.spyOn(test.worker, "open");
-  test.requireHistory.mockImplementation(() => { throw new RevisionClientError("decision-no-history"); });
-  await expect(test.reader.list(PAGE)).rejects.toMatchObject({ code: "decision-no-history" });
-  await expect(test.reader.get(PAGE, "any")).rejects.toMatchObject({ code: "decision-no-history" });
+  test.requireHistory.mockImplementation(() => { throw new RevisionClientError("deleted"); });
+  await expect(test.reader.list(PAGE)).rejects.toMatchObject({ code: "deleted" });
+  await expect(test.reader.get(PAGE, "any")).rejects.toMatchObject({ code: "deleted" });
   expect(cached).not.toHaveBeenCalled();
   expect(test.request).not.toHaveBeenCalled();
 });

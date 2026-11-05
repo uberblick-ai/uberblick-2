@@ -10,7 +10,10 @@ interface at `http://localhost:8080`, answering only `localhost` and `127.0.0.1`
 Host names to prevent DNS rebinding. Other computers use HTTPS for a configured
 host name. Tailscale is the recommended optional network layer; public DNS is
 also supported. Caddy serves the app and `/uberblick-config.json` and proxies
-`/ws` and `/auth/*` to the hub. The hub is not published directly.
+`/ws`, `/auth/*`, `/oauth/*` and `/.well-known/oauth-authorization-server` to
+the hub. `/mcp/*` and `/.well-known/oauth-protected-resource/*` reach the
+separate `mcp` service, which runs the same hub image. Neither service
+publishes a host port.
 
 > Remote sync admits only device credentials with current workspace membership. Run `ub auth login` on each computer and unattended agent host, then use the MCP server or `ub open`. The hub's own page offers GitHub sign-in with a separate 24-hour browser session, including on HTTP localhost. It opens no workspace and shows no documents. A signing secret left in an old `.env` grants no access. Revocation stops live sync but cannot erase data already downloaded.
 
@@ -99,7 +102,7 @@ docker compose config --quiet
 docker compose up -d
 docker compose ps
 docker compose exec hub ub-hub status
-docker compose logs --tail=100 hub caddy
+docker compose logs --tail=100 hub mcp caddy
 ```
 
 [Check the site and WebSocket upgrade](#check-the-deployment) on the host, then
@@ -206,8 +209,10 @@ it with the template. Assets at a versioned URL never change. The `latest`
 download links are for finding host files, not a moving image tag.
 
 The project remains `uberblick-remote`, and its
-`hub-data`, `caddy-data` and `caddy-config` volumes keep documents, private access
-records and Caddy's certificate state across replacement. Do not pass
+`hub-data`, `mcp-data`, `caddy-data` and `caddy-config` volumes keep documents,
+private access records, hosted grant keys and mirrors, and Caddy's certificate
+state across replacement. `hub-mcp-socket` carries only the private socket
+shared by `hub` and `mcp`; it contains no backup state. Do not pass
 `--volumes` to `down`, rename the project or change these volume names.
 On an arm64 host upgrading from an amd64-only release, refresh the target
 Compose files as above to remove the old `platform: linux/amd64` pins. Clear
@@ -235,6 +240,41 @@ their own checks, so existing Compose files inherit them: the hub checks its
 own HTTP listener and the web image checks Caddy's loopback admin listener.
 These checks use no public DNS name, TLS certificate or deployment route; still
 check the selected site and `/ws` from the client.
+
+The `mcp` service overrides the shared image's health check. It checks its own
+HTTP listener through a negative token introspection on the hub's private
+socket, then completes one WebSocket handshake with `hub` at `/ws`. It issues
+no credential. A stopped hub makes `mcp` unhealthy; it recovers when the hub
+returns without restarting `mcp`. Both services run as `node`. The shared
+socket directory is owned by `node`, mode `0700`; only `hub` and `mcp` mount it.
+`mcp` mounts its own `mcp-data` at `/data/mcp`, never `hub-data` or Caddy data.
+
+### Enable the hosted MCP endpoint
+
+Every deployment starts `mcp`, including with hosted sign-in disabled. Set
+`HUB_PUBLIC_URL=https://hub.example.com` in `.env` to enable hosted sign-in at
+the hub's public HTTPS origin. It is the only source for issuer, audience and
+metadata URLs in both services; request Host headers, `WEB_HOST` and
+`TAILSCALE_HOST` do not change it. Unset or empty keeps hosted sign-in off,
+both metadata routes return `404`, and the private socket refuses all tokens
+and credential requests, including previously stored grants. An invalid value
+stops startup with an error naming `HUB_PUBLIC_URL`.
+
+Set `MCP_ALLOWED_ORIGINS` in `.env` to comma-separated exact origins if clients
+send an `Origin` header. Unset allows no origins; requests without that header
+are unaffected. The host adds no CORS support. Recreate `hub` and `mcp` after
+changing these settings:
+
+```sh
+docker compose up -d --force-recreate hub mcp
+docker compose ps
+docker compose logs --tail=100 hub mcp
+```
+
+Hosted clients use `https://<hub>/mcp/<workspace-id>`. Adding routes grants no
+access: GitHub sign-in, current workspace membership and approval are still
+required. Public cloud clients need an internet-reachable HTTPS address;
+loopback HTTP is supported only for local checks.
 
 If you replace the `web` image's Caddyfile with your own, keep
 `admin 127.0.0.1:2019` in its global options. With `admin off` or the admin
@@ -1639,6 +1679,55 @@ have the same contents, integrity check and private mode. Find their paths in
 `docker compose logs hub` under `hub.database.backup`; they stay beside
 `/data/hub.sqlite` and can be restored directly from that volume. They supplement
 operator backups and follow the same owner-managed retention policy.
+
+### Backing up and restoring hosted MCP state
+
+`ub-hub backup` covers `hub-data`, not the separate `mcp-data` volume. Save
+both when keeping a deployment backup. The MCP volume holds grant private
+keys and workspace mirrors; losing it loses that host's stored keys and local
+mirror state. Keep its archive private alongside the hub backup. The socket
+volume needs no backup; the hub recreates the socket on startup.
+
+If `mcp-data` alone is lost or restored from an older backup, connections whose
+grants are still live recover with new credentials without another approval.
+Recovery can take about a minute while an outstanding renewal expires. Losing
+the volume loses only changes the hub had not received; acknowledged content
+downloads again. The host removes a revoked or unknown grant's key and mirror
+only when the mirror has no such changes. A revoked grant with unsynced changes
+keeps its files; the host neither recovers nor discards those changes.
+
+For a coordinated copy, stop `mcp` before taking the hub backup above, then
+archive its data with the same release image. Wait for every command to
+succeed before restarting it:
+
+```sh
+docker compose stop mcp
+docker compose exec hub ub-hub backup
+# Copy the reported hub backup path as above, then archive all MCP state:
+(umask 077; docker compose run --rm --no-deps -T mcp tar -cf - -C /data/mcp . > ~/uberblick-mcp-backup.tar)
+chmod 600 ~/uberblick-mcp-backup.tar
+docker compose start mcp
+```
+
+Restore a matching pair with `hub` and `mcp` stopped. The following replaces
+the hub database and all current MCP keys and mirrors; retain a backup of the
+current state first. Read the next section's access-change warnings before
+using `--yes` to confirm the hub restore. These commands run as `node` and
+keep the named volumes and their ownership. Stop on any failure; start both
+services only after both restores succeed:
+
+```sh
+docker compose stop hub mcp
+docker compose run --rm -T hub ub-hub restore --yes - < ~/uberblick-hub-backup.sqlite
+docker compose run --rm --no-deps -T mcp node -e 'const fs = require("node:fs"); for (const name of fs.readdirSync("/data/mcp")) fs.rmSync("/data/mcp/" + name, {recursive: true, force: true});'
+docker compose run --rm --no-deps -T mcp tar -xf - -C /data/mcp < ~/uberblick-mcp-backup.tar
+docker compose start hub mcp
+docker compose ps
+```
+
+Use the archive only after both backup files are safely stored. A normal
+update, restart or `docker compose down` retains `mcp-data`; never add
+`--volumes`. Caddy mounts neither `mcp-data` nor `hub-mcp-socket`.
 
 ### Restoring one
 
