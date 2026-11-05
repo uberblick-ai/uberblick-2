@@ -251,6 +251,10 @@ socket directory is owned by `node`, mode `0700`; only `hub` and `mcp` mount it.
 
 ### Enable the hosted MCP endpoint
 
+**Experimental.** Hosted MCP is not ready for real use: connections do not sync
+on a released deployment yet, and it can change in any release. Leave
+`HUB_PUBLIC_URL` unset unless you are testing it.
+
 Every deployment starts `mcp`, including with hosted sign-in disabled. Set
 `HUB_PUBLIC_URL=https://hub.example.com` in `.env` to enable hosted sign-in at
 the hub's public HTTPS origin. It is the only source for issuer, audience and

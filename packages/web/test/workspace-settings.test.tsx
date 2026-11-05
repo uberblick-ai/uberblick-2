@@ -327,6 +327,7 @@ it.each([false, true])("shows the confirmed hosted URL before local controls for
   const host = within(mounted.container);
   const headings = host.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
   expect(headings.slice(-2)).toEqual(["Hosted MCP", "On this computer"]);
+  expect(host.getByText(/^Experimental\./)).toBeTruthy();
   if (!admin) {
     expect(headings).toEqual(["Hosted MCP", "On this computer"]);
     expect(host.queryByRole("textbox", { name: "Name" })).toBeNull();

@@ -287,7 +287,7 @@ export function renderStatus(
   let text = field("workspace", short.workspace.name === null
     ? short.workspace.id : `${short.workspace.name} (${short.workspace.id})`);
   text += field("hub", short.hub ?? "local, this computer only");
-  if (short.hostedMcp !== null) text += field("hosted mcp", short.hostedMcp);
+  if (short.hostedMcp !== null) text += field("hosted mcp", `${short.hostedMcp} (experimental)`);
   text += field("version", `client ${short.version.client}` +
     (short.connection === null ? "" : `, hub ${short.version.hub ?? "unknown"}`));
   if (short.hub === null) {

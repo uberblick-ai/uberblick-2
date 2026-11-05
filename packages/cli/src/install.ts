@@ -39,8 +39,9 @@ export const INSTALL_HELP = `usage: ub mcp install <client> [options]
 Register uberblick with an MCP client using a plain \`ub mcp serve\` entry.
 Agents follow the nearest .uberblick.json in the project where they start.
 Plain install needs no workspace selection. With --remote, register this
-project's workspace hosted URL instead. Credentials stay in the private user
-store and are never copied into an MCP entry.
+project's workspace hosted URL instead; hosted MCP is experimental and may not
+work yet. Credentials stay in the private user store and are never copied into
+an MCP entry.
 
 Claude Code and Codex are wired up by running their own \`mcp add\` command, so
 the vendor writes its own file. A client \`ub\` does not know gets the snippet,
@@ -54,7 +55,8 @@ operands:
 
 options:
   --user            the per-user config
-  --remote          this project's hosted MCP URL; requires a shared workspace
+  --remote          this project's hosted MCP URL (experimental); requires a
+                    shared workspace
                     and cannot be combined with --user
   --print           print the snippet to paste, and run nothing
   -h, --help        show this help
@@ -283,6 +285,7 @@ export async function installCommand(
         "Use `ub mcp install <client>` to register the local server instead.\n");
       return 1;
     }
+    io.err("ub mcp install: hosted MCP is experimental and may not work yet.\n");
     entry = { name: DEFAULT_ENTRY.name, url };
   }
 
