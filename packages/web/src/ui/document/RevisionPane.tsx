@@ -458,7 +458,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         const previous = pane.current === null ? null : snapshotRows(sides, pane.current);
         view.expand(run);
         setRows(view.model.rows);
-        if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current);
+        if (previous !== null && pane.current !== null) animateRows(sides, previous, pane.current, "next-frame");
       };
       let view: RevisionComparisonView;
       let destroy: () => void;

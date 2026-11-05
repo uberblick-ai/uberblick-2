@@ -4538,10 +4538,7 @@ test.describe("document history through ub open", () => {
 
   for (const appearance of ["light", "dark"] as const) {
     for (const reducedMotion of ["no-preference", "reduce"] as const) {
-      test(`drawn folds stay in place on either side — ${appearance}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }, info) => {
-        // https://github.com/uberblick-ai/uberblick-2/issues/2574 — native iPad WebKit intermittently samples no running fold animation.
-        test.fixme(reducedMotion === "no-preference" && info.project.name === "webkit-ipad",
-          "iPad WebKit fold motion is quarantined; the reduced-motion cases keep iPad scroll stability covered");
+      test(`drawn folds stay in place on either side — ${appearance}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }) => {
         const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
           viewport: { width: 1440, height: 420 }, colorScheme: appearance, reducedMotion,
         }, beforeNavigate: async page => {
@@ -4569,11 +4566,39 @@ test.describe("document history through ub open", () => {
           const aboveTop = await above.evaluate(element => element.getBoundingClientRect().top);
           const scroll = await pane.evaluate(element => element.scrollTop);
           expect(scroll).toBeGreaterThan(0);
+          // Observe in the page: input completion and protocol round trips can outlast the motion.
+          const opening = await pane.evaluateHandle((pane, run) => ({ sample: new Promise<number>((resolve, reject) => {
+            pane.addEventListener("click", () => {
+              let drawn = false;
+              requestAnimationFrame(() => requestAnimationFrame(function sample() {
+                const row = pane.querySelector(`.ub-revision-row-start[data-key="row-${run}"]`)?.nextElementSibling;
+                if (!(row instanceof HTMLElement)) { reject(new Error("The opened row is missing")); return; }
+                const rect = row.getBoundingClientRect();
+                const view = pane.getBoundingClientRect();
+                if (Number(getComputedStyle(row).opacity) === 0) {
+                  requestAnimationFrame(sample);
+                  return;
+                }
+                if (rect.bottom <= view.top || rect.top >= view.bottom) { reject(new Error("The opened row is outside the pane")); return; }
+                // A further frame gives the visible row a rendering opportunity before sampling.
+                if (!drawn) { drawn = true; requestAnimationFrame(sample); return; }
+                resolve(pane.getAnimations({ subtree: true }).filter(animation => {
+                  const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+                  return animation.playState === "running" && target instanceof Element &&
+                    target.matches(".ub-revision-row-start, .ub-revision-row, .ub-revision-row-end, .ub-revision-ghost");
+                }).length);
+              }));
+            }, { once: true });
+          }) }), run);
           await activateControl(bar);
           await expect(historicalEditor(page)).toContainText(`Opened run ${index + 1} begins here.`);
           expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
-          if (reducedMotion === "reduce") expect(await runningMotion(page)).toBe(0);
-          else expect(await runningMotion(page)).toBeGreaterThan(0);
+          const motion = await opening.evaluate(async observation => observation.sample);
+          await opening.dispose();
+          if (reducedMotion === "reduce") {
+            expect(motion).toBe(0);
+            expect(await runningMotion(page)).toBe(0);
+          } else expect(motion).toBeGreaterThan(0);
           await comparisonDrawn(page);
           expect(await pane.evaluate(element => element.scrollTop)).toBe(scroll);
           expect(Math.abs(await above.evaluate(element => element.getBoundingClientRect().top) - aboveTop)).toBeLessThanOrEqual(2);
