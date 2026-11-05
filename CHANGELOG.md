@@ -5,6 +5,35 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.16 — 2026-11-05
+
+Security audit fixes: the hub protects decision records from deletion and keeps their history, and signing out everywhere now ends browser sessions. Also new: rendered ablauf drawings for agents, `ub uninstall`, and an experimental hosted MCP endpoint.
+
+### Added
+
+- Decision records have document history like any other page: browse revisions, compare and name them. Restoring follows the usual edit rules, so a decided answer stays read-only (#2614).
+- `render_block` returns an ablauf drawing as a PNG or SVG, so agents can check what they drew (#2602).
+- `ub uninstall` removes the Homebrew install after showing what's at risk in local workspace copies. Deleting local data is an explicit choice, refused while `ub open` is using it (#2605).
+- **Experimental:** hosted MCP, which stays off unless an operator sets `HUB_PUBLIC_URL`. It isn't ready for real use: connections don't sync on a released deployment yet, and it can change in any release. Hubs that enable it show the workspace's URL in Workspace > General and `ub status`, and `ub mcp install --remote` registers it (#2594, #2596, #2599, #2604, #2616).
+
+### Improved
+
+- `ub auth logout --all-devices` also ends the account's hub browser sessions. If that can't be confirmed, the login stays and the command reports it (#2586).
+- Ablauf drawings stay whole and still until you press Play, instead of starting as they scroll into view (#2585).
+- MCP answers report `connecting` while the first hub connection is still pending, and say changes are saved and will sync, so agents don't repeat their writes (#2581).
+- The new-version banner in `ub open` is easier to read, with real command chips (#2584).
+- `ub workspace list` is sorted by name (#2607).
+- Hub release images pin their upstream images by digest (#2588).
+- Hub logs record which member delivered a revision with an unknown author (#2590).
+- Operator log commands include the `mcp` service (#2620).
+- MCP help explains toggle headings (#2611).
+
+### Fixed
+
+- The hub deletes a decision record only with its whole archived topic, and a rewritten directory entry can no longer delete a live page or another topic's record. Existing deletions stay in force after upgrading (#2615).
+- Selecting by dragging across a side-by-side comparison keeps the selection when you release (#2601).
+- Long guidance titles stay on one bounded line in MCP startup instructions (#2587).
+
 ## v0.4.15 — 2026-11-02
 
 Decision history that shows why each record exists, steadier keyboard movement past unsupported blocks, cleaner toggle headings, and hub downloads pinned to their attested images.
