@@ -4538,7 +4538,10 @@ test.describe("document history through ub open", () => {
 
   for (const appearance of ["light", "dark"] as const) {
     for (const reducedMotion of ["no-preference", "reduce"] as const) {
-      test(`drawn folds stay in place on either side — ${appearance}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }) => {
+      test(`drawn folds stay in place on either side — ${appearance}, ${reducedMotion}`, { tag: "@webkit" }, async ({ browser }, info) => {
+        // https://github.com/uberblick-ai/uberblick-2/issues/2574 — native iPad WebKit intermittently samples no running fold animation.
+        test.fixme(reducedMotion === "no-preference" && info.project.name === "webkit-ipad",
+          "iPad WebKit fold motion is quarantined; the reduced-motion cases keep iPad scroll stability covered");
         const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
           viewport: { width: 1440, height: 420 }, colorScheme: appearance, reducedMotion,
         }, beforeNavigate: async page => {
