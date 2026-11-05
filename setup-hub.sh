@@ -306,16 +306,16 @@ $(setup_bindings "$id")"
   docker compose config --quiet
   step='Compose pull'; fix='Check registry access and the selected release/platform, then re-run.'
   docker compose pull
-  step='Compose startup'; fix='Check docker compose logs --tail=100 hub caddy in HUB_DIR, fix the reported cause and re-run.'
+  step='Compose startup'; fix='Check docker compose logs --tail=100 in HUB_DIR, fix the reported cause and re-run.'
   docker compose up -d
-  step='hub readiness'; fix='Check docker compose logs --tail=100 hub caddy in HUB_DIR and re-run after correcting the cause.'
+  step='hub readiness'; fix='Check docker compose logs --tail=100 in HUB_DIR and re-run after correcting the cause.'
   for ((attempt=0; attempt<30; attempt++)); do
     if status=$(docker compose exec -T hub ub-hub status 2>&1) && printf '%s\n' "$status" | awk '$1=="hub" && $2=="running" {found=1} END {exit !found}'; then break; fi
     sleep 2
   done
   if [ "$attempt" = 30 ]; then
     printf '%s\n' "$status" >&2
-    docker compose logs --tail=100 hub caddy >&2 || true
+    docker compose logs --tail=100 >&2 || true
     setup_fail "hub readiness: not running after 30 checks, two seconds apart. $fix"
   fi
   printf '%s\n' "$status"

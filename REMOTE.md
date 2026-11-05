@@ -1593,7 +1593,7 @@ they are not replaced by the repository's local test suite.
 ## Operations
 
 ```sh
-docker compose logs --follow hub caddy
+docker compose logs --follow hub mcp caddy
 docker compose restart hub
 docker compose down
 docker compose up --detach

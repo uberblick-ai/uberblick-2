@@ -117,7 +117,11 @@ else if (command === "tailscale") {
       const values = dotenv(envFile);
       values.COMPOSE_PROJECT_NAME ??= input.match(/^name:\s*([A-Za-z0-9_-]+)/m)?.[1] ?? path.basename(process.cwd()).toLowerCase();
       for (const key of ["HUB_VERSION", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP", "LOOPBACK_PORT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"]) out(key + "=" + (process.env[key] ?? values[key] ?? "") + "\n");
-    } else if (args.includes("logs")) out("hub synthetic startup failure\ncaddy synthetic startup failure\n");
+    } else if (args.includes("logs")) {
+      const requested = args.slice(args.indexOf("logs") + 1).filter((arg) => !arg.startsWith("-"));
+      for (const service of requested) if (!config.services.includes(service)) die("no such service: " + service);
+      for (const service of requested.length ? requested : config.services) out(service + " synthetic startup failure\n");
+    }
     else if (args.at(-1) === "status") {
       if (config.statusError) die(config.statusError);
       out(config.status);
@@ -146,6 +150,7 @@ function fixture(t, overrides = {}) {
 		uid: 1000, os: "Linux", arch: "x86_64", engine: "28.0.0", compose: "2.24.4",
 		latest: "0.4.13", releases: ["0.4.13", "0.4.12", "0.4.11"], template,
 		listeners: [], containers: [], foreignContainers: [],
+		services: ["hub", "caddy"],
 		oldStatus: "hub running\nrelease 0.4.12\nprotocol 1\nclaimed no\n",
 		status: "hub running\nrelease 0.4.13\nprotocol 1\nclaimed no\n",
 		...overrides,
@@ -529,20 +534,30 @@ test("older status output without a release line retains the env version for upd
 	assert.ok(!downgrade.calls().some((call) => call.command === "curl" && call.args.some((arg) => arg.includes("/releases/download/"))));
 });
 
-test("failed Compose steps stop the sequence and bounded status failure prints hub and Caddy logs", { timeout: 60_000 }, (t) => {
+test("failed Compose steps stop the sequence and startup failure names the deployment log command", { timeout: 60_000 }, (t) => {
 	for (const step of ["config", "pull", "up"]) {
 		const f = fixture(t, { failStep: step });
-		failed(f.run(), new RegExp(step, "i"));
+		const result = f.run();
+		failed(result, new RegExp(step, "i"));
+		if (step === "up") assert.match(result.stderr, /Check docker compose logs --tail=100 in HUB_DIR/);
 		const calls = f.calls().filter((call) => call.command === "docker");
 		if (step === "config") assert.ok(!calls.some((call) => call.args.includes("pull")));
 		if (step !== "up") assert.ok(!calls.some((call) => call.args.includes("up")));
 		assert.ok(!calls.some((call) => call.args.at(-1) === "status"));
 	}
-	const f = fixture(t, { statusError: "hub stopped" });
-	const result = f.run();
-	failed(result, /running|status|start/i);
-	assert.match(result.stdout + result.stderr, /hub synthetic startup failure/);
-	assert.match(result.stdout + result.stderr, /caddy synthetic startup failure/);
-	const polls = f.calls().filter((call) => call.command === "docker" && call.args.at(-1) === "status");
-	assert.ok(polls.length >= 1 && polls.length <= 30);
+});
+
+test("bounded readiness failure prints every deployed service's logs with and without hosted MCP", { timeout: 60_000 }, (t) => {
+	for (const services of [["hub", "mcp", "caddy"], ["hub", "caddy"]]) {
+		const f = fixture(t, { services, statusError: "hub stopped" });
+		const result = f.run();
+		failed(result, /running|status|start/i);
+		for (const service of services) assert.ok(result.stderr.includes(`${service} synthetic startup failure`), `${service} logs missing: ${result.stderr}`);
+		assert.doesNotMatch(result.stderr, /no such service/);
+		assert.match(result.stderr, /Check docker compose logs --tail=100 in HUB_DIR/);
+		const calls = f.calls().filter((call) => call.command === "docker");
+		assert.deepEqual(calls.filter((call) => call.args.includes("logs")).map((call) => call.args), [["compose", "logs", "--tail=100"]]);
+		const polls = calls.filter((call) => call.args.at(-1) === "status");
+		assert.ok(polls.length >= 1 && polls.length <= 30);
+	}
 });
