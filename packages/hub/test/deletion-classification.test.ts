@@ -495,11 +495,13 @@ describe("hub-owned deletion classification", () => {
     const deletedState = persisted(original, deletedPage.name);
     const deletedUuid = parseRoom(deletedPage.name).uuid;
     const topicUuid = parseRoom(testRoom()).uuid;
+    const invalidRoom = roomForDoc(WORKSPACE, "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA");
     const savedDirectory = new Document(directoryRoom(WORKSPACE));
     documents.push(savedDirectory);
     publish(savedDirectory, page, topicUuid);
     savedDirectory.getMap("deleted-docs").set(topicUuid, true);
     savedDirectory.getMap("deleted-docs").set(deletedUuid, true);
+    savedDirectory.getMap("deleted-docs").set(parseRoom(invalidRoom).uuid, true);
     const savedState = Y.encodeStateAsUpdate(savedDirectory);
     original.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
       .run(savedDirectory.name, savedState);
@@ -518,6 +520,7 @@ describe("hub-owned deletion classification", () => {
 
     original.open();
     expect(original.isDeletedRoom(deletedPage.name)).toBe(true);
+    expect(original.isDeletedRoom(invalidRoom)).toBe(false);
     expect(persisted(original, deletedPage.name)).toBeUndefined();
     expect(original.revisions.list(deletedPage.name)).toEqual([]);
     assertRetained();

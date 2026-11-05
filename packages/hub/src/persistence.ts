@@ -352,7 +352,7 @@ export class HubDatabase implements Extension {
     // Stored UUID marks were already accepted. Fence them and retry any
     // unfinished purge before considering writer-controlled membership.
     for (const [uuid, value] of directory.getMap(DIRECTORY_DELETED_KEY)) {
-      if (value !== true || canonicalDocumentUuid(uuid) === null) continue;
+      if (value !== true || canonicalDocumentUuid(uuid) !== uuid) continue;
       const name = roomForDoc(workspaceId, uuid);
       this.deletedRooms.add(name);
       this.pendingDeletedRooms.add(name);
