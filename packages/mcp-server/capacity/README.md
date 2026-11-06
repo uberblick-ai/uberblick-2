@@ -29,6 +29,8 @@ The hub binds an ephemeral port on `0.0.0.0` to select its existing device
 credential admission; requests use loopback. Run on an isolated benchmark host.
 There is no container, proxy or TLS. The MCP host uses production runtimes,
 sessions, capacity admission, synchronization, SQLite, search and history workers.
+These processes run TypeScript through `tsx`; loader/module overhead is included,
+so these are source-mode measurements rather than a packaged-image footprint.
 Its test-only token checker accepts fixture grants, and its injected credential
 provider returns seeded device credentials. OAuth introspection, hosted grant-key
 issuance/renewal and the production Ed25519 grant admission path are omitted.
@@ -55,8 +57,8 @@ the injected grant login or storage configuration to the background history
 refresher; snapshots are not downloaded in this experiment. The live documents
 still contain their full retained CRDT structural history, and actual worker RSS
 and polling costs remain included. Recalibrate after that history path changes.
-`cap` opens all 128 sessions and submits ten waves of 64
-concurrent calls: 48 searches and 16 metadata writes per wave,
+`cap` opens all 128 sessions and submits ten waves at the configured call cap:
+75% searches and 25% metadata writes per wave,
 rotating writes across all workspaces. Latencies include the host's bounded
 acknowledgement wait; acknowledged and still-unsynced writes are counted separately.
 `restart` gracefully stops the host, keeps every mirror, starts a fresh process
