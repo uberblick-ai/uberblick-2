@@ -9,6 +9,7 @@ import { openCommand, OPEN_HELP, OPEN_OPTIONS } from "./open.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand, STATUS_HELP, STATUS_OPTIONS } from "./status.js";
 import { updateCommand, UPDATE_HELP } from "./update.js";
+import { uninstallCommand, UNINSTALL_HELP, UNINSTALL_OPTIONS } from "./uninstall.js";
 import { cliVersion } from "./version.js";
 import {
   listWorkspacesCommand, removeWorkspaceCommand, useWorkspaceCommand,
@@ -29,6 +30,8 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
+  uninstall [options]    remove the Homebrew installation and choose whether
+                         to delete this computer's data
   update                 update the Homebrew installation; for a checkout, run
                          git pull, then mise run setup
   open [options]         serve the web app and a hub in the foreground, and
@@ -54,6 +57,7 @@ commands:
 
 options for install:
   --user             # Register for every project of this user, not just this project
+  --remote           # Register this workspace's hosted URL (experimental)
   --print            # Print the entry to paste, and run nothing
 `;
 
@@ -64,6 +68,8 @@ const authParseError = (error: unknown): string =>
 export const COMMAND_TREE: CommandGroup = {
   path: [], help: HELP, version: cliVersion,
   children: [
+    command({ path: ["uninstall"], help: UNINSTALL_HELP, options: UNINSTALL_OPTIONS, positionals: false,
+      run: (args, io, options) => uninstallCommand(args, io, options.uninstallHost) }),
     command({ path: ["update"], help: UPDATE_HELP, options: {}, positionals: false,
       argumentError: args => args.length === 0 ? undefined : `expected no arguments, got ${JSON.stringify(args[0])}`,
       run: (_args, io, options) => updateCommand(io, options.updateHost) }),

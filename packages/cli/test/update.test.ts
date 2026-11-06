@@ -170,7 +170,7 @@ describe("ub update on Homebrew", () => {
   ])("keeps stdout empty when brew %s fails", async (command, step) => {
     const host = homebrewHost(formulaInfo("0.41.0"), formulaInfo("0.42.0"));
     if (step === 2) host.run.mockResolvedValueOnce(null);
-    host.run.mockResolvedValueOnce(`\`brew ${command}\` exited 1`);
+    host.run.mockResolvedValueOnce({ status: 1, message: `\`brew ${command}\` exited 1` });
     const io = recorder();
 
     expect(await updateCommand([], io, host)).toBe(1);
@@ -245,6 +245,11 @@ describe("ub update on a checkout", () => {
 });
 
 describe("the commands ub update spawns", () => {
+  it("preserves a failed child command's exit status", async () => {
+    expect(await processHost().run(process.execPath, ["-e", "process.exit(23)"]))
+      .toMatchObject({ status: 23, message: expect.stringContaining("exited 23") });
+  });
+
   it("passes a signal on to the child it is waiting for", async () => {
     const host = processHost();
     // Outlives the signal window, so a run that forwards nothing gives a
@@ -254,6 +259,6 @@ describe("the commands ub update spawns", () => {
     process.emit("SIGINT", "SIGINT");
 
     // Emitting the event exercises forwarding without terminating Vitest.
-    expect(await running).toMatch(/was killed by SIGINT/);
+    expect(await running).toMatchObject({ status: 130, message: expect.stringMatching(/was killed by SIGINT/) });
   });
 });

@@ -38,6 +38,8 @@ const osSensitive = [
   "storage",
   "storage-layout",
   "update",
+  "uninstall",
+  "uninstall-lifecycle",
   "workspace",
   "workspace-binding-guard",
   "workspace-create",

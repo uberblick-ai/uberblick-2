@@ -266,7 +266,7 @@ function ghostRuns(ghosts: readonly RowGhost[]): RowGhost[][] {
  * below slide up in step. The copy is inert and removed when it ends or the
  * sides rebuild again.
  */
-function foldAway(side: Element, ghosts: readonly RowGhost[]): void {
+function foldAway(side: Element, ghosts: readonly RowGhost[], animateRow: typeof animate): void {
   const host = side.parentElement;
   if (host === null) return;
   const present = new Set(rowStarts(side).map((start) => start.dataset.key));
@@ -286,7 +286,7 @@ function foldAway(side: Element, ghosts: readonly RowGhost[]): void {
     ghost.style.height = `${last.bottom - first.top}px`;
     ghost.append(...run.flatMap((entry) => entry.copy));
     host.append(ghost);
-    const animation = animate(ghost, [{ height: `${last.bottom - first.top}px`, opacity: 1 }, { opacity: 0, offset: 0.4 }, { height: `${Math.max(0, target)}px`, opacity: 0 }],
+    const animation = animateRow(ghost, [{ height: `${last.bottom - first.top}px`, opacity: 1 }, { opacity: 0, offset: 0.4 }, { height: `${Math.max(0, target)}px`, opacity: 0 }],
       { duration: FOLD_MOTION, easing: REVISION_EASE, fill: "forwards" });
     if (animation === null) ghost.remove();
     else animation.onfinish = () => ghost.remove();
@@ -299,8 +299,18 @@ function foldAway(side: Element, ghosts: readonly RowGhost[]): void {
  * stand, and rows that folded away close into their bar. Both sides move by
  * the same amount, so rows stay paired.
  */
-export function animateRows(sides: readonly Element[], previous: RowSnapshot, viewport: Element): void {
+export function animateRows(sides: readonly Element[], previous: RowSnapshot, viewport: Element, timing: "immediate" | "next-frame" = "immediate"): void {
   if (reducedMotion() || previous.positions.size === 0) return;
+  const animations: { element: Element; animation: Animation }[] = [];
+  const run: typeof animate = (element, keyframes, options) => {
+    const animation = animate(element, keyframes, options);
+    if (timing === "next-frame" && animation !== null && animation.playState === "running") {
+      animation.pause();
+      animation.currentTime = 0;
+      animations.push({ element, animation });
+    }
+    return animation;
+  };
   const near = nearView(viewport);
   sides.forEach((side, index) => {
     let shift = 0;
@@ -315,8 +325,15 @@ export function animateRows(sides: readonly Element[], previous: RowSnapshot, vi
       const keyframes: Keyframe[] = fresh
         ? [{ transform: `translateY(${shift}px)`, opacity: 0 }, { opacity: 0, offset: 0.35 }, { transform: "none", opacity: 1 }]
         : [{ transform: `translateY(${shift}px)` }, { transform: "none" }];
-      for (const element of rowElements(start)) animate(element, keyframes, { duration: FOLD_MOTION, easing: REVISION_EASE });
+      for (const element of rowElements(start)) run(element, keyframes, { duration: FOLD_MOTION, easing: REVISION_EASE });
     }
-    foldAway(side, previous.ghosts[index] ?? []);
+    foldAway(side, previous.ghosts[index] ?? [], run);
+  });
+  // WebKit can backdate autoplay to the tick before a long opening task.
+  // Hold the first keyframe until the opening can render; interrupted motion stays interrupted.
+  if (timing === "next-frame") requestAnimationFrame(() => {
+    for (const { element, animation } of animations) {
+      if (element.isConnected && animation.playState === "paused" && animation.currentTime === 0) animation.play();
+    }
   });
 }

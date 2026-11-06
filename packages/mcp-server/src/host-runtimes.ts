@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import { utimesSync } from "node:fs";
 import { join } from "node:path";
 import { resolveMcpConfig } from "./config.js";
 import { DEFAULT_HOST_LIMITS, ensureHostDiskCapacity } from "./host-capacity.js";
+import { hostGrantHash } from "./host-grants.js";
 import type { HostSession, McpHostConfig, McpHostDependencies } from "./http-host.js";
 import { log } from "./log.js";
 import { createMcpRuntime, type UberblickMcpRuntime } from "./server.js";
@@ -18,6 +18,12 @@ export interface HostRuntime {
   lastUsedAt: number;
   sessions: Set<HostSession>;
   admissions: number;
+  closing?: Promise<void>;
+}
+
+interface HostGrantLifecycle {
+  ready(): Promise<void>;
+  hasEnded(grantId: string): boolean;
 }
 
 export class HostFullError extends Error {}
@@ -30,6 +36,7 @@ export class HostRuntimes {
   private readonly allRuntimes = new Set<HostRuntime>();
   private readonly retired = new Set<Promise<void>>();
   private readonly excludedDirectories = new Set<string>();
+  private readonly endedGrants = new Set<string>();
   private diskAdmission = Promise.resolve();
   readonly limits;
   readonly now;
@@ -39,6 +46,7 @@ export class HostRuntimes {
     private readonly dependencies: McpHostDependencies,
     private readonly closeSession: (record: HostSession) => Promise<void>,
     private readonly isStopping: () => boolean,
+    private readonly grants?: HostGrantLifecycle,
   ) {
     this.limits = { ...DEFAULT_HOST_LIMITS, ...config.limits };
     this.now = dependencies.now ?? (() => performance.now());
@@ -58,22 +66,40 @@ export class HostRuntimes {
     }
   }
 
-  private retire(record: HostRuntime): void {
-    this.runtimes.delete(record.grantId);
-    for (const session of record.sessions) void this.closeSession(session);
-    const drained = record.runtime?.close();
-    const closingRuntime = Promise.resolve(drained).then(() => {
+  private retire(record: HostRuntime, deadline?: number): Promise<void> {
+    if (record.closing !== undefined) return record.closing;
+    if (this.runtimes.get(record.grantId) === record) this.runtimes.delete(record.grantId);
+    const sessionsClosed = Promise.all([...record.sessions].map(this.closeSession));
+    const drained = record.runtime?.close(deadline);
+    const closingRuntime = Promise.resolve().then(async () => {
+      await sessionsClosed;
+      if (drained !== undefined) await drained;
+      else await (await record.opening.catch(() => undefined))?.close(deadline);
       this.touchDirectory(record);
       this.allRuntimes.delete(record);
       if (![...this.allRuntimes].some(other => other.directory === record.directory)) {
         this.excludedDirectories.delete(record.directory);
       }
-    }).catch(() => {
-      log.error("MCP host runtime close failed");
     }).finally(() => {
       this.retired.delete(closingRuntime);
     });
+    record.closing = closingRuntime;
     this.retired.add(closingRuntime);
+    void closingRuntime.catch(() => { log.error("MCP host runtime close failed"); });
+    return closingRuntime;
+  }
+
+  async retireGrant(grantId: string): Promise<void> {
+    this.endedGrants.add(grantId);
+    const records = [...this.allRuntimes].filter(record => record.grantId === grantId);
+    // Older generations can still own an open log after an idle replacement starts.
+    await Promise.all(records.map(record => this.retire(record, performance.now())));
+  }
+
+  private assertAvailable(grantId: string): void {
+    if (this.isStopping() || this.endedGrants.has(grantId) || this.grants?.hasEnded(grantId)) {
+      throw new ServerShuttingDownError();
+    }
   }
 
   async sweepIdle(): Promise<void> {
@@ -90,23 +116,25 @@ export class HostRuntimes {
       if (record.runtime === undefined || record.admissions > 0 || record.lastActivity > cutoff) continue;
       if ([...record.sessions].some(session => session.requests > 0 || session.session.activeCalls > 0)) continue;
       if (record.runtime.store.pendingRooms().length > 0) continue;
-      this.retire(record);
+      void this.retire(record);
     }
     await Promise.all(closedSessions);
   }
 
   runtimeFor(grant: McpHostGrant): HostRuntime {
+    this.assertAvailable(grant.grantId);
     const existing = this.runtimes.get(grant.grantId);
     if (existing !== undefined) return existing;
     if (this.runtimes.size >= this.limits.maxRuntimes) throw new HostFullError();
-    const grantPath = createHash("sha256").update(grant.grantId).digest("hex");
+    const grantPath = hostGrantHash(grant.grantId);
     const directory = join(this.config.databaseDirectory, grantPath);
     const record: HostRuntime = {
       grantId: grant.grantId, directory, lastActivity: this.now(), lastUsedAt: Date.now(), sessions: new Set(), admissions: 0,
       opening: Promise.resolve().then(async () => {
-        if (this.isStopping()) throw new ServerShuttingDownError();
+        await this.grants?.ready();
+        this.assertAvailable(grant.grantId);
         const credentials = await this.dependencies.credentialsForGrant?.(grant);
-        if (this.isStopping()) throw new ServerShuttingDownError();
+        this.assertAvailable(grant.grantId);
         if (credentials === undefined) throw new Error("Grant credentials are unavailable");
         // Keep the free-space check and synchronous open in one serialized turn.
         const opening = this.diskAdmission.then(async () => {
@@ -119,7 +147,7 @@ export class HostRuntimes {
             excludedDirectories: protectedDirectories,
             ...(this.dependencies.freeSpace === undefined ? {} : { freeSpace: this.dependencies.freeSpace }),
           });
-          if (this.isStopping()) throw new ServerShuttingDownError();
+          this.assertAvailable(grant.grantId);
           if (!enoughSpace) throw new HostFullError();
           const runtimeConfig = resolveMcpConfig({
             WORKSPACE_ID: grant.workspace,

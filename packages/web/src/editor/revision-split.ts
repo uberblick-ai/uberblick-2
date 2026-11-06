@@ -8,7 +8,7 @@ import { Editor, Extension } from "@tiptap/core";
 import type { JSONContent } from "@tiptap/core";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { AllSelection, Plugin, PluginKey } from "@tiptap/pm/state";
+import { AllSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
 import { compareJsonSources, compareRevisions } from "@uberblick/schema";
@@ -228,6 +228,43 @@ function foldRows(rows: readonly RevisionRow[], left: readonly PMNode[], right: 
 
 const revisionRows = new PluginKey<readonly RevisionRow[]>("revisionSideRows");
 
+function retainSideDrag(view: EditorView): { destroy: () => void } {
+  const root = view.dom.ownerDocument;
+  let press: MouseEvent | null = null;
+  const start = (event: MouseEvent): void => {
+    press = !event.defaultPrevented && event.button === 0 && event.detail === 1 && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey &&
+      event.target instanceof Element && view.dom.contains(event.target) && event.target.closest('[contenteditable="false"]') === null ? event : null;
+  };
+  const release = (event: MouseEvent): void => {
+    const started = press;
+    press = null;
+    if (started === null || event.button !== 0 || view.composing || !view.hasFocus() ||
+      Math.abs(started.clientX - event.clientX) <= 4 && Math.abs(started.clientY - event.clientY) <= 4) return;
+    const bounds = view.dom.getBoundingClientRect();
+    if (event.clientX >= bounds.left && event.clientX <= bounds.right) return;
+    const native = root.getSelection();
+    if (native?.rangeCount !== 1 || native.isCollapsed || native.anchorNode === null || native.focusNode === null ||
+      !view.dom.contains(native.anchorNode) || !view.dom.contains(native.focusNode)) return;
+    for (const node of [native.anchorNode, native.focusNode]) {
+      const element = node.nodeType === 1 ? node as Element : node.parentElement;
+      if (element?.closest('[contenteditable="false"]') !== null) return;
+    }
+    const anchor = view.posAtDOM(native.anchorNode, native.anchorOffset, 1);
+    const head = view.posAtDOM(native.focusNode, native.focusOffset, 1);
+    if (anchor === head || !view.state.doc.resolve(anchor).parent.inlineContent || !view.state.doc.resolve(head).parent.inlineContent) return;
+    const selection = TextSelection.create(view.state.doc, anchor, head);
+    // Chromium can mark a native drag as observed without importing it before release.
+    // Commit its range before the framework's deferred selection write restores stale state.
+    if (!selection.eq(view.state.selection)) view.dispatch(view.state.tr.setSelection(selection).setMeta("pointer", true));
+  };
+  root.addEventListener("mousedown", start);
+  root.addEventListener("mouseup", release, true);
+  return { destroy: () => {
+    root.removeEventListener("mousedown", start);
+    root.removeEventListener("mouseup", release, true);
+  } };
+}
+
 /** Side-scoped interaction and row widgets: captions and the spacers the aligner sizes. */
 function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docLinks: DocLinkContext | null): Extension {
   return Extension.create({
@@ -244,6 +281,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
           apply: (transaction, current) => transaction.getMeta(revisionRows) ?? current,
         },
         filterTransaction: (transaction) => !transaction.docChanged || transaction.getMeta(revisionRows) !== undefined,
+        view: retainSideDrag,
         props: {
           handleDOMEvents: revisionNativeKeyboardEvents,
           transformCopied: (slice) => new Slice(copiedContent(slice.content), slice.openStart, slice.openEnd),

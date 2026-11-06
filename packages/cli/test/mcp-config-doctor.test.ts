@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { claudeDoctorEntries, DEFAULT_ENTRY, doctorEntry, snippet, type TargetFile } from "../src/mcp-config.js";
+import { claudeDoctorEntries, DEFAULT_ENTRY, doctorEntry, presence, snippet, type TargetFile } from "../src/mcp-config.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -74,6 +74,30 @@ describe("doctor's MCP config reads", () => {
       '[other]\ninstructions = """\nUnrelated multiline setting.\n"""\n' +
       'large_integer = 9007199254740993\n';
     expect(doctorEntry(config(text, "toml"))).toEqual({ status: "entry", env: {} });
+  });
+
+  it.each(["json", "toml"] as const)("recognises remote %s entries as pin-free while preserving different registrations", (format) => {
+    const entry = { name: "uberblick", url: "https://hub.example.test/mcp/workspace" };
+    const valid = snippet(format, entry, "claude");
+    const file = config(valid, format);
+    // Codex has no type field; Claude writes type: http.
+    const installed = format === "toml" ? snippet(format, entry) : valid;
+    writeFileSync(file.path, installed);
+    expect(doctorEntry(file)).toEqual({ status: "entry", env: {} });
+    expect(presence(file, entry)).toBe("ours");
+    expect(presence(file, DEFAULT_ENTRY)).toBe("foreign");
+    const fields: Record<string, unknown>[] = [
+      { url: `${entry.url}-other` }, { url: entry.url, env: {} },
+      { url: entry.url, command: "ub" }, { url: entry.url, headers: { Authorization: "SECRET" } },
+      { url: entry.url, bearer_token_env_var: "SECRET" },
+    ];
+    for (const held of fields) {
+      writeFileSync(file.path, format === "json"
+        ? JSON.stringify({ mcpServers: { uberblick: held } })
+        : '[mcp_servers.uberblick]\n' + Object.entries(held).map(([key, value]) =>
+          `${key} = ${typeof value === "object" ? "{}" : JSON.stringify(value)}\n`).join(""));
+      expect(presence(file, entry)).toBe("foreign");
+    }
   });
 
   it.each([

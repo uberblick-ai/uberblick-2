@@ -10,6 +10,7 @@ type AccessLevel = "read-only" | "read-write";
 interface PendingRequest {
   clientName: string;
   redirectHost: string;
+  redirectScheme?: string;
   workspaceId: string;
   workspaceName: string | null;
   accessLevels: AccessLevel[];
@@ -23,10 +24,12 @@ const NO_CLAIM = (): void => {};
 function pendingRequest(body: Record<string, unknown>): PendingRequest {
   if (body.status !== "pending" || typeof body.clientName !== "string" ||
       typeof body.redirectHost !== "string" || typeof body.workspaceId !== "string" ||
+      (body.redirectScheme !== undefined && (typeof body.redirectScheme !== "string" || body.redirectScheme === "")) ||
       (body.workspaceName !== null && typeof body.workspaceName !== "string") ||
       !Array.isArray(body.accessLevels) || body.accessLevels[0] !== "read-only" ||
       !(body.accessLevels.length === 1 || (body.accessLevels.length === 2 && body.accessLevels[1] === "read-write"))) throw new Error();
   return { clientName: body.clientName, redirectHost: body.redirectHost,
+    ...(body.redirectScheme === undefined ? {} : { redirectScheme: body.redirectScheme }),
     workspaceId: body.workspaceId, workspaceName: body.workspaceName, accessLevels: body.accessLevels };
 }
 
@@ -111,14 +114,14 @@ function ConsentRequest({ requestId, token, signedOut, onBusy }: {
   </>;
   if (reading.status !== "pending") return <p role="status">Returning to the agent…</p>;
   const request = reading.request;
-  const loopback = isLoopbackHost(new URL(`http://${request.redirectHost}`).hostname);
+  const localApp = request.redirectScheme !== undefined || isLoopbackHost(new URL(`http://${request.redirectHost}`).hostname);
   return <section className="mt-6 space-y-4" aria-label="Agent request">
     <dl className="space-y-3">
       <div><dt className="font-semibold">Agent</dt><dd className="break-all">{request.clientName}</dd></div>
-      <div><dt className="font-semibold">Browser returns to</dt><dd className="break-all">{request.redirectHost}</dd></div>
+      <div><dt className="font-semibold">Browser returns to</dt><dd className="break-all">{request.redirectScheme ?? request.redirectHost}</dd></div>
       <div><dt className="font-semibold">Workspace</dt><dd className="break-all">{request.workspaceName ?? request.workspaceId}</dd></div>
     </dl>
-    {loopback && <p>The browser returns to an app on this computer. Approve only if you started this from an agent on this computer.</p>}
+    {localApp && <p>The browser returns to an app on this computer. Approve only if you started this from an agent on this computer.</p>}
     <div className="space-y-2">
       <label className="block font-semibold" htmlFor="agent-access">Access</label>
       <NativeSelect id="agent-access" value={accessLevel} disabled={busy}

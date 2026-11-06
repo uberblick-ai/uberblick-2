@@ -40,7 +40,7 @@ export { captureWorkspaceDetachGeneration } from "./workspace-generation.js";
 export { parseHistoryRetention } from "./local-settings.js";
 export type { HistoryRetention, WorkspaceSize } from "./local-settings.js";
 export { createMcpRuntime, createMcpServer } from "./server.js";
-export type { McpRuntimeOptions, UberblickMcpRuntime, UberblickMcpServer, UberblickMcpSession } from "./server.js";
+export type { McpRuntimeOptions, McpSessionOptions, UberblickMcpRuntime, UberblickMcpServer, UberblickMcpSession } from "./server.js";
 export { createLocalCredentialProvider } from "./credential-provider.js";
 export type { CredentialEnsureOptions, CredentialProvider } from "./credential-provider.js";
 export { createMcpHost } from "./http-host.js";

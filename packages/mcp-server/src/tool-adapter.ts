@@ -4,15 +4,17 @@ import type { OperationRequest } from "./tools/operation.js";
 import type { ToolContext } from "./tools/context.js";
 import { toFailure } from "./failures.js";
 import { writeAcknowledgement } from "./write-acknowledgement.js";
+import { ImageResult } from "./tools/image-result.js";
 
 /**
  * Both wire answers carry the same JSON; failures stay text-only. The text copy
  * is compact because clients that show both pay for it twice.
  */
-export function toolResult(payload: object, isError = false): CallToolResult {
+export function toolResult(payload: object, isError = false, image?: ImageResult["image"]): CallToolResult {
   return {
     ...(isError ? { isError: true } : {}),
-    content: [{ type: "text", text: JSON.stringify(payload) }],
+    content: [{ type: "text", text: JSON.stringify(payload) },
+      ...(!isError && image ? [{ type: "image" as const, ...image }] : [])],
     ...(isError ? {} : { structuredContent: { ...payload } }),
   };
 }
@@ -46,13 +48,16 @@ export function guarded(
         const acknowledgement = waitForWriteAcknowledgement && tool.writes !== null
           ? writeAcknowledgement(context) : null;
         let payload: object;
+        let image: ImageResult["image"] | undefined;
         let isError = false;
         try {
-          payload = await tool.operation(acknowledgement?.context ?? context, args, {
+          const result = await tool.operation(acknowledgement?.context ?? context, args, {
             signal: extra.signal,
             ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
             ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
           });
+          payload = result instanceof ImageResult ? result.payload : result;
+          image = result instanceof ImageResult ? result.image : undefined;
         } catch (error) {
           const failure = toFailure(tool, error);
           payload = failure.payload;
@@ -66,7 +71,7 @@ export function guarded(
             throw new Error(`Output validation failed for ${tool.name}: ${parsed.error.message}`);
           }
         }
-        return toolResult(payload, isError);
+        return toolResult(payload, isError, image);
       });
     } catch (error) {
       const failure = toFailure(tool, error);

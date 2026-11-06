@@ -224,28 +224,38 @@ it("rechecks background priority at send time while foreground history remains a
   expect(requests).toHaveLength(2);
 });
 
-it.each(["directory", "document"] as const)("refuses decision history known through the %s before sending any client request", async source => {
-  const opened = workspace();
-  const uuid = randomUUID();
+it.each(["directory", "document"] as const)("uses the revision transport for a decision known through the %s", async source => {
+  const { opened, uuid, replica, reply } = await admitted();
   const topic = randomUUID();
   if (source === "directory") {
     upsertDirectoryEntry(opened.replicas.directory().doc, { uuid, title: "Decision", kind: "decision", topic, status: "open" });
   } else {
-    const doc = opened.replicas.replica(uuid).doc;
-    initDoc(doc, { uuid, title: "Decision" });
-    getMetaMap(doc).set("kind", "decision");
-    getMetaMap(doc).set("topic", topic);
+    getMetaMap(replica.doc).set("kind", "decision");
+    getMetaMap(replica.doc).set("topic", topic);
   }
-  const request = vi.spyOn(opened.replicas.sync, "requestRevisions");
-  const expected = { code: "decision-no-history", details: { uuid, topic } };
-  await expect(readDocumentHistory(opened.replicas, uuid)).rejects.toMatchObject(expected);
-  await expect(readDocumentRevision(opened.replicas, uuid, "earlier")).rejects.toMatchObject(expected);
-  await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum: "unused" }))
-    .rejects.toMatchObject(expected);
+  expect(await opened.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+  const checksum = documentRevisionChecksum(replica.doc);
+  const entry = { id: "earlier", author: null, startedAt: 100, endedAt: 200, checksum,
+    name: { text: "Reviewed", namer: null, namedAt: 200, canManage: true } };
+  const requests: RevisionRequest[] = [];
+  reply((request, send) => {
+    requests.push(request);
+    if (request.operation === "list") send({ requestId: request.requestId, ok: true, revisions: [entry] });
+    else if (request.operation === "get") send({ requestId: request.requestId, ok: true,
+      state: Y.encodeStateAsUpdate(replica.doc), revisionId: entry.id, checksum });
+    else if (request.operation === "restore") send({ requestId: request.requestId, ok: true, revision: entry, applied: true });
+    else send({ requestId: request.requestId, ok: true, revision: entry });
+  });
+  await expect(readDocumentHistory(opened.replicas, uuid)).resolves.toMatchObject({ revisions: [entry] });
+  const read = await readDocumentRevision(opened.replicas, uuid, entry.id);
+  try { expect(getMeta(read.doc).title).toBe("Current document"); }
+  finally { read.doc.destroy(); }
+  await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum,
+    surface: { kind: "mcp", name: "Codex" } }))
+    .resolves.toEqual(entry);
   await expect(restoreDocumentRevision(opened.replicas, uuid, { operation: "restore", revisionId: "earlier",
-    checksum: "unused", surface: { kind: "mcp", name: "Codex" } })).rejects.toMatchObject(expected);
-  expect(request).not.toHaveBeenCalled();
-  expect(opened.replicas.hydrated(uuid)).toBe(source === "document");
+    checksum, surface: { kind: "mcp", name: "Codex" } })).resolves.toEqual({ revision: entry, applied: true });
+  expect(requests.map(request => request.operation)).toEqual(["list", "get", "name", "restore"]);
 });
 
 it("preserves independent names and titles options at the revision transport boundary", async () => {

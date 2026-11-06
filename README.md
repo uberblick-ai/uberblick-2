@@ -142,6 +142,12 @@ ub mcp install codex
 For another MCP client, `ub mcp install <client> --print` prints the entry to
 add yourself. Restart the client afterwards.
 
+To uninstall, run `ub uninstall`. It shows this computer's workspaces and
+logins, then asks whether to remove Uberblick and whether to delete that local
+data. `brew uninstall uberblick-ai/tap/uberblick` removes only the program and
+keeps the data in `~/.local/share/uberblick/` and `~/.config/uberblick/` (or your
+absolute XDG roots). MCP client registrations stay in place.
+
 <details>
 <summary>Verify the download's build provenance</summary>
 

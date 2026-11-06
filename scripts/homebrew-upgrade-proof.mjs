@@ -203,7 +203,8 @@ try {
 
 	// The upgraded copy is a working install, not merely a present one: the
 	// formula proof's own journeys, on a home this workspace never touched.
-	const smokeEnv = { ...process.env };
+	// Keep fixture trust in Homebrew while Uberblick receives fresh XDG roots.
+	const smokeEnv = { ...process.env, HOMEBREW_XDG_CONFIG_HOME: configHome };
 	for (const key of ["XDG_CONFIG_HOME", "XDG_DATA_HOME"]) delete smokeEnv[key];
 	run("node", [join(REPOSITORY_ROOT, "scripts", "homebrew-formula-proof.mjs"), FORMULA, upgradedVersion, tapFormulaPath], {
 		env: smokeEnv,

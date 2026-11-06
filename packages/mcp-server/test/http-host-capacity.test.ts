@@ -3,6 +3,10 @@ import { once } from "node:events";
 import { statSync } from "node:fs";
 import { request, type ClientRequest, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { ProgressNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
@@ -15,6 +19,7 @@ import { cleanupTestResources, tempDir, waitUntil, WORKSPACE } from "./helpers.j
 type Hub = Awaited<ReturnType<typeof startDeviceSyncHub>>;
 const hosts: ReturnType<typeof createMcpHost>[] = [];
 const hubs: Hub[] = [];
+const clients: Client[] = [];
 const requests: ClientRequest[] = [];
 const releases: Array<() => void> = [];
 const pending: Promise<unknown>[] = [];
@@ -25,6 +30,7 @@ afterEach(async () => {
   for (const outgoing of requests.splice(0)) outgoing.destroy();
   try {
     await cleanupTestResources({
+      clients: clients.splice(0).map(client => () => client.close()),
       peers: hosts.splice(0).map(host => () => host.close()),
       hubs: hubs.splice(0).map(hub => () => hub.close()),
       after: [async () => { await Promise.allSettled(pending.splice(0)); }],
@@ -71,12 +77,19 @@ async function fixture(limits: McpHostConfig["limits"] = {}, hub?: Hub, freeSpac
   const checkToken = vi.fn(async (token: string) => ({ status: "positive" as const, ...grants.get(token)! }));
   const credentialsForGrant = vi.fn(async (grant: McpHostGrant) => credentials.get(grant.grantId)!);
   const runtimes: serverModule.UberblickMcpRuntime[] = [];
+  const sessions: serverModule.UberblickMcpSession[] = [];
   const createRuntime = serverModule.createMcpRuntime;
   const opening = vi.spyOn(serverModule, "createMcpRuntime").mockImplementation((config, options) => {
     const runtime = createRuntime({ ...config, ...(hub === undefined ? { localWorkspace: true } : {
       connectTimeoutMs: 1_000, syncTimeoutMs: 1_000,
     }) }, options);
     runtimes.push(runtime);
+    const openSession = runtime.openSession.bind(runtime);
+    vi.spyOn(runtime, "openSession").mockImplementation((...args) => {
+      const session = openSession(...args);
+      sessions.push(session);
+      return session;
+    });
     return runtime;
   });
   const host = createMcpHost({
@@ -125,7 +138,7 @@ async function fixture(limits: McpHostConfig["limits"] = {}, hub?: Hub, freeSpac
     await response.text();
     return response;
   }
-  return { host, url, opening, runtimes, checkToken, credentialsForGrant, credentials, grants, responses,
+  return { host, url, opening, runtimes, sessions, checkToken, credentialsForGrant, credentials, grants, responses,
     send, initialize, call, ok, listed, advance: (value: number) => { now = value; } };
 }
 
@@ -210,7 +223,7 @@ it("refuses a new runtime below the disk threshold while existing sessions keep 
   expect(rig.opening).toHaveBeenCalledTimes(1);
 });
 
-it("keeps a call slot until disconnected work finishes and refuses excess writes without applying them", async () => {
+it("caps disconnected tool calls and excess writes while initialization and tool discovery remain available", async () => {
   const rig = await fixture({ maxCalls: 1 });
   const one = await rig.initialize();
   const two = await rig.initialize("second");
@@ -234,12 +247,17 @@ it("keeps a call slot until disconnected work finishes and refuses excess writes
   const otherGrant = await rig.call("second", two.id, "create_doc", { title: "Refused other grant", description: "Host-wide call cap." });
   expectFull(otherGrant);
   await otherGrant.text();
-  expectFull((await rig.initialize("third")).response);
-  expect(rig.opening).toHaveBeenCalledTimes(2);
+  const third = await rig.initialize("third");
+  expect(third.response.status).toBe(200);
+  expect((await rig.listed("third", third.id)).status).toBe(200);
+  const thirdWrite = await rig.call("third", third.id, "create_doc", { title: "Also refused", description: "Initialization needs no call slot." });
+  expectFull(thirdWrite);
+  await thirdWrite.text();
+  expect(rig.opening).toHaveBeenCalledTimes(3);
   expect(getMeta(runtime.replicas.replica(created.uuid).doc).title).toBe("Before");
   rig.advance(IDLE_MS);
   await rig.host.sweepIdle();
-  expect(rig.runtimes).toHaveLength(2);
+  expect(rig.runtimes).toHaveLength(3);
   held.release();
   await write;
   await waitUntil("the disconnected write to finish", () => getMeta(runtime.replicas.replica(created.uuid).doc).title === "Admitted");
@@ -259,8 +277,96 @@ it("releases a completed call's slot while another call in its session remains b
   await held.entered;
   expect((await rig.listed("first", one.id)).status).toBe(200);
   expect((await rig.listed("second", two.id)).status).toBe(200);
+  expect(await rig.ok("first", one.id, "get_help")).toHaveProperty("topics");
+  expect(await rig.ok("second", two.id, "get_help")).toHaveProperty("topics");
   held.release();
   await busy;
+});
+
+it("keeps a DELETE-closed session's call slot until its admitted handler finishes", async () => {
+  const rig = await fixture({ maxCalls: 1 });
+  const one = await rig.initialize();
+  const two = await rig.initialize("second");
+  const runtime = rig.runtimes[0]!;
+  const session = rig.sessions[0]!;
+  const held = gate();
+  const settle = runtime.replicas.settle.bind(runtime.replicas);
+  vi.spyOn(runtime.replicas, "settle").mockImplementationOnce(async (...args) => { await held.wait(); return settle(...args); });
+  const busy = rig.call("first", one.id, "list_docs").then(response => response.text());
+  pending.push(busy);
+  await held.entered;
+  const post = rig.responses.at(-1)!;
+  const finishedPost = once(post, "finish");
+  const closingSession = vi.spyOn(session, "close");
+  const deletion = rig.send("first", one.id, undefined, "DELETE").then(async response => {
+    expect(response.status).toBe(200);
+    await response.text();
+  });
+  pending.push(deletion);
+  await waitUntil("DELETE to stop the admitted session", () => closingSession.mock.calls.length > 0);
+  await finishedPost;
+  await busy;
+  expect(post.writableFinished).toBe(true);
+  expect(session.activeCalls).toBe(1);
+  const refused = await rig.call("second", two.id, "get_help");
+  expectFull(refused);
+  await refused.text();
+  held.release();
+  await session.drain();
+  await deletion;
+  expect(await rig.ok("second", two.id, "get_help")).toHaveProperty("topics");
+});
+
+it("releases a cancelled SDK call after its handler finishes and then evicts its idle clean runtime", async () => {
+  const rig = await liveFixture({ maxCalls: 1, maxRuntimes: 2 });
+  let acceptCancellation!: () => void;
+  const cancellationAccepted = new Promise<void>(resolve => { acceptCancellation = resolve; });
+  const transport = new StreamableHTTPClientTransport(rig.url, {
+    requestInit: { headers: { Authorization: "Bearer first" } },
+    fetch: async (url, init) => {
+      const response = await fetch(url, init);
+      if (typeof init?.body === "string" && JSON.parse(init.body).method === "notifications/cancelled") {
+        expect(response.status).toBe(202);
+        acceptCancellation();
+      }
+      return response;
+    },
+  });
+  const client = new Client({ name: "capacity-cancellation", version: "1" });
+  clients.push(client);
+  await client.connect(transport as Transport);
+  const one = transport.sessionId!;
+  const two = await rig.initialize("second");
+  const runtime = rig.runtimes[0]!;
+  const session = rig.sessions[0]!;
+  await waitUntil("both cancellation fixture seeds to be acknowledged", () =>
+    rig.runtimes.every(item => item.store.pendingRooms().length === 0));
+  const close = vi.spyOn(runtime, "close");
+  const storeClose = vi.spyOn(runtime.store, "close");
+  const held = gate();
+  const settle = runtime.replicas.settle.bind(runtime.replicas);
+  vi.spyOn(runtime.replicas, "settle").mockImplementationOnce(async (...args) => { await held.wait(); return settle(...args); });
+  const abort = new AbortController();
+  const cancelled = client.callTool({ name: "list_docs", arguments: {} }, undefined, { signal: abort.signal })
+    .catch((error: unknown) => error);
+  pending.push(cancelled);
+  await held.entered;
+  abort.abort();
+  await cancellationAccepted;
+  expect(await cancelled).toBeInstanceOf(Error);
+  expect(session.activeCalls).toBe(1);
+  const refused = await rig.call("second", two.id, "get_help");
+  expectFull(refused);
+  await refused.text();
+  held.release();
+  await session.drain();
+  expect(session.activeCalls).toBe(0);
+  expect(await rig.ok("second", two.id, "get_help")).toHaveProperty("topics");
+  rig.advance(IDLE_MS);
+  await rig.host.sweepIdle();
+  expect((await rig.listed("first", one)).status).toBe(404);
+  await waitUntil("the cancelled call's clean runtime to release its mirror", () => storeClose.mock.calls.length === 1);
+  expect(close).toHaveBeenCalledTimes(1);
 });
 
 it("reserves every request in a batch before any of its writes starts", async () => {
@@ -274,6 +380,96 @@ it("reserves every request in a batch before any of its writes starts", async ()
   expectFull(response);
   await response.text();
   expect((await rig.ok("first", one.id, "get_doc", { uuid: created.uuid })).title).toBe("Before batch");
+});
+
+it("leaves no call reservation after malformed, unknown-tool and unsupported-task requests", async () => {
+  const rig = await fixture({ maxCalls: 1 });
+  const one = await rig.initialize();
+  for (const [index, params] of [
+    { arguments: {} },
+    { name: "unknown_capacity_test_tool", arguments: {} },
+    { name: "get_help", arguments: {}, task: { ttl: 1_000 } },
+  ].entries()) {
+    const response = await rig.send("first", one.id, { jsonrpc: "2.0", id: 1_000 + index, method: "tools/call", params });
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    const event = body.split("\n").find(line => line.startsWith("data: "));
+    expect(event).toBeDefined();
+    const answer = JSON.parse(event!.slice(6));
+    expect(answer.error !== undefined || answer.result?.isError === true).toBe(true);
+    expect(await rig.ok("first", one.id, "get_help")).toHaveProperty("topics");
+  }
+});
+
+it("refuses duplicate batch and active call IDs without disturbing the admitted call", async () => {
+  const rig = await fixture({ maxCalls: 2 });
+  const one = await rig.initialize();
+  const two = await rig.initialize("second");
+  const call = { jsonrpc: "2.0", id: 2_001, method: "tools/call", params: { name: "get_help", arguments: {} } };
+  const duplicateBatch = await rig.send("first", one.id, [call, call]);
+  expect(duplicateBatch.status).toBe(400);
+  await duplicateBatch.text();
+  expect(await rig.ok("first", one.id, "get_help")).toHaveProperty("topics");
+  const runtime = rig.runtimes[0]!;
+  const session = rig.sessions[0]!;
+  const held = gate();
+  const settle = runtime.replicas.settle.bind(runtime.replicas);
+  vi.spyOn(runtime.replicas, "settle").mockImplementationOnce(async (...args) => { await held.wait(); return settle(...args); });
+  const busy = rig.send("first", one.id, { ...call, params: { name: "list_docs", arguments: {} } })
+    .then(response => response.text());
+  pending.push(busy);
+  await held.entered;
+  const duplicateActive = await rig.send("first", one.id, call);
+  expect(duplicateActive.status).toBe(400);
+  await duplicateActive.text();
+  expect(session.activeCalls).toBe(1);
+  expect(await rig.ok("second", two.id, "get_help")).toHaveProperty("topics");
+  held.release();
+  await busy;
+  await session.drain();
+  const reused = await rig.send("first", one.id, call);
+  expect(reused.status).toBe(200);
+  expect(await reused.text()).toContain('"topics"');
+});
+
+it("releases a reservation when cancellation arrives before its tool handler starts", async () => {
+  const rig = await fixture({ maxCalls: 1 });
+  const one = await rig.initialize();
+  const runtime = rig.runtimes[0]!;
+  const session = rig.sessions[0]!;
+  const order: string[] = [];
+  let observeCancellation!: () => void;
+  const cancellationObserved = new Promise<void>(resolve => { observeCancellation = resolve; });
+  session.server.server.setNotificationHandler(ProgressNotificationSchema, () => {
+    order.push("cancelled");
+    observeCancellation();
+  });
+  const held = gate();
+  const settle = runtime.replicas.settle.bind(runtime.replicas);
+  vi.spyOn(runtime.replicas, "settle").mockImplementationOnce(async (...args) => {
+    order.push("started");
+    await held.wait();
+    return settle(...args);
+  });
+  const abort = new AbortController();
+  releases.push(() => abort.abort());
+  const cancelled = rig.send("first", one.id, [
+    { jsonrpc: "2.0", id: 3_001, method: "tools/call", params: { name: "list_docs", arguments: {} } },
+    { jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 3_001 } },
+    { jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: "cancellation-observed", progress: 1 } },
+  ], "POST", abort.signal).then(response => response.text()).catch(() => {});
+  pending.push(cancelled);
+  await cancellationObserved;
+  await held.entered;
+  expect(order).toEqual(["cancelled", "started"]);
+  const refused = await rig.call("first", one.id, "get_help");
+  expectFull(refused);
+  await refused.text();
+  held.release();
+  await session.drain();
+  expect(await rig.ok("first", one.id, "get_help")).toHaveProperty("topics");
+  abort.abort();
+  await cancelled;
 });
 
 it("closes idle sessions despite a GET stream, while POST refreshes the grant's remaining session", async () => {

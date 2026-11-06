@@ -26,6 +26,22 @@
 		reverse_proxy hub:1234
 	}
 
+	handle /mcp/* {
+		reverse_proxy mcp:3001
+	}
+
+	handle /.well-known/oauth-protected-resource/* {
+		reverse_proxy mcp:3001
+	}
+
+	handle /oauth/* {
+		reverse_proxy hub:1234
+	}
+
+	handle /.well-known/oauth-authorization-server {
+		reverse_proxy hub:1234
+	}
+
 	handle {
 		import /etc/caddy/uberblick-csp.caddy
 		root * /srv

@@ -182,13 +182,13 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     const text = runUb(["workspace", "list"], box, env);
     expect(text.status, text.output).toBe(0);
     expect(text.stdout).toBe(
-      `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes  | https://hub.example.test\n  ${UNRELATED} |                | local\n`,
+      `* ${WORKSPACE} | Project notes  | https://hub.example.test\n  ${OTHER} | Research notes | local\n  ${UNRELATED} |                | local\n`,
     );
     const json = runUb(["workspace", "list", "--json"], box, env);
     expect(json.status, json.output).toBe(0);
     expect(JSON.parse(json.stdout)).toEqual([
-      { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`), hub: "local" },
       { uuid: WORKSPACE, name: "Project notes", active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: HUB },
+      { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`), hub: "local" },
       { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "local" },
     ]);
     expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(bindingBefore);
@@ -196,6 +196,39 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(recordsBefore);
     expect(databaseIds.map((uuid) => readFileSync(join(box.dataHome, "uberblick", `${uuid}.sqlite`))))
       .toEqual(databaseBefore);
+  });
+
+  it.each(["en_US.UTF-8", "tr_TR.UTF-8"])("sorts text and JSON by case-insensitive name with stable ID ties under %s", (locale) => {
+    const box = sandbox();
+    bind(box);
+    const named = [
+      [UNRELATED, "alpha"],
+      [WORKSPACE, "Beta"],
+      [OTHER, "gamma"],
+      ["77777777-1111-4222-8333-444455556666", "alpha"],
+      ["66666666-1111-4222-8333-444455556666", "ALPHA"],
+      ["88888888-1111-4222-8333-444455556666", "ibis"],
+      ["99999999-1111-4222-8333-444455556666", "Ibis"],
+    ] as const;
+    for (const [uuid, name] of named) {
+      storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: uuid }), name);
+    }
+    const unreadable = "00000000-1111-4222-8333-444455556666";
+    const unnamed = "ffffffff-1111-4222-8333-444455556666";
+    withDatabase(box, unreadable);
+    writeFileSync(join(box.dataHome, "uberblick", `${unreadable}.sqlite`), "not a SQLite database");
+    withDatabase(box, unnamed);
+    const expectedIds = [named[4][0], named[3][0], UNRELATED, WORKSPACE, OTHER,
+      named[5][0], named[6][0], unreadable, unnamed];
+    const env = { LANG: locale, LC_ALL: locale };
+    const text = runUb(["workspace", "list"], box, env);
+    expect(text.status, text.output).toBe(0);
+    expect(text.stderr).toBe("");
+    expect(text.stdout.trimEnd().split("\n").map(row => row.slice(2).split(" | ")[0])).toEqual(expectedIds);
+    const json = runUb(["workspace", "list", "--json"], box, env);
+    expect(json.status, json.output).toBe(0);
+    expect(json.stderr).toBe("");
+    expect(JSON.parse(json.stdout).map((entry: { uuid: string }) => entry.uuid)).toEqual(expectedIds);
   });
 
   it.each([

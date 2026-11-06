@@ -137,7 +137,7 @@ description = "Lint the workspace with Biome, browser settle checks and ShellChe
 # Biome is one root-level binary, not a per-package script, so this is `pnpm
 # lint` rather than `pnpm -r lint`. The root script carries the flags so the
 # Docker review runs the identical command.
-run = ["pnpm lint", "shellcheck setup-hub.sh"]
+run = ["pnpm lint", "shellcheck setup-hub.sh .agents/skills/release/scripts/*.sh"]
 
 [tasks.typecheck]
 description = "Typecheck every package (tsc --noEmit)"

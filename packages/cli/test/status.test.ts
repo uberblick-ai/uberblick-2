@@ -7,6 +7,8 @@ import { defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-s
 import { isTagCatalogSeeded, setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createServer } from "node:http";
+import type { Duplex } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
@@ -18,6 +20,7 @@ import { runUb, DEAD_HUB_URL, removeTempDirs, sandbox, unboundSandbox } from "./
 import { runInProcess } from "./in-process.js";
 import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
 import { cliVersion } from "../src/version.js";
+import { ownListener } from "./teardown.js";
 
 afterAll(removeTempDirs);
 
@@ -29,6 +32,7 @@ const ORIGIN = "https://hub.example.test";
 function report(overrides: Partial<StatusReport> = {}): StatusReport {
   return {
     version: "1.2.3",
+    hostedMcp: null,
     workspaceUuid: WORKSPACE,
     workspaceOrigin: "project config",
     binding: { workspaceId: WORKSPACE, hubUrl: HUB },
@@ -94,6 +98,15 @@ describe("the status replica reading", () => {
 });
 
 describe("the short status report", () => {
+  it("shows a confirmed hosted URL after the hub in text and JSON", () => {
+    const hostedMcp = `https://public.example.test/mcp/${WORKSPACE}`;
+    const reading = report({ hostedMcp });
+    expect(renderStatus(reading)).toContain(`hub         ${ORIGIN}\nhosted mcp  ${hostedMcp} (experimental)\nversion`);
+    expect(shortStatusReport(reading).hostedMcp).toBe(hostedMcp);
+    expect(shortStatusReport(reading).problems).toEqual([]);
+    expect(row(renderStatus(report()), "hosted mcp")).toBe("");
+  });
+
   it.each(["1.2.3", "1.2.2"])("shows connected hub release %s without adding a problem", hubVersion => {
     const reading = report({ hubVersion });
     expect(renderStatus(reading)).toContain(`hub         ${ORIGIN}\nversion     client 1.2.3, hub ${hubVersion}\n`);
@@ -144,6 +157,7 @@ describe("the short status report", () => {
     expect(shortStatusReport(report(), "Uberblick")).toEqual({
       workspace: { id: WORKSPACE, name: "Uberblick" },
       hub: ORIGIN,
+      hostedMcp: null,
       version: { client: "1.2.3", hub: null },
       account: { login: "bk-one", provider: "github" },
       chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
@@ -184,7 +198,7 @@ describe("the short status report", () => {
     expect(shortStatusReport(reading, "My Workspace")).toEqual({
       workspace: { id: WORKSPACE, name: "My Workspace" },
       version: { client: "1.2.3", hub: null },
-      hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
+      hub: null, hostedMcp: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
       chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
       storedIn: "/workspace/replica.sqlite",
     });
@@ -397,6 +411,86 @@ describe("the last hub sync in ub status", () => {
 });
 
 describe("the real project's short report", () => {
+  it("starts hosted discovery within the existing sync wait", async () => {
+    let syncSocket: Duplex | undefined;
+    let answer: (() => void) | undefined;
+    let metadataDuringSync = false;
+    const hostedMcp = `https://public.example.test/mcp/${WORKSPACE}`;
+    const server = createServer((_request, response) => {
+      answer = () => {
+        metadataDuringSync = syncSocket !== undefined && !syncSocket.destroyed;
+        response.end(JSON.stringify({ resource: hostedMcp }));
+      };
+      if (syncSocket !== undefined) answer();
+    });
+    const close = ownListener(server);
+    server.on("upgrade", (_request, socket) => {
+      syncSocket = socket;
+      answer?.();
+    });
+    try {
+      await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("missing test listener");
+      const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${address.port}` },
+        credentials: { signingSecret: "hosted-parallel-status-secret" },
+      });
+      const run = await runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "400.5" });
+      expect(run.status, run.stderr).toBe(0);
+      expect(JSON.parse(run.stdout).hostedMcp).toBe(hostedMcp);
+      expect(metadataDuringSync).toBe(true);
+    } finally { await close(); }
+  });
+
+  it("discovers the public hosted URL without credentials and keeps existing connection problems", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: DEAD_HUB_URL },
+      credentials: { signingSecret: "hosted-status-test-secret" },
+    });
+    const hostedMcp = `https://public.example.test/mcp/${WORKSPACE}`;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ resource: hostedMcp }));
+    try {
+      const json = await runInProcess(["status", "--json"], box);
+      expect(json.status, json.stderr).toBe(0);
+      expect(JSON.parse(json.stdout)).toMatchObject({ hostedMcp,
+        problems: [{ name: "hub-unreachable" }], connection: { state: "failed" } });
+      const text = await runInProcess(["status"], box);
+      expect(text.status, text.stderr).toBe(0);
+      expect(row(text.stdout, "hosted mcp")).toBe(`hosted mcp  ${hostedMcp} (experimental)`);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      for (const [url, init] of fetch.mock.calls) {
+        expect(String(url)).toBe(`http://127.0.0.1:1/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`);
+        expect(new Headers(init?.headers).get("authorization")).toBeNull();
+        expect(init).toMatchObject({ redirect: "error", cache: "no-store", signal: expect.any(AbortSignal) });
+      }
+    } finally { fetch.mockRestore(); }
+  });
+
+  it("leaves unavailable hosted access null without an extra problem or exit failure", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unavailable metadata"));
+    try {
+      const run = await runInProcess(["status", "--json"], box);
+      expect(run.status, run.stderr).toBe(0);
+      expect(JSON.parse(run.stdout)).toMatchObject({ hostedMcp: null, problems: [{ name: "sync-disabled" }] });
+      expect(row((await runInProcess(["status"], box)).stdout, "hosted mcp")).toBe("");
+      expect(run.output).not.toContain("unavailable metadata");
+    } finally { fetch.mockRestore(); }
+  });
+
+  it("reads no hosted metadata for local or mismatched bindings", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const local = await runInProcess(["status", "--json"], box);
+      expect(JSON.parse(local.stdout).hostedMcp).toBeNull();
+      const mismatched = await runInProcess(["status", "--json"], box,
+        { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: DEAD_HUB_URL });
+      expect(JSON.parse(mismatched.stdout)).toMatchObject({ hostedMcp: null,
+        problems: [{ name: "workspace-hub-mismatch" }] });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { fetch.mockRestore(); }
+  });
+
   it.each([false, true])("reports the secure fix for a retained cleartext binding (stored login=%s)", async stored => {
     const hubUrl = "ws://0.0.0.0:1234/proxy/ws";
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl },
@@ -466,7 +560,7 @@ describe("the real project's short report", () => {
     expect(run.status).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual({ workspace: { id: WORKSPACE, name: null },
       version: { client: cliVersion(), hub: null },
-      hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
+      hub: null, hostedMcp: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
       chosenBy: { source: "project-config", path: join(box.cwd, ".uberblick.json") },
       storedIn: defaultWorkspaceDatabasePath(WORKSPACE, box.env),
     });
@@ -534,7 +628,7 @@ describe("the real project's short report", () => {
     const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     const reading = JSON.parse(json.stdout);
-    expect(Object.keys(reading).sort()).toEqual(["account", "chosenBy", "connection", "hub", "lastSync", "pending", "problems", "recentDevices", "storedIn", "version", "workspace"]);
+    expect(Object.keys(reading).sort()).toEqual(["account", "chosenBy", "connection", "hostedMcp", "hub", "lastSync", "pending", "problems", "recentDevices", "storedIn", "version", "workspace"]);
     expect(reading.workspace).toEqual({ id: WORKSPACE, name: "Stored name" });
     expect(reading.pending).toEqual({ count: hubUrl === null ? 0 : 4 });
     const text = await runInProcess(["status"], box);

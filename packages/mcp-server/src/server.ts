@@ -4,7 +4,9 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getMethodLiteral } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { RequestId } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConfig } from "./config.js";
 import type { CredentialProvider } from "./credential-provider.js";
 import { registerHelpResources } from "./help-resources.js";
@@ -54,6 +56,11 @@ export interface UberblickMcpServer extends Omit<UberblickMcpSession, "close"> {
   close(deadline?: number): Promise<void>;
 }
 
+export interface McpSessionOptions {
+  /** Notify the host after tool lookup, argument validation and execution finish. */
+  onToolCallFinished?: (requestId: RequestId) => void;
+}
+
 export interface McpRuntimeOptions {
   /** Adopt and close this mirror; omitted opens `config.databasePath`. */
   store?: MirrorStore;
@@ -69,7 +76,7 @@ export interface UberblickMcpRuntime {
   readonly replicas: Replicas;
   readonly store: MirrorStore;
   /** Capture startup instructions and register tools for a new independent session. */
-  openSession(): UberblickMcpSession;
+  openSession(options?: McpSessionOptions): UberblickMcpSession;
   /** Close every session, drain admitted work, then release the shared replicas. */
   close(deadline?: number): Promise<void>;
 }
@@ -105,9 +112,10 @@ function openRuntime(
   return {
     replicas,
     store,
-    openSession() {
+    openSession(sessionOptions = {}) {
       if (closed) throw new ServerShuttingDownError();
       const session = openSession(config, replicas, store, {
+        ...sessionOptions,
         seed() {
           seeding ??= seedTagCatalogOnce(replicas);
           return seeding;
@@ -149,6 +157,7 @@ function openSession(
     seed(): Promise<void>;
     initializedClientIdentity: boolean;
     waitForWriteAcknowledgement: boolean;
+    onToolCallFinished?: (requestId: RequestId) => void;
     released(session: UberblickMcpSession): void;
   },
 ): UberblickMcpSession {
@@ -166,6 +175,24 @@ function openSession(
     server.server.oninitialized = () => {
       replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
       replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
+    };
+  }
+  if (runtime.onToolCallFinished !== undefined) {
+    const onToolCallFinished = runtime.onToolCallFinished;
+    const setRequestHandler = server.server.setRequestHandler.bind(server.server);
+    server.server.setRequestHandler = (schema, handler) => {
+      if (getMethodLiteral(schema) !== "tools/call") {
+        setRequestHandler(schema, handler);
+        return;
+      }
+      setRequestHandler(schema, async (request, extra) => {
+        try {
+          return await handler(request, extra);
+        } finally {
+          // Cancellation suppresses the SDK's reply without ending its handler.
+          onToolCallFinished(extra.requestId);
+        }
+      });
     };
   }
   const help = registerTools(server, replicas, work, runtime.waitForWriteAcknowledgement);

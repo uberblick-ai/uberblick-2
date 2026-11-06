@@ -165,14 +165,17 @@ export class OAuthAuthorizations {
   }
 
   read(requestId: string, principalId: string): ConsentRefusal | {
-    status: "pending"; clientName: string; redirectHost: string; workspaceId: string;
+    status: "pending"; clientName: string; redirectHost: string; redirectScheme?: string; workspaceId: string;
     workspaceName: string | null; accessLevels: TokenScope[];
   } {
     if (this.stopped) return { status: "unknown-request" };
     const pending = this.get(requestId);
     if (pending === null) return { status: "unknown-request" };
     if (this.memberships.roleFor(pending.workspaceId, principalId) === null) return { status: "not-a-member" };
-    return { status: "pending", clientName: pending.clientName, redirectHost: new URL(pending.redirectUri).host,
+    const redirect = new URL(pending.redirectUri);
+    const webRedirect = redirect.protocol === "http:" || redirect.protocol === "https:";
+    return { status: "pending", clientName: pending.clientName, redirectHost: webRedirect ? redirect.host : "",
+      ...(webRedirect ? {} : { redirectScheme: redirect.protocol }),
       workspaceId: pending.workspaceId, workspaceName: this.workspaceNames.read(pending.workspaceId),
       accessLevels: pending.writeRequested ? ["read-only", "read-write"] : ["read-only"] };
   }

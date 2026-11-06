@@ -1,12 +1,20 @@
 import { Readable } from "node:stream";
 import type { IncomingMessage } from "node:http";
 import { readRequestBody } from "@modelcontextprotocol/sdk/server/requestBody.js";
-import { isJSONRPCRequest, JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, isJSONRPCRequest, JSONRPCMessageSchema, type RequestId } from "@modelcontextprotocol/sdk/types.js";
+
+/** Only executable tool requests consume call slots; the SDK refuses other shapes. */
+export function hostToolCallId(message: unknown): RequestId | undefined {
+  const parsed = JSONRPCMessageSchema.safeParse(message);
+  if (!parsed.success || !isJSONRPCRequest(parsed.data) || !CallToolRequestSchema.safeParse(parsed.data).success) return;
+  if (parsed.data.params?.task !== undefined) return;
+  return parsed.data.id;
+}
 
 /** Use the SDK's body bound and message schema before reserving a whole batch. */
 export async function readHostPost(request: IncomingMessage): Promise<{
   body: unknown;
-  calls: number;
+  calls: RequestId[];
 } | { status: 400 | 413 }> {
   const webRequest = new Request("http://mcp.invalid/", {
     method: "POST", body: Readable.toWeb(request), duplex: "half",
@@ -16,10 +24,10 @@ export async function readHostPost(request: IncomingMessage): Promise<{
   try {
     const body: unknown = JSON.parse(read.text);
     const messages = Array.isArray(body) ? body : [body];
-    let calls = 0;
+    const calls: RequestId[] = [];
     for (const message of messages) {
-      const parsed = JSONRPCMessageSchema.safeParse(message);
-      if (parsed.success && isJSONRPCRequest(parsed.data)) calls += 1;
+      const id = hostToolCallId(message);
+      if (id !== undefined) calls.push(id);
     }
     return { body, calls };
   } catch {
