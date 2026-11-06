@@ -19,6 +19,7 @@ export function registerTools(
   server: McpServer,
   replicas: Replicas,
   work: ServerWork,
+  waitForWriteAcknowledgement = false,
 ): HelpCatalog {
   const help = new HelpCatalog();
   const context = createToolContext(replicas, work, help);
@@ -29,7 +30,7 @@ export function registerTools(
       inputSchema: tool.input,
       outputSchema: tool.output,
       annotations: tool.annotations,
-    }, guarded(tool, context));
+    }, guarded(tool, context, waitForWriteAcknowledgement));
     captureTool(help, tool, registered);
   }
   return help;

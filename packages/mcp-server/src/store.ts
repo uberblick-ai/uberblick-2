@@ -506,7 +506,7 @@ export class MirrorStore {
    * Wake after same-process commits: data_version detects only other connections,
    * and a replica engine cannot rely on MCP calls arriving to discover changes.
    */
-  private readonly appendListeners = new Set<() => void>();
+  private readonly appendListeners = new Set<(room: string, origin: UpdateOrigin) => void>();
 
   private readonly statements: {
     dataVersion: Prepared<[]>;
@@ -960,7 +960,7 @@ export class MirrorStore {
     const seq = this.appendTx(room, payload, origin, settingsResetSeq, metadata);
     for (const listener of [...this.appendListeners]) {
       try {
-        listener();
+        listener(room, origin);
       } catch (error) {
         // The update is already committed. An observer cannot turn a durable
         // append into a reported failure or starve the remaining observers.
@@ -1037,7 +1037,7 @@ export class MirrorStore {
         .run(JSON.stringify({ seq, notice }));
     }, "immediate")();
     for (const listener of [...this.appendListeners]) {
-      try { listener(); }
+      try { listener(room, "remote"); }
       catch (error) { log.warn("an update-log append observer failed", error); }
     }
   }
@@ -1046,7 +1046,7 @@ export class MirrorStore {
    * Run `listener` after every successful append made through this store
    * instance. Returns an idempotent unsubscribe.
    */
-  onAppend(listener: () => void): () => void {
+  onAppend(listener: (room: string, origin: UpdateOrigin) => void): () => void {
     this.appendListeners.add(listener);
     return () => {
       this.appendListeners.delete(listener);
