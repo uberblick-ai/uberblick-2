@@ -127,15 +127,15 @@ async function proveOpen() {
   }
 }
 
-const brewPrefix = run("brew", ["--prefix"]);
+const brewPrefix = run("brew", ["--prefix"], { cwd: process.cwd() });
 expect(brewPrefix !== "", "brew --prefix returned no prefix");
-const formulaPrefix = run("brew", ["--prefix", formulaName]);
+const formulaPrefix = run("brew", ["--prefix", formulaName], { cwd: process.cwd() });
 expect(formulaPrefix !== "", `brew --prefix ${formulaName} returned no prefix`);
 expect(
   formulaPrefix.startsWith(`${brewPrefix}/`),
   `formula prefix ${formulaPrefix} is outside Homebrew prefix ${brewPrefix}`,
 );
-const installedFiles = run("brew", ["list", "--formula", formulaName])
+const installedFiles = run("brew", ["list", "--formula", formulaName], { cwd: process.cwd() })
   .split("\n")
   .filter(Boolean);
 expect(installedFiles.length > 0, "Homebrew reported no installed formula files");

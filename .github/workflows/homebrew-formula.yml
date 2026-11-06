@@ -58,8 +58,6 @@ jobs:
       # Two versions built here stand in for two published releases; the public
       # transcript belongs to the tap's second publication (#842).
       - name: Check release web isolation and upgrade through Homebrew
-        env:
-          UB_HOMEBREW_FORMULA_SMOKE_QUARANTINE: https://github.com/uberblick-ai/uberblick-2/issues/2632
         run: |
           set -euo pipefail
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"

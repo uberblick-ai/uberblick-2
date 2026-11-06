@@ -203,17 +203,13 @@ try {
 
 	// The upgraded copy is a working install, not merely a present one: the
 	// formula proof's own journeys, on a home this workspace never touched.
-	const quarantine = process.env.UB_HOMEBREW_FORMULA_SMOKE_QUARANTINE;
-	if (quarantine) {
-		process.stderr.write(`homebrew formula smoke quarantined: ${quarantine}\n`);
-	} else {
-		const smokeEnv = { ...process.env };
-		for (const key of ["XDG_CONFIG_HOME", "XDG_DATA_HOME"]) delete smokeEnv[key];
-		run("node", [join(REPOSITORY_ROOT, "scripts", "homebrew-formula-proof.mjs"), FORMULA, upgradedVersion, tapFormulaPath], {
-			env: smokeEnv,
-			stdio: ["ignore", "inherit", "pipe"],
-		});
-	}
+	// Keep fixture trust in Homebrew while Uberblick receives fresh XDG roots.
+	const smokeEnv = { ...process.env, HOMEBREW_XDG_CONFIG_HOME: configHome };
+	for (const key of ["XDG_CONFIG_HOME", "XDG_DATA_HOME"]) delete smokeEnv[key];
+	run("node", [join(REPOSITORY_ROOT, "scripts", "homebrew-formula-proof.mjs"), FORMULA, upgradedVersion, tapFormulaPath], {
+		env: smokeEnv,
+		stdio: ["ignore", "inherit", "pipe"],
+	});
 
 	process.stdout.write(
 		`homebrew upgrade proof: ${installedVersion} to ${upgradedVersion} on ${process.arch} passed\n`,
