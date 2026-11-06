@@ -9,7 +9,7 @@ import { HubAdminRegistry } from "./hub-admins.js";
 import { replyJson } from "./http.js";
 
 const HUB_DATA_TABLES = [
-  "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_admins", "hub_workspace_promotions",
+  "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admins", "hub_workspace_promotions",
 ] as const;
 
 export class HubClaimState {
@@ -67,7 +67,7 @@ export class HubClaimState {
     return workspaceId;
   }
 
-  /** Caller commits this together with its first-admin grant and receipt. */
+  /** Caller commits this together with the credential or browser session. */
   close(): void {
     this.database.connection.prepare("UPDATE hub_claim_state SET unclaimed = 0 WHERE id = 1 AND unclaimed = 1").run();
   }

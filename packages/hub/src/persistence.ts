@@ -148,6 +148,7 @@ export class HubDatabase implements Extension {
     try {
       if (hubVersion !== undefined && durable) writeDatabaseRelease(db, hubVersion);
       db.exec(SCHEMA);
+      db.exec("DROP TABLE IF EXISTS hub_admin_setup_grants");
       revokeHmacCredentials(db);
       addCredentialCeiling(db);
       this.statements = {

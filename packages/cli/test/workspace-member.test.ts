@@ -269,6 +269,27 @@ describe("confirmed grants", () => {
 });
 
 describe("current member matching and mutations", () => {
+  it("lists host-added admins in text and JSON and clears attribution after an ordinary role change", async () => {
+    const remote = await administrator();
+    const identity = member(remote);
+    remote.hub.memberships!.grantAdminOnHost(WORKSPACE, identity.id);
+    const listed = await runInProcess(["workspace", "member", "list"], remote.box);
+    expect(listed.status, listed.output).toBe(0);
+    expect(listed.stdout).toContain(`"${LOGIN}" (GitHub account ${ACCOUNT}) | admin (added on the host)\n`);
+    const json = await runInProcess(["workspace", "member", "list", "--json"], remote.box);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout).members).toContainEqual({ githubUsername: LOGIN, githubAccountId: ACCOUNT,
+      role: "admin", addedOnHost: true });
+    const changed = await runInProcess(["workspace", "member", "role", ACCOUNT, "member"], remote.box);
+    expect(changed.status, changed.output).toBe(0);
+    const after = await runInProcess(["workspace", "member", "list", "--json"], remote.box);
+    expect(after.status, after.output).toBe(0);
+    expect(JSON.parse(after.stdout).members).toContainEqual({ githubUsername: LOGIN, githubAccountId: ACCOUNT, role: "member" });
+    publicOutput(listed, remote);
+    publicOutput(json, remote);
+    publicOutput(after, remote);
+  });
+
   it("lists login, permanent ID and role, with only public JSON on stdout", async () => {
     const remote = await administrator();
     member(remote);

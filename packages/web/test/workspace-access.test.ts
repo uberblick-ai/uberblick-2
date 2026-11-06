@@ -18,6 +18,20 @@ function reply(body: unknown) {
 describe("the browser's hub management answers", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("keeps host attribution for admins and accepts older hubs that omit it", async () => {
+    const action: AccessAction = { operation: "list-members", workspaceId: WORKSPACE.workspaceId };
+    const member = { principalId: "principal", githubAccountId: "1234", githubUsername: "host-admin", role: "admin" };
+    for (const addedOnHost of [undefined, false, true]) {
+      const stored = { ...member, ...(addedOnHost === undefined ? {} : { addedOnHost }), private: "provider diagnostic" };
+      const expected = { ...member, ...(addedOnHost === true ? { addedOnHost: true } : {}) };
+      await expect(reply({ status: "ok", members: [stored] }).request(action))
+        .resolves.toEqual({ status: "ok", hub: null, members: [expected] });
+    }
+    for (const stored of [{ ...member, role: "member", addedOnHost: true }, { ...member, addedOnHost: "provider diagnostic" }]) {
+      await expect(reply({ status: "ok", members: [stored] }).request(action)).rejects.toThrow("Invalid access answer");
+    }
+  });
+
   it("uses the browser proof and exposes only the hub-admin inventory fields", async () => {
     const { request, fetchImpl } = reply({ status: "ok", hub: "https://bound.example", credential: "private",
       admins: [{ ...ADMIN, document: "private content" }], nextCursor: "next-admin" });

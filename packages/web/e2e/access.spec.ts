@@ -193,6 +193,7 @@ for (const profile of [
 ] as const) {
   test(`member controls work with ${profile.name}`, { tag: profile.touch ? "@webkit-touch" : [] }, async ({ browser }, info) => {
     for (const colorScheme of ["light", "dark"] as const) {
+      harness().addWorkspaceAdminOnHost("9876", "host-admin");
       const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
         contextOptions: {
           ...(profile.touch ? devices["iPad (gen 7)"] : { hasTouch: false, isMobile: false }),
@@ -201,6 +202,18 @@ for (const profile of [
       });
       const pane = page.locator("[data-settings-page]");
       const members = page.getByRole("table", { name: "Members", exact: true });
+      const hostRow = members.getByRole("row").filter({ hasText: "host-admin" });
+      const hostMarker = hostRow.getByText("added on the host", { exact: true });
+      await expect(hostMarker).toBeVisible();
+      await expect(members.getByRole("row").filter({ hasText: "browser-person" }).getByText("added on the host", { exact: true })).toHaveCount(0);
+      const markerStyle = await hostMarker.evaluate(element => ({
+        color: getComputedStyle(element).color,
+        width: element.getBoundingClientRect().width,
+        cellWidth: element.parentElement?.getBoundingClientRect().width ?? 0,
+      }));
+      expect(markerStyle.width).toBeGreaterThan(0);
+      expect(markerStyle.width).toBeLessThanOrEqual(markerStyle.cellWidth);
+      expect(markerStyle.color).toBe(await members.getByText("you", { exact: true }).evaluate(element => getComputedStyle(element).color));
       const handle = page.getByLabel("GitHub handle", { exact: true });
       const lookUp = page.getByRole("button", { name: "Look up", exact: true });
       const activate = async (target: Locator): Promise<void> => {
@@ -265,6 +278,7 @@ for (const profile of [
       await expect(roleToast(page)).toHaveAttribute("data-type", "success");
       await expect(role).toBeEnabled();
       await expect(role).toHaveValue("admin");
+      await page.unroute("**/api/access");
       await expect(page.getByRole("button", { name: /Save role|Refresh/ })).toHaveCount(0);
       const image = info.outputPath(`members-${profile.width}-${colorScheme}.png`);
       await page.screenshot({ path: image });
@@ -278,6 +292,9 @@ for (const profile of [
       await activate(remove);
       await activate(confirm.getByRole("button", { name: "Remove member", exact: true }));
       await expect(members.getByText("new-agent", { exact: true })).toHaveCount(0);
+      await page.getByLabel("Role for host-admin", { exact: true }).selectOption("member");
+      await expect(hostMarker).toHaveCount(0);
+      await expect(page.getByLabel("Role for host-admin", { exact: true })).toHaveValue("member");
       await page.context().close();
     }
   });

@@ -114,7 +114,8 @@ describe("browser-only hub identity", () => {
     expect(snapshot.hub_browser_sessions).toEqual([{ token_hash: expect.stringMatching(/^[0-9a-f]{64}$/), principal_id: principal.id,
       origin: origin(r.hub), expires_at: result.session.expiresAt }]);
     expect(snapshot.hub_admins).toEqual([{ principal_id: principal.id }]);
-    expect(snapshot.hub_memberships).toEqual([{ workspace_id: result.claimedWorkspaceId, principal_id: principal.id, role: "admin" }]);
+    expect(snapshot.hub_memberships).toEqual([{ workspace_id: result.claimedWorkspaceId, principal_id: principal.id,
+      role: "admin", added_on_host: 0 }]);
     expect(r.hub.hubAdmins!.pageAdmins(principal.id).admins[0]?.lastSignedInAt).toBeNull();
     for (const secret of [GITHUB_TOKEN, "private-device-code", TEST_SECRET]) {
       expect(JSON.stringify({ result, snapshot, logs: r.logs })).not.toContain(secret);
@@ -297,7 +298,8 @@ describe("browser session durability and claim atomicity", () => {
     const snapshot = rows(r.path);
     const principalId = r.hub.principals!.getByGithubAccountId("5678")!.id;
     expect(snapshot.hub_admins).toEqual([{ principal_id: principalId }]);
-    expect(snapshot.hub_memberships).toEqual([{ workspace_id: won.result.claimedWorkspaceId, principal_id: principalId, role: "admin" }]);
+    expect(snapshot.hub_memberships).toEqual([{ workspace_id: won.result.claimedWorkspaceId, principal_id: principalId,
+      role: "admin", added_on_host: 0 }]);
     expect(snapshot.hub_browser_sessions).toHaveLength(1);
     expect(snapshot.hub_credentials).toHaveLength(1);
   });

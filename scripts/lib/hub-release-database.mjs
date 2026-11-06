@@ -40,6 +40,11 @@ export function assertHubDatabaseUpgrade(actual, original) {
 		expected = { ...original, hub_principals: original.hub_principals.map((row) =>
 			({ ...row, has_signed_in: signedIn.has(row.id) ? 1 : 0 })) };
 	}
+	if (original.hub_memberships.every((row) => !Object.hasOwn(row, "added_on_host")) &&
+		actual.hub_memberships.some((row) => Object.hasOwn(row, "added_on_host"))) {
+		expected = { ...expected, hub_memberships: original.hub_memberships.map((row) =>
+			({ ...row, added_on_host: 0 })) };
+	}
 	if (expected.credentialKeyColumn !== "signing_key" || actual.credentialKeyColumn !== "public_key") {
 		assert.deepEqual(actual, expected);
 		return;

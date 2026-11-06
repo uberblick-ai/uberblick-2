@@ -267,6 +267,24 @@ describe("management replies exposed to a browser", () => {
     }
   });
 
+  it("preserves host attribution only for admins and accepts older hubs without the field", () => {
+    for (const addedOnHost of [undefined, false, true]) {
+      const stored = { ...member, role: "admin", ...(addedOnHost === undefined ? {} : { addedOnHost }) };
+      const expected = { ...member, role: "admin", ...(addedOnHost === true ? { addedOnHost: true } : {}) };
+      expect(sanitizeManagementReply({ operation: "list-members", workspaceId: WORKSPACE }, {
+        status: 200, body: { status: "ok", members: [stored] },
+      }, login)).toEqual({ status: 200, body: { status: "ok", members: [expected] } });
+      expect(sanitizeManagementReply({ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, {
+        status: 200, body: { status: "already-member", member: stored },
+      }, login)).toEqual({ status: 200, body: { status: "already-member", member: expected } });
+    }
+    for (const stored of [{ ...member, role: "member", addedOnHost: true }, { ...member, addedOnHost: "private-provider-text" }]) {
+      expect(() => sanitizeManagementReply({ operation: "list-members", workspaceId: WORKSPACE }, {
+        status: 200, body: { status: "ok", members: [stored] },
+      }, login)).toThrow(ManagementResponseError);
+    }
+  });
+
   it.each(["private/provider", "<img src=x onerror=alert(1)>", 'stored"\\login\n\u001b\u007f\u009b', " "])(
     "preserves a non-empty stored login %j in every member reply", githubUsername => {
       const stored = { ...member, githubUsername };

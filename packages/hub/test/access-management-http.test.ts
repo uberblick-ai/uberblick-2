@@ -335,6 +335,20 @@ describe("authenticated hub access management", () => {
     for (const secret of ["github-token", credential.key]) expect(JSON.stringify({ listed, logs })).not.toContain(secret);
   });
 
+  it("lists host attribution until an ordinary role change replaces the host-granted role", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "5678", "host-admin", [[WORKSPACE, "member"]]);
+    hub.memberships!.grantAdminOnHost(WORKSPACE, member.principal.id);
+    const marked = { principalId: member.principal.id, githubAccountId: "5678", githubUsername: "host-admin", role: "admin", addedOnHost: true };
+    expect((await manage(hub, admin.issued, { operation: "list-members", workspaceId: WORKSPACE })).result.members)
+      .toContainEqual(marked);
+    expect(await manage(hub, admin.issued, { operation: "change-role", workspaceId: WORKSPACE,
+      principalId: member.principal.id, role: "member" })).toEqual({ code: 200, result: { status: "ok" } });
+    expect((await manage(hub, admin.issued, { operation: "list-members", workspaceId: WORKSPACE })).result.members)
+      .toContainEqual({ principalId: member.principal.id, githubAccountId: "5678", githubUsername: "host-admin", role: "member" });
+  });
+
   it("reads GitHub identities and current roles, and applies the existing admin and last-admin rules", async () => {
     const { hub, github } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);

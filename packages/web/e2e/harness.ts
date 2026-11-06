@@ -263,6 +263,7 @@ export interface Harness {
   removeCurrentHubAdmin(): void;
   changeCurrentWorkspaceRole(role: "member" | "admin"): void;
   changeOtherMemberUsername(username: string): string;
+  addWorkspaceAdminOnHost(accountId: string, username: string): void;
   /** Name the current state through the other account's authenticated hub connection. */
   nameRevisionAsOther(uuid: string, name: string): Promise<RevisionEntry>;
   /** Where the browser goes. This run's real `ub open` address. */
@@ -713,6 +714,11 @@ export async function startHarness(options: {
         const { principals } = hub ?? {};
         if (principals === undefined) throw new Error("Workspace member fixture is missing");
         return principals.identify("5678", username).id;
+      },
+      addWorkspaceAdminOnHost(accountId, username) {
+        const { principals, memberships } = hub ?? {};
+        if (principals === undefined || memberships === undefined) throw new Error("Workspace member fixture is missing");
+        memberships.grantAdminOnHost(workspaceUuid, principals.identify(accountId, username).id);
       },
       async nameRevisionAsOther(uuid, name) {
         if (otherAccount === undefined) throw new Error("Other account fixture is missing");
