@@ -489,10 +489,12 @@ export const toolHelpDetails = {
     "and `rev` ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM " +
     "preserves representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's " +
     "marked whitespace and meeting code-span limits; after one round trip the text is stable.\n\n" +
-    "Pass `old_text` (and the `rev` from get_doc) to assert what you are editing. A mismatched asserted rev " +
+    "Pass the block's whole text as get_doc returns it as `old_text`, not a fragment, and preferably its `rev`, " +
+    "to assert what you are editing. A mismatched asserted rev " +
     "refuses with `stale_block`. When the rev is current but `old_text` is wrong, the refusal is " +
     "`old_text_mismatch`; without a rev, a text mismatch remains `stale_block` because the server cannot tell " +
-    "a bad argument from a stale read. Both errors carry `currentText` and `currentRev` to re-diff against.\n\n" +
+    "a bad argument from a stale read. If `old_text` is only part of the current block, the refusal says so " +
+    "and requires the whole text. Both errors carry `currentText` and `currentRev` to re-diff against.\n\n" +
     "Scope of that guarantee, stated plainly: it is a check against THIS replica at the moment of the call. " +
     "There is no cross-replica compare-and-swap — an edit made elsewhere that has not reached this replica " +
     "yet cannot be detected, and the window widens the longer this server stays offline.",

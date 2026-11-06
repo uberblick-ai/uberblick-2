@@ -401,7 +401,7 @@ export const tools: readonly Tool[] = [
     title: "Edit one block",
     description:
       "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a " +
-      "list item's `list` and `indent` can also change in place. Assert `old_text` and preferably the `rev` " +
+      "list item's `list` and `indent` can also change in place. Assert the block's whole text as `old_text` and preferably the `rev` " +
       "from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and " +
       "currentRev to re-diff against. The assertion checks this replica only. A splice that touches a " +
       "formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown " +
