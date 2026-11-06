@@ -1,0 +1,1204 @@
+{
+  "commit": "b1a569c0e2734cc577e3dac9ba6c5d6e2e2b7716",
+  "dirty": false,
+  "scenario": "all",
+  "runtimeCap": 32,
+  "limits": {
+    "maxRuntimes": 32,
+    "maxSessions": 128,
+    "maxCalls": 16,
+    "minFreeBytes": 268435456
+  },
+  "machine": {
+    "os": "Linux 7.0.0-38-generic",
+    "node": "v26.13.0",
+    "cpu": "AMD EPYC-Genoa Processor",
+    "logicalCpus": 8,
+    "memoryBytes": 16365817856,
+    "openFileLimits": "Max open files            524288               524288               files     "
+  },
+  "profile": {
+    "description": "Synthetic engineering workspace: 200 mixed prose, list and code documents, size distribution chosen to include a few long pages, with 20/100/500 actual Yjs edit transactions grouped into 10/20/50 durable hub revision stretches. No real document content is copied.",
+    "documentsPerWorkspace": 200,
+    "workspaces": 4,
+    "principals": 1,
+    "grants": 33,
+    "visibleTextBytesPerWorkspace": 1064960,
+    "editTransactionsPerWorkspace": 22400,
+    "revisionStretchesPerWorkspace": 3700,
+    "encodedRoomBytesPerWorkspace": 2031093,
+    "retainedStructsPerWorkspace": 55760,
+    "preGcEncodedRoomBytesPerWorkspace": 3464693,
+    "documentClasses": [
+      {
+        "count": 120,
+        "textBytes": 1024,
+        "edits": 20,
+        "stretches": 10
+      },
+      {
+        "count": 50,
+        "textBytes": 4096,
+        "edits": 100,
+        "stretches": 20
+      },
+      {
+        "count": 25,
+        "textBytes": 16384,
+        "edits": 500,
+        "stretches": 50
+      },
+      {
+        "count": 5,
+        "textBytes": 65536,
+        "edits": 500,
+        "stretches": 50
+      }
+    ]
+  },
+  "memory": {
+    "checkpoints": [
+      {
+        "runtimes": 0,
+        "host": {
+          "rssBytes": 171085824,
+          "highWaterRssBytes": 171085824,
+          "cpuSeconds": 1.06,
+          "openFiles": 31
+        },
+        "hub": {
+          "rssBytes": 153866240,
+          "highWaterRssBytes": 153866240,
+          "cpuSeconds": 1.29,
+          "openFiles": 26
+        },
+        "mirror": {
+          "bytes": 0,
+          "allocatedBytes": 0,
+          "files": 0
+        }
+      },
+      {
+        "runtimes": 1,
+        "host": {
+          "rssBytes": 282415104,
+          "highWaterRssBytes": 282415104,
+          "cpuSeconds": 5.36,
+          "openFiles": 50
+        },
+        "hub": {
+          "rssBytes": 204292096,
+          "highWaterRssBytes": 204292096,
+          "cpuSeconds": 3.32,
+          "openFiles": 26
+        },
+        "mirror": {
+          "bytes": 11879648,
+          "allocatedBytes": 11894784,
+          "files": 5
+        },
+        "openToSearchMs": 10228.764683000001,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 2,
+        "host": {
+          "rssBytes": 347381760,
+          "highWaterRssBytes": 347381760,
+          "cpuSeconds": 8.92,
+          "openFiles": 67
+        },
+        "hub": {
+          "rssBytes": 230293504,
+          "highWaterRssBytes": 230293504,
+          "cpuSeconds": 4.87,
+          "openFiles": 27
+        },
+        "mirror": {
+          "bytes": 23582280,
+          "allocatedBytes": 23609344,
+          "files": 10
+        },
+        "openToSearchMs": 9295.336661000001,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 3,
+        "host": {
+          "rssBytes": 396877824,
+          "highWaterRssBytes": 409341952,
+          "cpuSeconds": 12.46,
+          "openFiles": 84
+        },
+        "hub": {
+          "rssBytes": 254332928,
+          "highWaterRssBytes": 254332928,
+          "cpuSeconds": 6.44,
+          "openFiles": 28
+        },
+        "mirror": {
+          "bytes": 34617424,
+          "allocatedBytes": 34660352,
+          "files": 15
+        },
+        "openToSearchMs": 9544.128782,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 4,
+        "host": {
+          "rssBytes": 448086016,
+          "highWaterRssBytes": 463065088,
+          "cpuSeconds": 15.68,
+          "openFiles": 101
+        },
+        "hub": {
+          "rssBytes": 274984960,
+          "highWaterRssBytes": 274984960,
+          "cpuSeconds": 7.79,
+          "openFiles": 29
+        },
+        "mirror": {
+          "bytes": 46460160,
+          "allocatedBytes": 46518272,
+          "files": 20
+        },
+        "openToSearchMs": 8974.977732,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 5,
+        "host": {
+          "rssBytes": 493428736,
+          "highWaterRssBytes": 493428736,
+          "cpuSeconds": 18.85,
+          "openFiles": 118
+        },
+        "hub": {
+          "rssBytes": 279564288,
+          "highWaterRssBytes": 279564288,
+          "cpuSeconds": 8.47,
+          "openFiles": 30
+        },
+        "mirror": {
+          "bytes": 57266624,
+          "allocatedBytes": 57339904,
+          "files": 25
+        },
+        "openToSearchMs": 6121.830836000008,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 6,
+        "host": {
+          "rssBytes": 537194496,
+          "highWaterRssBytes": 538435584,
+          "cpuSeconds": 21.56,
+          "openFiles": 135
+        },
+        "hub": {
+          "rssBytes": 280903680,
+          "highWaterRssBytes": 280903680,
+          "cpuSeconds": 9.13,
+          "openFiles": 31
+        },
+        "mirror": {
+          "bytes": 68027840,
+          "allocatedBytes": 68116480,
+          "files": 30
+        },
+        "openToSearchMs": 6304.514941000001,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 7,
+        "host": {
+          "rssBytes": 584863744,
+          "highWaterRssBytes": 601739264,
+          "cpuSeconds": 24.65,
+          "openFiles": 152
+        },
+        "hub": {
+          "rssBytes": 285335552,
+          "highWaterRssBytes": 285335552,
+          "cpuSeconds": 9.76,
+          "openFiles": 32
+        },
+        "mirror": {
+          "bytes": 79100424,
+          "allocatedBytes": 79204352,
+          "files": 35
+        },
+        "openToSearchMs": 6152.486816999997,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 8,
+        "host": {
+          "rssBytes": 637157376,
+          "highWaterRssBytes": 637157376,
+          "cpuSeconds": 27.78,
+          "openFiles": 169
+        },
+        "hub": {
+          "rssBytes": 287019008,
+          "highWaterRssBytes": 287019008,
+          "cpuSeconds": 10.39,
+          "openFiles": 33
+        },
+        "mirror": {
+          "bytes": 90069936,
+          "allocatedBytes": 90185728,
+          "files": 40
+        },
+        "openToSearchMs": 6412.020879000003,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 9,
+        "host": {
+          "rssBytes": 679247872,
+          "highWaterRssBytes": 679247872,
+          "cpuSeconds": 30.7,
+          "openFiles": 186
+        },
+        "hub": {
+          "rssBytes": 288378880,
+          "highWaterRssBytes": 288378880,
+          "cpuSeconds": 11.03,
+          "openFiles": 34
+        },
+        "mirror": {
+          "bytes": 101043712,
+          "allocatedBytes": 101175296,
+          "files": 45
+        },
+        "openToSearchMs": 6574.317647999997,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 10,
+        "host": {
+          "rssBytes": 727871488,
+          "highWaterRssBytes": 727871488,
+          "cpuSeconds": 33.62,
+          "openFiles": 203
+        },
+        "hub": {
+          "rssBytes": 289652736,
+          "highWaterRssBytes": 289652736,
+          "cpuSeconds": 11.64,
+          "openFiles": 35
+        },
+        "mirror": {
+          "bytes": 111821384,
+          "allocatedBytes": 111968256,
+          "files": 50
+        },
+        "openToSearchMs": 6336.799031000002,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 11,
+        "host": {
+          "rssBytes": 772788224,
+          "highWaterRssBytes": 772788224,
+          "cpuSeconds": 36.27,
+          "openFiles": 220
+        },
+        "hub": {
+          "rssBytes": 292806656,
+          "highWaterRssBytes": 292806656,
+          "cpuSeconds": 12.28,
+          "openFiles": 36
+        },
+        "mirror": {
+          "bytes": 122656736,
+          "allocatedBytes": 122818560,
+          "files": 55
+        },
+        "openToSearchMs": 6018.371406999999,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 12,
+        "host": {
+          "rssBytes": 821915648,
+          "highWaterRssBytes": 821915648,
+          "cpuSeconds": 39.05,
+          "openFiles": 237
+        },
+        "hub": {
+          "rssBytes": 294449152,
+          "highWaterRssBytes": 294449152,
+          "cpuSeconds": 12.87,
+          "openFiles": 37
+        },
+        "mirror": {
+          "bytes": 133836464,
+          "allocatedBytes": 134012928,
+          "files": 60
+        },
+        "openToSearchMs": 6286.331298999998,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 13,
+        "host": {
+          "rssBytes": 868073472,
+          "highWaterRssBytes": 868073472,
+          "cpuSeconds": 41.88,
+          "openFiles": 254
+        },
+        "hub": {
+          "rssBytes": 295714816,
+          "highWaterRssBytes": 295714816,
+          "cpuSeconds": 13.47,
+          "openFiles": 38
+        },
+        "mirror": {
+          "bytes": 145003856,
+          "allocatedBytes": 145195008,
+          "files": 65
+        },
+        "openToSearchMs": 6632.3104100000055,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 14,
+        "host": {
+          "rssBytes": 914354176,
+          "highWaterRssBytes": 914354176,
+          "cpuSeconds": 44.65,
+          "openFiles": 271
+        },
+        "hub": {
+          "rssBytes": 228208640,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 14.49,
+          "openFiles": 39
+        },
+        "mirror": {
+          "bytes": 155818680,
+          "allocatedBytes": 156024832,
+          "files": 70
+        },
+        "openToSearchMs": 6328.122411999997,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 15,
+        "host": {
+          "rssBytes": 960208896,
+          "highWaterRssBytes": 960208896,
+          "cpuSeconds": 47.34,
+          "openFiles": 288
+        },
+        "hub": {
+          "rssBytes": 231841792,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 15.18,
+          "openFiles": 40
+        },
+        "mirror": {
+          "bytes": 166784192,
+          "allocatedBytes": 167006208,
+          "files": 75
+        },
+        "openToSearchMs": 6129.487679000013,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 16,
+        "host": {
+          "rssBytes": 1009278976,
+          "highWaterRssBytes": 1009278976,
+          "cpuSeconds": 50.36,
+          "openFiles": 305
+        },
+        "hub": {
+          "rssBytes": 235446272,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 16.11,
+          "openFiles": 41
+        },
+        "mirror": {
+          "bytes": 177741464,
+          "allocatedBytes": 177975296,
+          "files": 80
+        },
+        "openToSearchMs": 6606.568960000004,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 17,
+        "host": {
+          "rssBytes": 1055387648,
+          "highWaterRssBytes": 1055387648,
+          "cpuSeconds": 53.06,
+          "openFiles": 321
+        },
+        "hub": {
+          "rssBytes": 239083520,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 16.75,
+          "openFiles": 42
+        },
+        "mirror": {
+          "bytes": 188665728,
+          "allocatedBytes": 188907520,
+          "files": 85
+        },
+        "openToSearchMs": 6310.7386289999995,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 18,
+        "host": {
+          "rssBytes": 1101418496,
+          "highWaterRssBytes": 1101418496,
+          "cpuSeconds": 55.81,
+          "openFiles": 339
+        },
+        "hub": {
+          "rssBytes": 241057792,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 17.65,
+          "openFiles": 43
+        },
+        "mirror": {
+          "bytes": 199406488,
+          "allocatedBytes": 199663616,
+          "files": 90
+        },
+        "openToSearchMs": 6031.732745999994,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 19,
+        "host": {
+          "rssBytes": 1148567552,
+          "highWaterRssBytes": 1148567552,
+          "cpuSeconds": 58.75,
+          "openFiles": 356
+        },
+        "hub": {
+          "rssBytes": 241397760,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 18.29,
+          "openFiles": 44
+        },
+        "mirror": {
+          "bytes": 210237720,
+          "allocatedBytes": 210505728,
+          "files": 95
+        },
+        "openToSearchMs": 6533.12529299999,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 20,
+        "host": {
+          "rssBytes": 1193336832,
+          "highWaterRssBytes": 1193336832,
+          "cpuSeconds": 61.52,
+          "openFiles": 373
+        },
+        "hub": {
+          "rssBytes": 247570432,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 19.2,
+          "openFiles": 45
+        },
+        "mirror": {
+          "bytes": 221244408,
+          "allocatedBytes": 221528064,
+          "files": 100
+        },
+        "openToSearchMs": 6399.789877999981,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 21,
+        "host": {
+          "rssBytes": 1227010048,
+          "highWaterRssBytes": 1240571904,
+          "cpuSeconds": 64.46,
+          "openFiles": 389
+        },
+        "hub": {
+          "rssBytes": 254558208,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 19.83,
+          "openFiles": 46
+        },
+        "mirror": {
+          "bytes": 232419920,
+          "allocatedBytes": 232714240,
+          "files": 105
+        },
+        "openToSearchMs": 7733.4481660000165,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 22,
+        "host": {
+          "rssBytes": 1174630400,
+          "highWaterRssBytes": 1286410240,
+          "cpuSeconds": 68.28,
+          "openFiles": 407
+        },
+        "hub": {
+          "rssBytes": 255537152,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 20.43,
+          "openFiles": 47
+        },
+        "mirror": {
+          "bytes": 243352592,
+          "allocatedBytes": 243658752,
+          "files": 110
+        },
+        "openToSearchMs": 7347.757693000021,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 23,
+        "host": {
+          "rssBytes": 1272209408,
+          "highWaterRssBytes": 1287634944,
+          "cpuSeconds": 72.54,
+          "openFiles": 424
+        },
+        "hub": {
+          "rssBytes": 256450560,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 21.09,
+          "openFiles": 48
+        },
+        "mirror": {
+          "bytes": 254171536,
+          "allocatedBytes": 254492672,
+          "files": 115
+        },
+        "openToSearchMs": 6817.297297000012,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 24,
+        "host": {
+          "rssBytes": 1309487104,
+          "highWaterRssBytes": 1323495424,
+          "cpuSeconds": 75.55,
+          "openFiles": 441
+        },
+        "hub": {
+          "rssBytes": 258236416,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 21.99,
+          "openFiles": 49
+        },
+        "mirror": {
+          "bytes": 265342664,
+          "allocatedBytes": 265678848,
+          "files": 120
+        },
+        "openToSearchMs": 6589.048944000009,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 25,
+        "host": {
+          "rssBytes": 1356996608,
+          "highWaterRssBytes": 1371373568,
+          "cpuSeconds": 78.45,
+          "openFiles": 458
+        },
+        "hub": {
+          "rssBytes": 258121728,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 22.65,
+          "openFiles": 50
+        },
+        "mirror": {
+          "bytes": 276341136,
+          "allocatedBytes": 276692992,
+          "files": 125
+        },
+        "openToSearchMs": 6266.763065999985,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 26,
+        "host": {
+          "rssBytes": 1417150464,
+          "highWaterRssBytes": 1417150464,
+          "cpuSeconds": 81.21,
+          "openFiles": 475
+        },
+        "hub": {
+          "rssBytes": 258224128,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 23.26,
+          "openFiles": 51
+        },
+        "mirror": {
+          "bytes": 287306672,
+          "allocatedBytes": 287674368,
+          "files": 130
+        },
+        "openToSearchMs": 6228.874160999985,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 27,
+        "host": {
+          "rssBytes": 1464983552,
+          "highWaterRssBytes": 1464983552,
+          "cpuSeconds": 84.35,
+          "openFiles": 492
+        },
+        "hub": {
+          "rssBytes": 259502080,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 24.25,
+          "openFiles": 52
+        },
+        "mirror": {
+          "bytes": 298166864,
+          "allocatedBytes": 298549248,
+          "files": 135
+        },
+        "openToSearchMs": 6610.515028000023,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 28,
+        "host": {
+          "rssBytes": 1522315264,
+          "highWaterRssBytes": 1522315264,
+          "cpuSeconds": 88.11,
+          "openFiles": 509
+        },
+        "hub": {
+          "rssBytes": 274870272,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 24.87,
+          "openFiles": 53
+        },
+        "mirror": {
+          "bytes": 309157120,
+          "allocatedBytes": 309555200,
+          "files": 140
+        },
+        "openToSearchMs": 6421.723413,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 29,
+        "host": {
+          "rssBytes": 1534791680,
+          "highWaterRssBytes": 1545609216,
+          "cpuSeconds": 91.14,
+          "openFiles": 526
+        },
+        "hub": {
+          "rssBytes": 286068736,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 25.5,
+          "openFiles": 54
+        },
+        "mirror": {
+          "bytes": 320184384,
+          "allocatedBytes": 320598016,
+          "files": 145
+        },
+        "openToSearchMs": 6520.002632999996,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 30,
+        "host": {
+          "rssBytes": 1581142016,
+          "highWaterRssBytes": 1581142016,
+          "cpuSeconds": 94.09,
+          "openFiles": 543
+        },
+        "hub": {
+          "rssBytes": 288235520,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 26.06,
+          "openFiles": 55
+        },
+        "mirror": {
+          "bytes": 331236464,
+          "allocatedBytes": 331665408,
+          "files": 150
+        },
+        "openToSearchMs": 6593.251094999985,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 31,
+        "host": {
+          "rssBytes": 1626079232,
+          "highWaterRssBytes": 1626079232,
+          "cpuSeconds": 96.88,
+          "openFiles": 560
+        },
+        "hub": {
+          "rssBytes": 289419264,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 26.69,
+          "openFiles": 56
+        },
+        "mirror": {
+          "bytes": 342080104,
+          "allocatedBytes": 342523904,
+          "files": 155
+        },
+        "openToSearchMs": 6169.956310000009,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      },
+      {
+        "runtimes": 32,
+        "host": {
+          "rssBytes": 1674055680,
+          "highWaterRssBytes": 1674055680,
+          "cpuSeconds": 99.9,
+          "openFiles": 577
+        },
+        "hub": {
+          "rssBytes": 290648064,
+          "highWaterRssBytes": 296087552,
+          "cpuSeconds": 27.32,
+          "openFiles": 57
+        },
+        "mirror": {
+          "bytes": 353095104,
+          "allocatedBytes": 353554432,
+          "files": 160
+        },
+        "openToSearchMs": 6288.145620999974,
+        "history": {
+          "pages": 0,
+          "snapshots": 0
+        }
+      }
+    ],
+    "peaks": {
+      "host": {
+        "rssBytes": 1674055680,
+        "highWaterRssBytes": 1674055680,
+        "openFiles": 577
+      },
+      "hub": {
+        "rssBytes": 296796160,
+        "highWaterRssBytes": 296796160,
+        "openFiles": 57
+      }
+    }
+  },
+  "cap": {
+    "sessions": 128,
+    "concurrency": 16,
+    "acknowledgedWrites": 28,
+    "unsyncedWrites": 12,
+    "elapsedMs": 58333.913881999964,
+    "before": {
+      "host": {
+        "rssBytes": 1681793024,
+        "highWaterRssBytes": 1681793024,
+        "cpuSeconds": 100.42,
+        "openFiles": 672
+      },
+      "hub": {
+        "rssBytes": 290648064,
+        "highWaterRssBytes": 296087552,
+        "cpuSeconds": 27.33,
+        "openFiles": 57
+      },
+      "mirror": {
+        "bytes": 353095104,
+        "allocatedBytes": 353554432,
+        "files": 160
+      }
+    },
+    "after": {
+      "host": {
+        "rssBytes": 1730572288,
+        "highWaterRssBytes": 1730572288,
+        "cpuSeconds": 128.72,
+        "openFiles": 680
+      },
+      "hub": {
+        "rssBytes": 244486144,
+        "highWaterRssBytes": 296087552,
+        "cpuSeconds": 29.33,
+        "openFiles": 57
+      },
+      "mirror": {
+        "bytes": 356019648,
+        "allocatedBytes": 356478976,
+        "files": 160
+      }
+    },
+    "peaks": {
+      "host": {
+        "rssBytes": 1734836224,
+        "highWaterRssBytes": 1734836224,
+        "openFiles": 688
+      },
+      "hub": {
+        "rssBytes": 296271872,
+        "highWaterRssBytes": 296271872,
+        "openFiles": 59
+      }
+    },
+    "latency": {
+      "search": {
+        "calls": 120,
+        "p50Ms": 782.9715759999817,
+        "p95Ms": 6581.900704999978,
+        "maxMs": 7144.224317000015
+      },
+      "set_metadata": {
+        "calls": 40,
+        "p50Ms": 3960.7235690000234,
+        "p95Ms": 5431.9120229999535,
+        "maxMs": 6348.080124999979
+      }
+    },
+    "hostCpuPercent": 48.513802892167156,
+    "hubCpuPercent": 3.428537306866937
+  },
+  "restart": {
+    "sessions": 128,
+    "listeningMs": 544.0594709999859,
+    "allSearchableMs": 29522.870796000003,
+    "completionMs": [
+      12740.002174000023,
+      12760.146038000006,
+      12779.213418999978,
+      12800.791695000022,
+      12820.305079000012,
+      12839.820074999996,
+      12871.45392900001,
+      12921.894371000002,
+      12923.135452000017,
+      12941.52259800001,
+      17412.177764000022,
+      18467.860143000027,
+      18514.448988999997,
+      18543.15598099999,
+      20326.23327299999,
+      21995.28348500002,
+      23301.166874999995,
+      23364.889827999985,
+      23618.23783400003,
+      23704.19509200001,
+      23784.48728100001,
+      23860.654290999984,
+      24022.663317000028,
+      24044.40161499998,
+      24064.55685599998,
+      24134.395978000015,
+      24214.90612499998,
+      24336.173468000023,
+      24363.039124000003,
+      24411.994177000015,
+      24485.493016000022,
+      24512.730872999993,
+      24623.13400000002,
+      24711.789955999993,
+      24753.010499999975,
+      24824.51285900001,
+      24851.790376999998,
+      24983.949337000027,
+      25006.222551000013,
+      25088.260760999983,
+      25136.465043000004,
+      25161.441020000027,
+      25241.507718999987,
+      25301.97206,
+      25405.94214,
+      25426.748652999988,
+      25466.074720999983,
+      25531.163342999993,
+      25602.197968000022,
+      25677.47546799999,
+      25698.33708299999,
+      25752.462240000023,
+      25824.834149000002,
+      25863.80070600001,
+      25915.836071000027,
+      25943.66447900003,
+      25988.505130000005,
+      26027.715873999987,
+      26070.582720000006,
+      26116.965604999976,
+      26182.688534000015,
+      26204.413470999978,
+      26245.548866000026,
+      26310.224694999983,
+      26357.399014999974,
+      26405.597467000014,
+      26461.464969000022,
+      26482.845996999997,
+      26522.722545000026,
+      26576.79695400002,
+      26637.53938500001,
+      26658.556706000003,
+      26734.152255000023,
+      26757.105234000017,
+      26796.172502,
+      26856.324872000027,
+      26875.94786200003,
+      26936.521498000016,
+      26998.663647999987,
+      27023.074543999974,
+      27061.68137800001,
+      27096.247542000026,
+      27126.44180500001,
+      27186.764763000014,
+      27212.49499799998,
+      27288.391291000007,
+      27314.950904999976,
+      27340.87621399999,
+      27408.949915000005,
+      27435.074072999996,
+      27479.667110999988,
+      27557.993166,
+      27582.56658699998,
+      27729.704497000028,
+      27749.78133899998,
+      27780.977492999984,
+      27802.74361200002,
+      27825.137208,
+      27898.679772000003,
+      27970.310655999987,
+      27992.030685000005,
+      28102.429145000002,
+      28122.738558000012,
+      28213.765529000026,
+      28305.12526,
+      28338.994834000012,
+      28433.990806000016,
+      28464.43516699999,
+      28525.39531599998,
+      28592.473767000018,
+      28686.148438000004,
+      28708.06632600003,
+      28771.039960000024,
+      28882.936917999992,
+      28941.69424600003,
+      28964.573121999972,
+      29024.42037399998,
+      29086.806551999995,
+      29107.363598999975,
+      29178.707718999998,
+      29232.880047000013,
+      29252.352518,
+      29284.17392500001,
+      29345.449358000013,
+      29394.95053500001,
+      29415.526529999974,
+      29451.833938000025,
+      29522.821080999973
+    ],
+    "refusals503": 0,
+    "host": {
+      "rssBytes": 2267803648,
+      "highWaterRssBytes": 2267803648,
+      "cpuSeconds": 47.86,
+      "openFiles": 701
+    },
+    "hub": {
+      "rssBytes": 325832704,
+      "highWaterRssBytes": 325832704,
+      "cpuSeconds": 39.46,
+      "openFiles": 57
+    },
+    "mirror": {
+      "bytes": 216602968,
+      "allocatedBytes": 216965120,
+      "files": 160
+    },
+    "peaks": {
+      "host": {
+        "rssBytes": 2267803648,
+        "highWaterRssBytes": 2267803648,
+        "openFiles": 701
+      },
+      "hub": {
+        "rssBytes": 325832704,
+        "highWaterRssBytes": 325832704,
+        "openFiles": 57
+      }
+    }
+  },
+  "cold": [
+    {
+      "mirrorState": "empty",
+      "firstRequestToSearchMs": 8220.252085999993,
+      "host": {
+        "rssBytes": 277438464,
+        "highWaterRssBytes": 277438464,
+        "cpuSeconds": 4.79,
+        "openFiles": 42
+      },
+      "hub": {
+        "rssBytes": 350801920,
+        "highWaterRssBytes": 350801920,
+        "cpuSeconds": 40.54,
+        "openFiles": 26
+      },
+      "mirror": {
+        "bytes": 226416000,
+        "allocatedBytes": 226549760,
+        "files": 69
+      },
+      "peaks": {
+        "host": {
+          "rssBytes": 277438464,
+          "highWaterRssBytes": 277438464,
+          "openFiles": 42
+        },
+        "hub": {
+          "rssBytes": 350801920,
+          "highWaterRssBytes": 350801920,
+          "openFiles": 26
+        }
+      }
+    },
+    {
+      "mirrorState": "kept",
+      "firstRequestToSearchMs": 1182.3786449999898,
+      "host": {
+        "rssBytes": 279977984,
+        "highWaterRssBytes": 279977984,
+        "cpuSeconds": 3.36,
+        "openFiles": 42
+      },
+      "hub": {
+        "rssBytes": 357806080,
+        "highWaterRssBytes": 360185856,
+        "cpuSeconds": 41.19,
+        "openFiles": 26
+      },
+      "mirror": {
+        "bytes": 222052920,
+        "allocatedBytes": 222183424,
+        "files": 69
+      },
+      "peaks": {
+        "host": {
+          "rssBytes": 279977984,
+          "highWaterRssBytes": 279977984,
+          "openFiles": 42
+        },
+        "hub": {
+          "rssBytes": 357806080,
+          "highWaterRssBytes": 360185856,
+          "openFiles": 26
+        }
+      }
+    }
+  ],
+  "findings": [],
+  "refusals503": {},
+  "elapsedMs": 379513.177559
+}

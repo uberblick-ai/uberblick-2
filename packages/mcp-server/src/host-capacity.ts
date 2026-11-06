@@ -11,6 +11,7 @@ export interface McpHostLimits {
   minFreeBytes: number;
 }
 
+// Reference measurements and sizing rationale: ../capacity/README.md.
 export const DEFAULT_HOST_LIMITS: Readonly<McpHostLimits> = {
   maxRuntimes: 32,
   maxSessions: 128,
