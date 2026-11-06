@@ -22,6 +22,8 @@ process user plus system time, with 100% meaning one core. File counts include
 sockets and worker descriptors. Disk reports both apparent and allocated bytes
 for every file under `mirrors`, including SQLite journals and history caches.
 The generator/client and fixture preparation are excluded from host/hub memory.
+VmHWM covers a process's full lifetime; sampled phase RSS gives the hub's
+restart-specific peak, since the hub stays running between phases.
 
 The hub binds an ephemeral port on `0.0.0.0` to select its existing device
 credential admission; requests use loopback. Run on an isolated benchmark host.
@@ -43,17 +45,21 @@ deleted content, then the production hub's normal Yjs GC preserves the resulting
 structural history. The profile reports both encodings and the retained structs.
 Eight synthetic people appear as historical editors. One active principal has
 32 independent grants, eight per workspace; a further unused grant probes an
-empty mirror. Each grant has its own injected device credential. A private login
-store gives all history workers the same active account, matching those grants.
-This distribution does not measure many-account credential-store behavior.
+empty mirror. Each grant has its own injected device credential. This distribution
+does not measure many-account credential-store behavior.
 
-`memory` records the baseline and each additional searchable runtime, then waits
-for that runtime's 200 history catalogs and 3,700 revision snapshots before its
-resource checkpoint. `cap` opens all 128 sessions and submits ten waves of 64
+`memory` records the baseline and each additional searchable runtime, allowing
+one second for worker startup before its resource checkpoint. It also records
+downloaded history catalog/snapshot counts. The delivered host does not propagate
+the injected grant login or storage configuration to the background history
+refresher; snapshots are not downloaded in this experiment. The live documents
+still contain their full retained CRDT structural history, and actual worker RSS
+and polling costs remain included. Recalibrate after that history path changes.
+`cap` opens all 128 sessions and submits ten waves of 64
 concurrent calls: 48 searches and 16 acknowledged metadata writes per wave,
 rotating writes across all workspaces. Latencies include hub acknowledgement.
 `restart` gracefully stops the host, keeps every mirror, starts a fresh process
-and starts 32 new client sessions together. It reports time from process spawn
+and starts 128 new client sessions across all 32 grants together. It reports time from process spawn
 until every grant is searchable, including listener startup. `cold` measures
 first request through complete search for one unused grant and one kept mirror,
 each in a fresh host process. HTTP 503 counts are recorded by phase; unexpected
@@ -62,8 +68,8 @@ transport/tool failures fail the run and appear in `findings`.
 Search has a 100-hit maximum and no pagination. Two body-only marker queries,
 each with an exact expected set of 100 UUIDs, prove that every document is indexed;
 listing or matching titles alone is insufficient. Cold/restart completion means
-search completeness; history download completion is measured separately while
-preparing steady resource checkpoints.
+search completeness. Background snapshot downloads are a disclosed limitation,
+not part of the readiness definition.
 
 `results.json` contains revision, machine, profile, checkpoints, latency summaries,
 peaks, refusals and findings. `samples.json` contains the time series. These files

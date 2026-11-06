@@ -110,7 +110,10 @@ async function stop(child: ChildProcess | undefined) {
   try {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     await completions.get(child);
-    if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") findings.push(`Child ended with exit=${child.exitCode}, signal=${child.signalCode}`);
+    if (child.exitCode !== 0 && child.signalCode !== "SIGTERM") {
+      findings.push(`Child ended with exit=${child.exitCode}, signal=${child.signalCode}`);
+      process.exitCode = 1;
+    }
   } finally { clearTimeout(kill); }
 }
 
@@ -190,29 +193,27 @@ async function ready(session: Session, fixture: Fixture) {
   }
 }
 
-async function historyReady(grant: Grant, fixture: Fixture) {
+function historyState(grant: Grant) {
   const path = join(root, "mirrors", hostGrantHash(grant.grant.grantId), `${grant.grant.workspace}.sqlite`);
-  const end = performance.now() + 120_000;
   let counts: { pages: number; snapshots: number } = { pages: 0, snapshots: 0 };
-  for (;;) {
-    const db = new DatabaseSync(path, { readOnly: true });
-    try {
-      if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'history_v1_pages'").get()) {
-        counts = {
-          pages: Number(db.prepare("SELECT COUNT(*) AS n FROM history_v1_pages WHERE complete = 1 AND failed = 0").get()?.n),
-          snapshots: Number(db.prepare("SELECT COUNT(*) AS n FROM history_v1_snapshots").get()?.n),
-        };
-      }
-    } finally { db.close(); }
-    if (counts.pages >= fixture.profile.documentsPerWorkspace && counts.snapshots >= fixture.profile.revisionStretchesPerWorkspace) return counts;
-    if (performance.now() >= end) throw new Error(`History incomplete: ${JSON.stringify(counts)}`);
-    await pause(250, undefined, { signal: deadline });
-  }
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'history_v1_pages'").get()) {
+      counts = {
+        pages: Number(db.prepare("SELECT COUNT(*) AS n FROM history_v1_pages WHERE complete = 1 AND failed = 0").get()?.n),
+        snapshots: Number(db.prepare("SELECT COUNT(*) AS n FROM history_v1_snapshots").get()?.n),
+      };
+    }
+  } finally { db.close(); }
+  return counts;
 }
 
 function checkpoint() {
   sample();
-  return { host: resources(host), hub: resources(hub), mirror: disk(join(root, "mirrors")) };
+  const hostResources = required(resources(host));
+  const hubResources = required(resources(hub));
+  if (![hostResources.rssBytes, hubResources.rssBytes, hostResources.cpuSeconds, hubResources.cpuSeconds].every(Number.isFinite)) throw new Error("Invalid process resource sample");
+  return { host: hostResources, hub: hubResources, mirror: disk(join(root, "mirrors")) };
 }
 function peaks(name: string) {
   const selected = samples.filter(s => s.phase === name);
@@ -242,14 +243,16 @@ async function run() {
   let sessions: Session[] = [];
   phase = "memory";
   const memory = [{ runtimes: 0, ...checkpoint() }];
+  results.memory = { checkpoints: memory };
   for (const grant of grants) {
     const before = performance.now();
     const session = await connect(origin, grant);
     await ready(session, fixture);
     const openToSearchMs = performance.now() - before;
-    const history = await historyReady(grant, fixture);
+    await pause(1000, undefined, { signal: deadline });
+    const history = historyState(grant);
     sessions.push(session);
-    memory.push({ runtimes: sessions.length, ...checkpoint(), ...{ openToSearchMs, history, openToHistoryMs: performance.now() - before } });
+    memory.push({ runtimes: sessions.length, ...checkpoint(), ...{ openToSearchMs, history } });
     console.log(`Ready ${sessions.length}/${runtimeCap}`);
   }
   results.memory = { checkpoints: memory, peaks: peaks(phase) };
@@ -306,13 +309,13 @@ async function run() {
     origin = await startHost(hubUrl);
     const listeningMs = performance.now() - begin;
     const completionMs: number[] = [];
-    sessions = await Promise.all(grants.map(async grant => {
-      const session = await connect(origin, grant);
+    sessions = await Promise.all(Array.from({ length: DEFAULT_HOST_LIMITS.maxSessions }, async (_, index) => {
+      const session = await connect(origin, required(grants[index % grants.length]));
       await ready(session, fixture);
       completionMs.push(performance.now() - begin);
       return session;
     }));
-    results.restart = { listeningMs, allSearchableMs: performance.now() - begin, completionMs,
+    results.restart = { sessions: sessions.length, listeningMs, allSearchableMs: performance.now() - begin, completionMs,
       refusals503: refusals[phase] ?? 0, ...checkpoint(), peaks: peaks(phase) };
   }
 

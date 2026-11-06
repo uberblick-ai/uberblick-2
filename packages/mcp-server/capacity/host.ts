@@ -2,7 +2,6 @@ import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Fixture } from "./fixture.js";
-import { writeHubLogin } from "../src/auth-store.js";
 import { createMcpHost } from "../src/http-host.js";
 
 async function main(): Promise<void> {
@@ -14,11 +13,6 @@ async function main(): Promise<void> {
     throw new Error("Invalid host port or runtime cap");
   }
   const fixture = JSON.parse(readFileSync(join(directory, "fixture.json"), "utf8")) as Fixture;
-  process.env.XDG_CONFIG_HOME = join(directory, "config");
-  process.env.XDG_DATA_HOME = join(directory, "data");
-  const first = fixture.grants[0];
-  if (first === undefined) throw new Error("Fixture has no grant");
-  await writeHubLogin(new URL(hubUrl.replace(/^ws/, "http")).origin, first.login);
   const byToken = new Map(fixture.grants.map(item => [item.token, item]));
   const byGrant = new Map(fixture.grants.map(item => [item.grant.grantId, item]));
   const host = createMcpHost({
