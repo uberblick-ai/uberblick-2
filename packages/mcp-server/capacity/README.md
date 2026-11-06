@@ -5,7 +5,7 @@ root after `mise run install`. Choose a **new** directory on a volume with at le
 6 GiB free; it holds synthetic credentials, hub data, mirrors and private logs.
 
 ```sh
-mise exec -- node --import tsx packages/mcp-server/capacity/run.ts all /absolute/private/new-run
+mise exec -- pnpm --filter @uberblick/mcp-server exec node --import tsx capacity/run.ts all /absolute/private/new-run
 ```
 
 Replace `all` with `memory`, `cap`, `restart` or `cold` to rerun one scenario with
