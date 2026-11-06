@@ -28,6 +28,7 @@ const cwd = join(scratch, "cwd");
 const configHome = process.env.XDG_CONFIG_HOME ?? join(scratch, "config");
 const dataHome = process.env.XDG_DATA_HOME ?? join(scratch, "data");
 mkdirSync(cwd, { recursive: true });
+let proofEnv = process.env;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -37,9 +38,9 @@ function run(command, args, options = {}) {
     timeout: 120_000,
     ...options,
   });
-  if (result.status !== 0) {
+  if (result.error !== undefined || result.status !== 0) {
     throw new Error(
-      `${command} ${args.join(" ")} ${result.signal === null ? `exited ${result.status}` : `ended from ${result.signal}`}: ${result.stderr}`,
+      `${command} ${args.join(" ")} ${result.error?.message ?? (result.signal === null ? `exited ${result.status}` : `ended from ${result.signal}`)}: ${result.stderr ?? ""}`,
     );
   }
   return result.stdout.trim();
@@ -126,19 +127,15 @@ async function proveOpen() {
   }
 }
 
-const brewPrefix = spawnSync("brew", ["--prefix"], { encoding: "utf8" }).stdout.trim();
-const formulaPrefix = spawnSync("brew", ["--prefix", formulaName], {
-  encoding: "utf8",
-}).stdout.trim();
-expect(brewPrefix !== "" && formulaPrefix !== "", "Homebrew did not report its prefixes");
+const brewPrefix = run("brew", ["--prefix"]);
+expect(brewPrefix !== "", "brew --prefix returned no prefix");
+const formulaPrefix = run("brew", ["--prefix", formulaName]);
+expect(formulaPrefix !== "", `brew --prefix ${formulaName} returned no prefix`);
 expect(
   formulaPrefix.startsWith(`${brewPrefix}/`),
   `formula prefix ${formulaPrefix} is outside Homebrew prefix ${brewPrefix}`,
 );
-const installedFiles = spawnSync("brew", ["list", "--formula", formulaName], {
-  encoding: "utf8",
-}).stdout
-  .trim()
+const installedFiles = run("brew", ["list", "--formula", formulaName])
   .split("\n")
   .filter(Boolean);
 expect(installedFiles.length > 0, "Homebrew reported no installed formula files");
@@ -151,7 +148,7 @@ mkdirSync(foreignBin);
 writeFileSync(join(foreignBin, "node"), "#!/bin/sh\nexit 97\n", { mode: 0o755 });
 chmodSync(join(foreignBin, "node"), 0o755);
 
-const proofEnv = {
+proofEnv = {
   ...process.env,
   HOME: process.env.HOME,
   XDG_CONFIG_HOME: configHome,
