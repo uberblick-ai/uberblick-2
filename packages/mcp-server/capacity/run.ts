@@ -90,8 +90,8 @@ sampling.unref();
 function launch(name: string, entry: string, args: string[], env: NodeJS.ProcessEnv = {}) {
   const fd = openSync(join(root, `${name}.log`), "a", 0o600);
   // Do not inherit operator hub configuration or credentials into the fixture services.
-  const child = spawn(process.execPath, ["--import", "tsx", entry, ...args], {
-    cwd: packageRoot, env: { PATH: process.env.PATH, ...env },
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), resolve(packageRoot, entry), ...args], {
+    cwd: root, env: { PATH: process.env.PATH, ...env },
     stdio: ["ignore", "pipe", fd], timeout: 18 * 60_000, killSignal: "SIGKILL",
   });
   closeSync(fd);
