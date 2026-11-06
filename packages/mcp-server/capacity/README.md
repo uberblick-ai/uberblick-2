@@ -64,6 +64,8 @@ until every grant is searchable, including listener startup. `cold` measures
 first request through complete search for one unused grant and one kept mirror,
 each in a fresh host process. HTTP 503 counts are recorded by phase; unexpected
 transport/tool failures fail the run and appear in `findings`.
+Search readiness retries HTTP 503 after the host's one-second Retry-After;
+writes are never retried by the harness.
 
 Search has a 100-hit maximum and no pagination. Two body-only marker queries,
 each with an exact expected set of 100 UUIDs, prove that every document is indexed;

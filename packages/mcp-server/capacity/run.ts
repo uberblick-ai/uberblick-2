@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as pause } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { DEFAULT_HOST_LIMITS } from "../src/host-capacity.js";
 import { hostGrantHash } from "../src/host-grants.js";
@@ -181,7 +181,16 @@ async function ready(session: Session, fixture: Fixture) {
     const found = new Set<string>();
     let exact = true;
     for (const bucket of new Set(workspace.documents.map(d => d.bucket))) {
-      const result = await call(session, "search", { query: bucket, limit: 100 });
+      let result: Record<string, unknown>;
+      try { result = await call(session, "search", { query: bucket, limit: 100 }); }
+      catch (error) {
+        if (!(error instanceof StreamableHTTPError) || error.code !== 503) throw error;
+        if (performance.now() >= end) throw error;
+        // Busy-host replies advertise Retry-After: 1; readiness reads are safe to repeat.
+        await pause(1000, undefined, { signal: deadline });
+        exact = false;
+        break;
+      }
       const hits = result.hits as Array<{ uuid: string }>;
       const expected = workspace.documents.filter(d => d.bucket === bucket).map(d => d.uuid);
       if (hits.length !== expected.length || hits.some(hit => !expected.includes(hit.uuid))) exact = false;
