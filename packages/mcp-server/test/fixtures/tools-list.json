@@ -885,7 +885,7 @@
         },
         "old_text": {
           "type": "string",
-          "description": "The block text you read. Asserted before the splice."
+          "description": "The block's whole text as get_doc returns it, not a fragment. Asserted before the splice."
         },
         "new_text": {
           "type": "string",
@@ -986,7 +986,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a list item's `list` and `indent` can also change in place. Assert `old_text` and preferably the `rev` from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and currentRev to re-diff against. The assertion checks this replica only. A splice that touches a formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown afterwards. An edit that would remove an open thread's last anchor refuses with open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and need `table_mapping` for structural or multi-cell edits; `column_widths` sizes columns (see markdown help). Card and Figma blocks take their `:::` content and cannot be converted to or from other types. New document-link targets must be known to this replica.\n\nHelp: edit_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Change one block's text by diff-and-splice, so concurrent edits elsewhere in the block survive; a list item's `list` and `indent` can also change in place. Assert the block's whole text as `old_text` and preferably the `rev` from get_doc: a mismatch refuses with stale_block or old_text_mismatch and returns currentText and currentRev to re-diff against. The assertion checks this replica only. A splice that touches a formatting mark's edge can re-anchor the mark, so check formatted text with export_markdown afterwards. An edit that would remove an open thread's last anchor refuses with open_thread_anchored; resolve the thread or move its anchor with annotate first. Tables take GFM and need `table_mapping` for structural or multi-cell edits; `column_widths` sizes columns (see markdown help). Card and Figma blocks take their `:::` content and cannot be converted to or from other types. New document-link targets must be known to this replica.\n\nHelp: edit_block, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

@@ -35,7 +35,7 @@ afterAll(() => {
 });
 
 describe("edit_block", () => {
-  it("refuses a stale old_text and hands back the re-read payload", async () => {
+  it("explains both possible causes of a rev-less old_text mismatch", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
       title: "Conflict",
@@ -53,6 +53,12 @@ describe("edit_block", () => {
 
     expect(stale.isError).toBe(true);
     expect(stale.payload.error).toBe("stale_block");
+    expect(stale.payload.recoveryClass).toBe("reread");
+    for (const text of [stale.payload.message, stale.payload.recovery]) {
+      expect(text).toContain("may have changed since it was read, or `old_text`");
+      expect(text).toContain("whole text from get_doc");
+      expect(text).not.toContain("The block changed under you");
+    }
     expect(stale.payload.currentText).toBe("the current text");
     expect(stale.payload.currentRev).toBe(block.rev);
 
@@ -90,6 +96,10 @@ describe("edit_block", () => {
     expect(refused.payload.expectedRev).toBe(staleRev);
     expect(refused.payload.currentText).toBe("second");
     expect(refused.payload.currentRev).not.toBe(staleRev);
+    expect(refused.payload.message).toContain("the block has changed since it was read");
+    expect(refused.payload.recovery).toContain("The block changed under you.");
+    expect(refused.payload.message).not.toContain("only part");
+    expect(refused.payload.recovery).not.toContain("only part");
   });
 
   it("distinguishes an incorrect old_text when the asserted rev is current", async () => {
@@ -114,12 +124,63 @@ describe("edit_block", () => {
     expect(refused.payload.message).toContain("old_text");
     expect(refused.payload.recoveryClass).toBe("manual");
     expect(refused.payload.recovery).toContain("old_text");
+    expect(refused.payload.message).not.toContain("only part");
+    expect(refused.payload.recovery).not.toContain("only part");
     expect(refused.payload.expectedRev).toBe(block.rev);
     expect(refused.payload.currentText).toBe("the current text");
     expect(refused.payload.currentRev).toBe(block.rev);
 
     const read = await rig.ok("get_doc", { uuid: doc.uuid });
     expect(read.blocks[0].text).toBe("the current text");
+  });
+
+  it.each([
+    { revision: "absent", oldText: "current", code: "stale_block", recoveryClass: "reread" },
+    { revision: "current", oldText: "current", code: "old_text_mismatch", recoveryClass: "manual" },
+    { revision: "stale", oldText: "current", code: "stale_block", recoveryClass: "reread" },
+    { revision: "absent", oldText: "", code: "stale_block", recoveryClass: "reread" },
+  ])("identifies a fragment '$oldText' with a $revision rev", async ({ revision, oldText, code, recoveryClass }) => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Fragment",
+      description: "A test document.",
+      blocks: [{ type: "paragraph", text: "the current text" }],
+    });
+    const block = doc.blocks[0];
+    const refused = await rig.call("edit_block", {
+      uuid: doc.uuid,
+      block_id: block.id,
+      old_text: oldText,
+      new_text: "replacement",
+      ...(revision === "absent" ? {} : { rev: revision === "current" ? block.rev : "stale-rev" }),
+    });
+
+    expect(refused).toMatchObject({ isError: true, payload: {
+      error: code, recoveryClass, expectedText: oldText,
+      currentText: "the current text", currentRev: block.rev,
+      applied: false, partial: false, synced: false,
+    } });
+    for (const text of [refused.payload.message, refused.payload.recovery]) {
+      expect(text).toContain("`old_text` is only part of the block");
+      expect(text).toContain("must be the block's whole text as get_doc returns it");
+    }
+    if (revision === "stale") {
+      expect(refused.payload.message).toContain("the block has changed since it was read");
+      expect(refused.payload.recovery).toContain("The block changed under you.");
+    }
+    if (revision === "absent") {
+      expect(refused.payload.message).toContain("may have changed since it was read, or `old_text`");
+      expect(refused.payload.recovery).toContain("may have changed since it was read, or `old_text`");
+    }
+
+    const unchanged = (await rig.ok("get_doc", { uuid: doc.uuid })).blocks[0];
+    expect(unchanged.text).toBe("the current text");
+    expect(unchanged.rev).toBe(block.rev);
+    await rig.ok("edit_block", {
+      uuid: doc.uuid, block_id: block.id,
+      old_text: refused.payload.currentText, new_text: "the replacement text", rev: refused.payload.currentRev,
+    });
+    expect((await rig.ok("get_doc", { uuid: doc.uuid })).blocks[0].text).toBe("the replacement text");
   });
 
 });

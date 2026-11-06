@@ -248,6 +248,12 @@ describe("inline document references", () => {
     expect(refused.payload.expectedRev).toBe(block.rev);
     expect(refused.payload.currentText).toBe("See the hub document");
     expect(refused.payload.currentRev).toBeTruthy();
+    expect(refused.payload.message).toBe(`Stale edit for block ${block.id}: the block has changed since it was read`);
+    expect(refused.payload.recovery).toBe(
+      "The block changed under you. This answer already carries `currentText` and `currentRev`, so call the same " +
+      "tool again with `currentRev` — re-diffing against `currentText` first for edit_block, and re-measuring the " +
+      "offsets against it for link_range. No extra read is needed.",
+    );
   });
 
   it("refuses a target this replica cannot resolve, and accepts an archived one", async () => {

@@ -615,6 +615,25 @@ function stamped(
     // An unmapped crash cannot claim whether a write landed or how to recover.
     return failure(payload);
   }
+  if (tool.name === "edit_block" &&
+      (payload.error === "stale_block" || payload.error === "old_text_mismatch")) {
+    if (payload.error === "stale_block" && payload.expectedRev === null &&
+        typeof payload.expectedText === "string") {
+      const message = "The block may have changed since it was read, or `old_text` is not the block's whole text from get_doc.";
+      payload = { ...payload, message, recovery:
+        `${message} This answer already carries \`currentText\` and \`currentRev\`; use all of \`currentText\` as ` +
+        "`old_text`, re-diff the intended change against it, and call edit_block again with `currentRev`. No extra read is needed.",
+      };
+    }
+    if (typeof payload.expectedText === "string" && typeof payload.currentText === "string" &&
+        payload.expectedText !== payload.currentText && payload.currentText.includes(payload.expectedText)) {
+      const fragment = "`old_text` is only part of the block; it must be the block's whole text as get_doc returns it.";
+      payload = { ...payload,
+        message: `${fragment} ${payload.message}`,
+        recovery: `${payload.recovery ?? recovery.guidance} ${fragment}`,
+      };
+    }
+  }
   return failure({
     ...(tool.writes !== null
       ? { applied: false, partial: false, synced: false }
