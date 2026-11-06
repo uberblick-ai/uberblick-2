@@ -276,6 +276,7 @@ async function run() {
     const begin = performance.now();
     const latencies: { search: number[]; set_metadata: number[] } = { search: [], set_metadata: [] };
     let acknowledgedWrites = 0;
+    let unsyncedWrites = 0;
     // Each wave submits the full call limit. Distinct documents avoid conflicting edits.
     for (let wave = 0; wave < 10; wave++) {
       await Promise.all(Array.from({ length: DEFAULT_HOST_LIMITS.maxCalls }, async (_, index) => {
@@ -290,8 +291,9 @@ async function run() {
           : { query: document.bucket, limit: 100 });
         latencies[name].push(performance.now() - t);
         if (write) {
-          if (result.applied !== true || result.synced !== true) throw new Error("Hosted write did not receive hub acknowledgement");
-          acknowledgedWrites++;
+          if (result.applied !== true) throw new Error(`Hosted write was not applied: applied=${result.applied}, synced=${result.synced}`);
+          if (result.synced === true) acknowledgedWrites++;
+          else unsyncedWrites++;
         }
       }));
     }
@@ -302,7 +304,7 @@ async function run() {
       values.sort((a, b) => a - b);
       return [name, { calls: values.length, p50Ms: values[Math.floor(values.length * 0.5)], p95Ms: values[Math.ceil(values.length * 0.95) - 1], maxMs: values.at(-1) }];
     }));
-    results.cap = { sessions: sessions.length, concurrency: DEFAULT_HOST_LIMITS.maxCalls, acknowledgedWrites,
+    results.cap = { sessions: sessions.length, concurrency: DEFAULT_HOST_LIMITS.maxCalls, acknowledgedWrites, unsyncedWrites,
       elapsedMs, before, after, peaks: peaks(phase), latency,
       hostCpuPercent: 100_000 * ((after.host?.cpuSeconds ?? 0) - (before.host?.cpuSeconds ?? 0)) / elapsedMs,
       hubCpuPercent: 100_000 * ((after.hub?.cpuSeconds ?? 0) - (before.hub?.cpuSeconds ?? 0)) / elapsedMs };

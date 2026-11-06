@@ -56,8 +56,9 @@ refresher; snapshots are not downloaded in this experiment. The live documents
 still contain their full retained CRDT structural history, and actual worker RSS
 and polling costs remain included. Recalibrate after that history path changes.
 `cap` opens all 128 sessions and submits ten waves of 64
-concurrent calls: 48 searches and 16 acknowledged metadata writes per wave,
-rotating writes across all workspaces. Latencies include hub acknowledgement.
+concurrent calls: 48 searches and 16 metadata writes per wave,
+rotating writes across all workspaces. Latencies include the host's bounded
+acknowledgement wait; acknowledged and still-unsynced writes are counted separately.
 `restart` gracefully stops the host, keeps every mirror, starts a fresh process
 and starts 128 new client sessions across all 32 grants together. It reports time from process spawn
 until every grant is searchable, including listener startup. `cold` measures
