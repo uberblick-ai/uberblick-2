@@ -1,5 +1,5 @@
 import { createConnection } from "node:net";
-import { adminSocketPath } from "./admin-setup.js";
+import { adminSocketPath } from "./operator-socket.js";
 import type { OperatorRequest } from "./operator-control.js";
 
 /** One bounded request over the deployment's private socket; never opens the database. */

@@ -41,8 +41,7 @@ Check these before deploying:
   by the daemon, so empty Caddy logs do not diagnose it.
 - **An operator session on the host**, locally or over SSH. Tailscale SSH is
   sufficient. The operator deliberately launches and updates the stack; no
-  timer, webhook or polling loop does it. Use `ssh -t` for setup cancellation
-  through Ctrl-C.
+  timer, webhook or polling loop does it.
 
 No Tailscale setting, daemon or socket is needed for the default or public DNS
 route. The optional Tailscale route needs a Linux host's daemon and standard
@@ -50,7 +49,7 @@ route. The optional Tailscale route needs a Linux host's daemon and standard
 Caddy as root to reach it. See [the route settings below](#choose-how-clients-reach-the-hub).
 The macOS routes are loopback and public DNS HTTPS; the host-socket Tailscale
 recipe is Linux-only. Every other process runs in the published containers, including backup,
-restore and first-admin setup. The host needs no Node, pnpm or `sqlite3`.
+restore and administrator appointment. The host needs no Node, pnpm or `sqlite3`.
 
 ## Stand it up from a release
 
@@ -112,8 +111,8 @@ Do this before enabling wider access. A private Tailscale route can also be
 claimed before wider exposure. Confirm that the completed login reports the
 claim and the default workspace's UUID. Startup creates that workspace once,
 with the name **Default workspace**, and changes no computer's workspace
-binding. Existing deployments keep
-[host-only first-admin setup](#establish-a-workspaces-first-administrator).
+binding. Existing deployments use
+[host-only workspace administrator addition](#add-a-workspace-administrator).
 Bind clients explicitly as described
 [below](#binding-a-computer-to-this-hubs-workspace).
 
@@ -345,15 +344,17 @@ source checkout advancing or a candidate passing acceptance does not authorize
 an existing hub upgrade. To try a candidate first, use the
 [isolated candidate procedure below](#try-a-candidate-on-a-fresh-isolated-hub).
 
-Prepare the old deployment before switching either side:
+Complete the transition on the operator's schedule:
 
 1. Configure GitHub sign-in on the existing hub (the public Uberblick Login app
    is the standalone default).
-2. Run host-only first-admin setup for each existing workspace, retaining its UUID.
-3. Run `ub auth login <hub-origin>` on **every** computer and unattended agent
+2. Run `ub auth login <hub-origin>` on **every** computer and unattended agent
    host that syncs here. Confirm access, or allow renewal to pick up a later grant.
-4. Update the hub and all clients to the matching protocol in one sitting. Restart
+3. Update the hub and all clients to the matching protocol in one sitting. Restart
    MCP servers and `ub open` processes, and reload host-served pages.
+4. [Add a workspace administrator](#add-a-workspace-administrator) for each
+   existing workspace, retaining its UUID and naming an account that signed in
+   to this hub. Its existing devices pick up the grant through renewal.
 
 There is no compatibility window or shared-secret fallback. A pre-switch client
 against a switched hub says to update the client. A switched client against a
@@ -658,8 +659,7 @@ device credentials and revocation belong to each hub alone.
 GitHub's approval page shows the app name, **Uberblick Login**, for every hub on
 the default. It neither identifies nor vouches for the hub. `ub auth login`
 displays the selected hub's origin next to the URL and code: approve only a login
-you started for that hub. Give a first-admin setup code only to the intended
-administrator, because the account approving it receives the grant.
+you started for that hub.
 
 A malformed `HUB_GITHUB_CLIENT_ID` prevents hub startup and names that setting;
 it never falls back to the shared app. GitHub refusing or being unreachable
@@ -730,7 +730,7 @@ including some Docker Desktop, IPv6 publishing and host-loopback routes, put
 everyone in one client bucket. Many independent addresses can still fill a
 pool's hub-wide bound. These limits and pending attempts reset on restart.
 
-These GitHub limits cover CLI and browser sign-in, first-admin setup and member lookup:
+These GitHub limits cover CLI and browser sign-in and member lookup:
 
 - [Device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#rate-limits-for-the-device-flow)
   permits 50 verification-code submissions per hour per application, shared by
@@ -921,12 +921,12 @@ a bare `localhost:8080` is interpreted as an HTTPS endpoint.
 
 A deployed hub creates exactly one default workspace only when its database
 contains no documents, sign-in principals, credentials, memberships, hub
-administrators, promotion receipts or setup receipts on its first start with this version. Its UUID, name and one-time
+administrators or promotion receipts on its first start with this version. Its UUID, name and one-time
 claim state persist in `hub.sqlite`. Restarts, container replacement and
 release updates reuse them, including a later rename in Workspace Settings.
 The hub created by `ub open` never initializes or claims a default workspace.
-An existing deployment is never claimable, even if it has no membership; keep
-using host-only first-admin setup there.
+An existing deployment is never claimable, even if it has no membership; use
+[host-only workspace administrator addition](#add-a-workspace-administrator) there.
 
 Claiming commits the first account's hub administration, default-workspace
 admin membership and device credential or browser session together. Failure
@@ -934,13 +934,10 @@ before commit claims nothing. If the completed response is lost, the claim still
 stands: signing in again with that account receives a new browser session or
 device credential, according to the route used. Other completed logins grant
 neither membership nor hub administration.
-The first successful host-only first-admin grant, for any workspace, also
-closes claiming. Claiming and host setup racing for the default workspace
-can establish only one initial administrator.
-Host-only first-admin setup grants workspace administration only.
-
-A claim made by someone else cannot be recovered in place. There is no operator
-override, administrator recovery or supported way to reopen claiming. The resulting membership admits that account's device credentials to its default workspace.
+A claim's hub administrator access cannot be recovered in place. There is no
+operator override or supported way to reopen claiming. Workspace administrator
+access can be recovered with the host command described above. The resulting
+claim membership admits that account's device credentials to its default workspace.
 A fresh hub has nothing to lose, so start over instead: run
 `docker compose down --volumes`, then `up` again and claim it.
 
@@ -1110,7 +1107,7 @@ Workspace inventory rows contain `workspaceId`, optional valid `name`,
 `members` (count), `admins` (workspace-admin handles) and `status` (`active` or
 `suspended`). The inventory includes
 the default workspace and UUIDs present in stored document prefixes,
-memberships, promotion receipts or first-admin setup grants. Names come from
+memberships, promotion receipts or suspension records. Names come from
 each workspace's readable `_settings`; no other document content is returned.
 
 In `ub open`, Hub → Workspaces lets a current hub administrator suspend or
@@ -1252,7 +1249,7 @@ docker compose exec hub ub-hub hub-admin add <github-login>
 
 The account must have completed GitHub sign-in to **this hub**, through
 `ub auth login <hub>` or the hub's web page. A workspace grant's account lookup
-or `ub-hub admin-setup` alone does not qualify: sign in to this hub, then retry.
+alone does not qualify: sign in to this hub, then retry.
 Once recorded, sign-in eligibility survives sign-out, browser-session expiry,
 device revocation and restart. Device sign-ins already on record at upgrade
 count, including revoked devices, as do browser sessions that have not yet
@@ -1286,113 +1283,57 @@ administrator. The host command provides no removal action. Hub administration
 alone gives no workspace document access; grant workspace membership separately
 when needed.
 
-## Establish a workspace's first administrator
+## Add a workspace administrator
 
-For an existing deployment, or a workspace other than a fresh hub's default,
-run setup in the deployment directory **on the hub host**, for example over SSH.
-[GitHub sign-in](#github-sign-in) is available by default:
+Run this in the deployment directory **on the hub host**, for example over SSH:
 
 ```sh
-docker compose exec hub ub-hub admin-setup <workspace-uuid>
+docker compose exec hub ub-hub workspace-admin add <workspace-uuid> <github-login>
 ```
 
-Name exactly one bare workspace UUID. For an existing workspace, use the UUID
-`ub status` shows on a machine that holds it, including a workspace from an older deployment. Setup adopts that same workspace; it does not replace its
-identity or documents. For a new workspace, choose a fresh UUID and pass it to
-the same command. Setup establishes its first administrator without creating
-documents or selecting the workspace in host or client configuration.
+Use the UUID shown under **Hub → Workspaces**, or by `ub status` on a machine
+that holds the workspace. The hub must already hold that workspace, including
+one that is suspended. The command never creates a workspace.
 
-The command prints a setup ID, GitHub's approval URL and a short code. Keep
-the ID for checking the result, and keep the code private: the GitHub account
-that approves **that code** becomes the administrator. Open the URL in a
-browser on any machine, sign in to the intended account and approve the code.
-Give the code only to the intended administrator. GitHub's page names the app,
-not the hub, and does not identify or vouch for the setup's hub or workspace.
-The hub host needs no browser. The command waits for approval and reports the
-GitHub login and durable account ID, the named workspace, and whether the hub
-already held documents for that workspace. The hub logs the committed grant.
-Approval expires within fifteen minutes.
-
-Host access is the authority for this operation. `ub-hub admin-setup` runs in
-the running hub container; the command connects to
-a private Unix socket beside the hub database. No deployment HTTP or WebSocket
-route can start setup, complete it or retrieve its result. A shared signing
-secret, device credential or supplied GitHub token cannot authorize setup.
-The hub uses GitHub's token briefly to read the approving account's public
-identity, then discards it. That token is never sent to the command, printed,
-logged or saved.
-
-### What setup can change
-
-Setup works only while the workspace has **no membership**, including a new
-workspace the hub holds nothing for. It refuses a workspace with any membership
-both when starting and when approval completes. Two setups racing for one
-workspace can establish only one administrator. You may run the command again
-for a different workspace with no membership.
-
-Running the command does not give the host operator a role or membership. Only
-the account approving its code gains that workspace's admin membership, using
-the same principal that the account's ordinary GitHub sign-in reaches. Setup
-issues no device credential and changes no documents, credentials or other
-workspace's memberships. Its first committed grant closes fresh-hub claiming
-for good. Setup remains available for an unclaimed default workspace; it races
-with claiming under the same membership check. Once membership exists, setup
-cannot add, replace or remove anyone there; access management belongs to that
-workspace's admins. After claiming closes, ordinary sign-in grants no membership.
-
-Setup grants the approving account access to that workspace. A machine that
-signed in before setup discovers the new membership through renewal, without
-new GitHub approval. Running MCP and ub open processes resume sharing with the
-existing login even if they previously reported no workspace access.
-
-### Cancellation and a missing result
-
-Denied, abandoned, expired and failed approvals end distinctly without a grant.
-Compose allocates a container terminal so **Ctrl-C**
-reaches the setup command. Over SSH, allocate a terminal with `ssh -t <hub-host>`.
-Press Ctrl-C and wait for `cancelled` or an unknown-result message.
-If the hub observes cancellation or interruption before committing, it fences
-that setup: approving its code later grants nothing. A grant already committed
-stands even if the command or its connection dies before displaying success.
-
-With redirected input or SSH without a terminal, Compose does not forward host
-signals to the command. Interrupting that host process does **not** cancel setup;
-the code can still be approved until it expires. A command can also survive a
-dropped SSH connection. Treat these interruptions as unknown results and check
-status; they do not prove cancellation.
-
-Losing the result does **not** establish that nothing changed. Reconnect to
-the host deployment directory and use the setup ID printed by the original command:
+The account must have completed GitHub sign-in to **this hub**, through
+`ub auth login <hub>` or the hub's web page. The command looks up the hub's
+recorded accounts without contacting GitHub. An unrecorded account, a recorded
+account with no sign-in, or an ambiguous login is refused with a non-zero exit
+and no membership change. Select a renamed or ambiguous account by its durable
+GitHub account ID instead:
 
 ```sh
-docker compose exec hub ub-hub admin-setup status <setup-uuid>
+docker compose exec hub ub-hub workspace-admin add <workspace-uuid> --account-id <github-account-id>
 ```
 
-The committed receipt is private hub data and survives a hub restart. This
-lookup retrieves what that setup committed without granting or changing
-anything. An unknown result never proves that nothing changed: for example,
-a database restore can replace the recorded history. Check the hub's grant
-logs with `docker compose logs hub` and the applicable backups when the
-receipt is unavailable. Do not interpret a connection failure or an unknown
-result as permission to replace an administrator.
+A plain argument is always a login, including an entirely numeric login.
 
-### Out of scope: recovery of workspace administrator access
+Host access authorizes the operation through the running hub's private Unix
+socket beside its database. No HTTP, WebSocket, management-request, CLI-login
+or MCP route can add a workspace administrator this way. The command adds an
+admin membership or promotes an existing member, whether or not the workspace
+already has members. It changes no other membership and issues no credential.
+An account already holding the role is reported as already a workspace
+administrator without changing anything. The hub logs every use, with the
+workspace, account, outcome and time.
 
-Setup provides no privileged recovery route. It never acts on a workspace with
-membership, and access management cannot remove or demote its final admin.
-Administrator authority belongs to durable GitHub account IDs. Restoring a
-backup whose administrators are the same inaccessible accounts restores the
-same lockout; it cannot recover those GitHub accounts.
+Use this when the workspace's only administrator lost access, or when a held
+workspace has no members. The new administrator can sign in and manage the
+other members under **Workspace → Members**, including removing the lost
+account. The command never removes or demotes anyone, and ordinary membership
+management continues to protect the final administrator. Hub administrator
+access has its own recovery procedure; this command grants no hub role.
 
-An older backup can recover access only if its access state permits access
-again: a historical administrator whose GitHub account is still accessible,
-or a workspace with no membership where setup can run anew. A restore replaces
-the **whole hub database**, including the documents and access state of every
-workspace, not just the affected workspace. Use the
-[backup and restore procedure](#backing-the-hub-up) below. Without a suitable
-backup, this version offers no supported workspace administrator recovery. Any
-operator route to recover workspace administration requires a separate owner
-decision.
+The member list marks an administrator added or promoted by this command as
+**added on the host**. The marker disappears if a workspace administrator
+later changes that member's role or removes them. A device already signed in
+as the added account receives the membership at its next credential renewal,
+without another GitHub approval.
+
+If the command cannot reach the hub or loses its response, it says the result
+is unknown and exits non-zero. Run the same command again: a membership already
+committed answers `already workspace admin`. A missing response never proves
+that nothing changed.
 
 ## Configure and check the stack
 
@@ -1423,7 +1364,7 @@ All three routes enforce the same device credentials and workspace membership.
 | HTTPS with public DNS | `COMPOSE_FILE=compose.yml:remote.https.yml`, `WEB_HOST=hub.example.com`; optional `HTTPS_BIND_IP=<host-ipv4>` | `ub auth login https://hub.example.com` | `ub workspace use wss://hub.example.com/ws/<WORKSPACE_ID>` |
 | HTTPS with Tailscale, Linux only | `COMPOSE_FILE=compose.yml:remote.https.yml:remote.tailscale.yml`, `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace use wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
 
-Use the UUID reported by the claim or first-admin setup. Use the selected port
+Use the UUID reported by the claim or **Hub → Workspaces**. Use the selected port
 in both loopback commands. The client's origin must be spelled consistently:
 `localhost` and `127.0.0.1`, or loopback and a configured DNS name, are different
 authentication origins and have separate stored logins.
@@ -1621,8 +1562,8 @@ client text appears only in JSON-escaped strings.
 
 ### Checking the hub
 
-The hub image supplies `ub-hub` for status, diagnostics, first-admin setup,
-backup and restore. These commands use the private control socket or the
+The hub image supplies `ub-hub` for status, diagnostics, workspace and hub
+administrator appointment, backup and restore. These commands use the private control socket or the
 `hub-data` volume. They cannot be reached over HTTP or WebSocket and never
 start, stop or update containers. Run them from the deployment directory:
 
@@ -1646,8 +1587,8 @@ docker compose run --rm hub ub-hub doctor
 ```
 
 Bare `ub-hub` and `ub-hub --help` list the commands and exit 0; bad arguments exit 2, and
-operational failures exit 1. First-admin setup retains its cancellation codes
-and reports an unknown result when it cannot confirm what happened.
+operational failures exit 1. Administrator appointment reports an unknown
+result when it cannot confirm what happened; repeat the same command to check.
 
 ### Backing the hub up
 
@@ -1777,7 +1718,7 @@ docker compose start hub
 
 Restore reads the candidate before changing the volume: it must pass
 `PRAGMA integrity_check` and contain documents or private access state.
-Identities, credentials, memberships, committed setup receipts and claim state
+Identities, credentials, memberships and claim state
 are worth restoring even before the first document exists. A missing, corrupt
 or empty backup leaves the volume untouched. A running hub also refuses the
 restore and names `docker compose stop hub`.
@@ -1890,9 +1831,8 @@ itself does not change the hub's default workspace, first-claim state or other
 memberships. On a fresh hub, the separate sign-in before promotion can claim the
 default workspace through the normal first-login flow.
 
-Host-only first-administrator setup remains a separate operation for workspaces
-without membership, existing or new. Its Unix-socket authority and restrictions are
-unchanged. Promotion's authenticated HTTP request can reserve only a new, empty
+Host-only workspace administrator addition acts only on workspaces the hub
+already holds, whether or not they have members. Promotion's authenticated HTTP request can reserve only a new, empty
 UUID for a current hub administrator; it cannot adopt an
 unrelated populated one.
 

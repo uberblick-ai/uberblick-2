@@ -20,7 +20,7 @@ import { assertHubDatabaseUpgrade, seedReleaseCredential, snapshotHubDatabase } 
 const WORKSPACE = "00000000-0000-4000-8000-000000001172";
 const PRINCIPAL = "00000000-0000-4000-8000-000000001173";
 const SETUP = "00000000-0000-4000-8000-000000001174";
-const PRIVATE_TABLES = ["hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_claim_state"];
+const PRIVATE_TABLES = ["hub_principals", "hub_credentials", "hub_memberships", "hub_claim_state"];
 // Y.encodeStateAsUpdate(doc), with clientID 1172 and a Y.Text named
 // release-proof containing "Synthetic hub release continuity". No host Yjs or
 // checkout dependency is needed to seed this valid v1 document snapshot.
@@ -149,7 +149,6 @@ async function main() {
   const operator = (name, args, options = {}) => command("sh", [join("bin", name), ...args], {
     cwd: deployment, env: environment, ...options,
   });
-  const setupCommand = (args, options = {}) => compose(["exec", "-T", "hub", "ub-hub", "admin-setup", ...args], options);
   const offline = (source) => compose(["run", "--rm", "--no-deps", "-T", "--entrypoint", "node", "hub", "-e", source]);
   const live = (source) => compose(["exec", "-T", "hub", "node", "-e", source]);
   const snapshotSource = `const { DatabaseSync } = require("node:sqlite");
@@ -384,10 +383,12 @@ db.prepare("UPDATE documents SET name = ? WHERE name = ?")
 db.prepare("UPDATE hub_claim_state SET default_workspace_id = ?, unclaimed = 0 WHERE id = 1").run("${WORKSPACE}");
 db.prepare("INSERT INTO documents(name,data) VALUES (?,?)").run("${WORKSPACE}/${SETUP}", Buffer.from("${UPDATE}", "base64"));
 db.prepare("INSERT INTO hub_principals (id,github_account_id,github_username) VALUES (?,?,?)").run("${PRINCIPAL}", "11720001", "release-proof");
-db.prepare("INSERT INTO hub_memberships VALUES (?,?,?)").run("${WORKSPACE}", "${PRINCIPAL}", "admin");
+db.prepare("INSERT INTO hub_memberships (workspace_id, principal_id, role) VALUES (?,?,?)").run("${WORKSPACE}", "${PRINCIPAL}", "admin");
 (${seedReleaseCredential.toString()})(db, "${PRINCIPAL}", "${WORKSPACE}");
-db.prepare("INSERT INTO hub_admin_setup_grants VALUES (?,?,?,?,?,?)")
-  .run("${SETUP}", "${WORKSPACE}", "${PRINCIPAL}", "11720001", "release-proof", 1);
+if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'hub_admin_setup_grants'").get() !== undefined) {
+  db.prepare("INSERT INTO hub_admin_setup_grants VALUES (?,?,?,?,?,?)")
+    .run("${SETUP}", "${WORKSPACE}", "${PRINCIPAL}", "11720001", "release-proof", 1);
+}
 db.exec("COMMIT"); db.close();`);
     await compose(["start", "hub"]);
     await serving();
@@ -396,12 +397,6 @@ db.exec("COMMIT"); db.close();`);
     for (const table of PRIVATE_TABLES) assert.equal(original[table].length, 1);
     assert.deepEqual(original.hub_claim_state, [{ id: 1, default_workspace_id: WORKSPACE, unclaimed: 0 }]);
     assert.deepEqual(JSON.parse((await request(freshPort, "/auth/claim-state")).body), { unclaimed: false, canClaim: false });
-    const setup = await setupCommand([WORKSPACE], { allowFailure: true });
-    assert.equal(setup.code, 1);
-    assert.match(setup.stdout, /workspace-has-membership/);
-    const status = await setupCommand(["status", SETUP]);
-    assert.match(status.stdout, /complete: release-proof/);
-    console.log("Bundled setup reaches the private host socket; membership refusal and durable receipt lookup work without a checkout.");
     const olderBackupPath = (await compose(["exec", "-T", "hub", "ub-hub", "backup"])).stdout.match(/\/data\/[^\s]+\.sqlite/)?.[0];
     assert.ok(olderBackupPath, "online backup reports its private volume path");
     await compose(["cp", `hub:${olderBackupPath}`, "backup.sqlite"]);
@@ -441,11 +436,12 @@ db.exec("COMMIT"); db.close();`);
       const id = (await compose(["ps", "--quiet", service])).stdout.trim();
       assert.equal((await command("docker", ["inspect", "--format", "{{.Config.Image}}", id])).stdout.trim(), image);
     }
-    assert.match((await setupCommand(["status", SETUP])).stdout, /complete: release-proof/);
+    const retiredReceipts = await live("const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync('/data/hub.sqlite',{readOnly:true}); console.log(db.prepare(\"SELECT count(*) AS count FROM sqlite_schema WHERE name = 'hub_admin_setup_grants'\").get().count); db.close();");
+    assert.equal(Number(retiredReceipts.stdout), 0, "upgrade drops retired setup receipts");
     console.log(`Recreated ${versions[0]} as ${versions[1]} from newly extracted files; documents, private history, claim and Caddy volumes survived; legacy HMAC credentials are revoked when crossing to public keys.`);
 
     const help = await compose(["exec", "-T", "hub", "ub-hub", "--help"]);
-    for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(help.stdout, new RegExp(name));
+    for (const name of ["status", "doctor", "workspace-admin", "hub-admin", "backup", "restore"]) assert.match(help.stdout, new RegExp(name));
     const hubStatus = await compose(["exec", "-T", "hub", "ub-hub", "status"]);
     assert.ok(hubStatus.stdout.includes(versions[1]), hubStatus.stdout);
     assert.match(hubStatus.stdout, /\/data\/hub\.sqlite/);
@@ -462,7 +458,7 @@ db.exec("COMMIT"); db.close();`);
     assert.deepEqual(await snapshot(), upgraded);
     await compose(["stop", "hub"]);
     await offline(`const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync("/data/hub.sqlite");
-db.exec("BEGIN IMMEDIATE"); for (const table of ["hub_admin_setup_grants", "hub_credentials", "hub_memberships", "hub_principals", "documents"]) db.exec("DELETE FROM " + table);
+db.exec("BEGIN IMMEDIATE"); for (const table of ["hub_credentials", "hub_memberships", "hub_principals", "documents"]) db.exec("DELETE FROM " + table);
 db.exec("UPDATE hub_claim_state SET unclaimed = 1 WHERE id = 1");
 db.exec("COMMIT"); db.close();`);
     const restore = await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "--yes", "-"], { input: olderBackup });

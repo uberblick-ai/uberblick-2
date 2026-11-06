@@ -70,11 +70,14 @@ function member(value: unknown, login?: StoredHubLogin): Record<string, unknown>
   if (!object(value) || !isUuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
       typeof value.githubUsername !== "string" || value.githubUsername.length === 0 ||
       (login !== undefined && value.githubUsername.includes(login.credential.key)) ||
-      (value.role !== "member" && value.role !== "admin")) {
+      (value.role !== "member" && value.role !== "admin") ||
+      (value.addedOnHost !== undefined && typeof value.addedOnHost !== "boolean") ||
+      (value.addedOnHost === true && value.role !== "admin")) {
     throw new ManagementResponseError();
   }
   return { principalId: value.principalId, githubAccountId: value.githubAccountId,
-    githubUsername: value.githubUsername, role: value.role };
+    githubUsername: value.githubUsername, role: value.role,
+    ...(value.addedOnHost === true ? { addedOnHost: true } : {}) };
 }
 
 function count(value: unknown): value is number {

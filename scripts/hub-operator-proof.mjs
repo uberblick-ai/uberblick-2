@@ -130,7 +130,7 @@ try {
   assert.equal(files.user, 1000); assert.ok(files.executable); assert.equal(files.legacyBundle, false);
   for (const args of [[], ["--help"]]) {
     const result = await offline(["ub-hub", ...args]);
-    for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(result.stdout, new RegExp(name));
+    for (const name of ["status", "doctor", "workspace-admin", "hub-admin", "backup", "restore"]) assert.match(result.stdout, new RegExp(name));
   }
   for (const args of [["unknown"], ["backup", "extra"], ["restore"]]) {
     const result = await offline(["ub-hub", ...args], { allowFailure: true });
@@ -144,8 +144,8 @@ try {
   const doctor = await exec(["ub-hub", "doctor"], { allowFailure: true });
   assertDoctor(doctor); assert.match(doctor.stdout, /^ok\s+hub\s/m); assert.match(doctor.stdout, /^ok\s+database\s/m);
   console.log(`Live status and doctor's five checks: ${doctor.code === 0 ? "passed" : "diagnostic failures recorded in proof log"}.`);
-  const receipt = await exec(["ub-hub", "admin-setup", "status", "00000000-0000-4000-8000-000000001174"], { allowFailure: true });
-  assert.equal(receipt.code, 1); assert.match(receipt.stdout + receipt.stderr, /unknown/);
+  const absentWorkspace = await exec(["ub-hub", "workspace-admin", "add", "00000000-0000-4000-8000-000000001174", "octocat"], { allowFailure: true });
+  assert.equal(absentWorkspace.code, 1); assert.match(absentWorkspace.stdout + absentWorkspace.stderr, /hub has no workspace/);
   const initial = await textState();
   assert.deepEqual(backupFiles(initial), [], "a fresh database needs no startup backup");
   assert.deepEqual(await startupBackupEvents(), []);

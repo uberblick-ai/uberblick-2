@@ -5,7 +5,7 @@ import { handleCredentialRenewal } from "./credential-renewal.js";
 import { WorkspaceNameReader } from "./workspace-names.js";
 import { WorkspacePromotions } from "./workspace-promotion.js";
 import { handleAccessManagement } from "./access-management.js";
-import { startAdminSetup } from "./admin-setup.js";
+import { startOperatorSocket } from "./operator-socket.js";
 import { createOperatorControls } from "./operator-control.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { handleBrowserSignIn } from "./browser-sign-in.js";
@@ -94,7 +94,7 @@ function createTeamExtension(
     admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log }, hubAdmins);
   }
 
-  let adminSetup: Awaited<ReturnType<typeof startAdminSetup>> | undefined;
+  let operatorSocket: Awaited<ReturnType<typeof startOperatorSocket>> | undefined;
   let mcpChannel: Awaited<ReturnType<typeof startMcpChannel>> | undefined;
   return {
     ...(credentials === undefined ? {} : { credentials }),
@@ -129,9 +129,8 @@ function createTeamExtension(
         if (principals === undefined || memberships === undefined || hubAdmins === undefined || isEphemeralDatabase(config.databasePath ?? "")) {
           throw new Error("hub setup: durable hub database required");
         }
-        adminSetup = await startAdminSetup({ database, principals, memberships, claims,
-          github: config.github, log, hasLiveDocuments,
-          operator: createOperatorControls(context, config, claims, principals, hubAdmins) });
+        operatorSocket = await startOperatorSocket({ database,
+          operator: createOperatorControls(context, config, claims, principals, hubAdmins, memberships) });
       }
       if (config.mcpSocketPath !== undefined && credentials !== undefined && hubAdmins !== undefined && principals !== undefined) {
         mcpChannel = await startMcpChannel({ path: config.mcpSocketPath, authorizations, credentials, principals, admins: hubAdmins,
@@ -146,7 +145,7 @@ function createTeamExtension(
       registeredClients?.stop();
       metadataClients.stop();
       await mcpChannel?.stop();
-      await adminSetup?.stop();
+      await operatorSocket?.stop();
     },
   };
 }

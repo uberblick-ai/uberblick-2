@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { setWorkspaceName } from "@uberblick/schema";
 import { afterEach, expect, it } from "vitest";
 import * as Y from "yjs";
-import { SetupReceipts } from "../src/admin-setup.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import { HubAdminRegistry, type HubAdminRecord, type HubWorkspaceRecord } from "../src/hub-admins.js";
 import { HubClaimState } from "../src/hub-claim.js";
@@ -30,9 +29,6 @@ it("lists every inventory source without exposing document content, and tolerate
     const memberOnly = randomUUID();
     const workspaceAdmin = principals.identify("5678", "workspace-admin");
     memberships.grant({ workspaceId: memberOnly, principalId: workspaceAdmin.id, role: "admin" });
-    const receiptOnly = randomUUID();
-    new SetupReceipts(database).save({ status: "complete", setupId: randomUUID(), workspaceId: receiptOnly,
-      identity: owner, hadDocuments: false });
     const promoted = randomUUID();
     new WorkspacePromotions(database, memberships, () => false, hubAdmins).reserve(promoted, randomUUID(), owner.id);
     database.connection.prepare("DELETE FROM hub_memberships WHERE workspace_id = ?").run(promoted);
@@ -55,11 +51,10 @@ it("lists every inventory source without exposing document content, and tolerate
     database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
       .run("not-a-uuid/_settings", new Uint8Array());
     const inventory = hubAdmins.listWorkspaces();
-    expect(inventory).toHaveLength(7);
+    expect(inventory).toHaveLength(6);
     expect(inventory).toEqual(expect.arrayContaining([
       { workspaceId: defaultId, status: "active", name: "Default workspace", members: 0, admins: [] },
       { workspaceId: memberOnly, status: "active", members: 1, admins: ["workspace-admin"] },
-      { workspaceId: receiptOnly, status: "active", members: 0, admins: [] },
       { workspaceId: promoted, status: "active", members: 0, admins: [] },
       { workspaceId: docOnly, status: "active", name: "Stored project", members: 0, admins: [] },
       { workspaceId: invalidName, status: "active", members: 0, admins: [] },

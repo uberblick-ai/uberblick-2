@@ -156,7 +156,7 @@ export async function handleAccessManagement(
           principalId: principal.id, role: action.role ?? "member" });
         reply(200, { status: existing === null ? "ok" : "already-member", member: {
           principalId: principal.id, githubAccountId: principal.githubAccountId,
-          githubUsername: principal.githubUsername, role: member.role,
+          githubUsername: principal.githubUsername, role: member.role, ...(member.addedOnHost === true ? { addedOnHost: true } : {}),
         } });
         break;
       }
@@ -227,7 +227,7 @@ export async function handleAccessManagement(
           const principal = principals.get(member.principalId);
           if (principal === null) throw new Error("Access management: member identity is missing");
           return { principalId: member.principalId, githubAccountId: principal.githubAccountId,
-            githubUsername: principal.githubUsername, role: member.role };
+            githubUsername: principal.githubUsername, role: member.role, ...(member.addedOnHost === true ? { addedOnHost: true } : {}) };
         });
         reply(200, { status: "ok", members });
         break;

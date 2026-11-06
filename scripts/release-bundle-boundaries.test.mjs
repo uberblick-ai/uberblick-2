@@ -20,7 +20,7 @@ const { StreamableHTTPClientTransport } = requireFromMcp("@modelcontextprotocol/
 const teamModules = new Set([
 	"team", "team-config", "github-sign-in", "github-device-flow", "credentials",
 	"credential-admission", "credential-renewal", "memberships", "principals",
-	"github-account-lookup", "hub-claim", "workspace-promotion", "access-management", "admin-setup",
+	"github-account-lookup", "hub-claim", "workspace-promotion", "access-management", "operator-socket",
 ]);
 const clientModules = new Set([
 	"local-browser-server", "storage", "project-config", "project-binding", "workspace-registry",
@@ -202,7 +202,7 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 					if (databasePath !== undefined) env.HUB_DB_PATH = databasePath;
 					const before = readdirSync(scratch).sort();
 					const result = spawnSync(process.execPath, [output,
-						...(name === "ub-hub.mjs" ? ["admin-setup", "00000000-0000-4000-8000-000000001387"] : [])], {
+						...(name === "ub-hub.mjs" ? ["workspace-admin", "add", "00000000-0000-4000-8000-000000001387", "octocat"] : [])], {
 						cwd: scratch, env, encoding: "utf8", timeout: 10_000,
 					});
 					assert.equal(result.error, undefined, `${name} stops without hanging`);
@@ -214,7 +214,7 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 			if (name === "ub-hub.mjs") {
 				const alias = join(scratch, "operator-alias.mjs");
 				symlinkSync(output, alias);
-				const aliased = spawnSync(process.execPath, [alias, "admin-setup", "00000000-0000-4000-8000-000000001387"], {
+				const aliased = spawnSync(process.execPath, [alias, "workspace-admin", "add", "00000000-0000-4000-8000-000000001387", "octocat"], {
 					cwd: scratch, env: { ...process.env, HUB_DB_PATH: "" }, encoding: "utf8", timeout: 10_000,
 				});
 				assert.equal(aliased.status, 1, "a symlinked command executes and refuses the missing database setting");
@@ -224,7 +224,7 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 						cwd: scratch, encoding: "utf8", timeout: 10_000,
 					});
 					assert.equal(result.status, 0, "the bundled operator command prints help without opening a database");
-					for (const command of ["status", "doctor", "admin-setup", "backup", "restore"]) {
+					for (const command of ["status", "doctor", "workspace-admin", "hub-admin", "backup", "restore"]) {
 						assert.match(result.stdout, new RegExp(command));
 					}
 				}

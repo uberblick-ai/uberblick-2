@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEVICE_CREDENTIAL_LIFETIME_MS } from "@uberblick/schema/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { adminSocketPath } from "../src/admin-setup.js";
+import { adminSocketPath } from "../src/operator-socket.js";
 import { restoreDatabase } from "../src/operator-database.js";
 
 const directories: string[] = [];
@@ -98,7 +98,7 @@ describe("restore access rollback reporting", () => {
     const { root, live, candidate } = revokedPair({ wal: true });
     const backup = new DatabaseSync(candidate);
     credential(backup, "other-credential", { principal: "bob", device: otherDevice });
-    backup.prepare("INSERT INTO hub_memberships VALUES (?, 'alice', 'member'), (?, 'bob', 'member')").run(workspace, otherWorkspace);
+    backup.prepare("INSERT INTO hub_memberships (workspace_id, principal_id, role) VALUES (?, 'alice', 'member'), (?, 'bob', 'member')").run(workspace, otherWorkspace);
     backup.exec("INSERT INTO hub_admins VALUES ('alice'), ('bob')");
     backup.close();
     const current = new DatabaseSync(live);
@@ -181,7 +181,7 @@ describe("restore access rollback reporting", () => {
     credential(backup, "expiry-boundary", { issued: now - DEVICE_CREDENTIAL_LIFETIME_MS });
     credential(backup, "missing-key", { noKey: true });
     credential(backup, "still-current");
-    backup.prepare("INSERT INTO hub_memberships VALUES (?, 'alice', 'admin')").run(workspace);
+    backup.prepare("INSERT INTO hub_memberships (workspace_id, principal_id, role) VALUES (?, 'alice', 'admin')").run(workspace);
     backup.exec("INSERT INTO hub_admins VALUES ('alice')");
     backup.close();
     const current = fixture(live);
@@ -189,7 +189,7 @@ describe("restore access rollback reporting", () => {
       credential(current, id, { revoked: now });
     }
     credential(current, "still-current");
-    current.prepare("INSERT INTO hub_memberships VALUES (?, 'alice', 'member')").run(workspace);
+    current.prepare("INSERT INTO hub_memberships (workspace_id, principal_id, role) VALUES (?, 'alice', 'member')").run(workspace);
     current.exec("INSERT INTO hub_admins VALUES ('alice')");
     current.close();
     const confirm = vi.fn(async () => false);

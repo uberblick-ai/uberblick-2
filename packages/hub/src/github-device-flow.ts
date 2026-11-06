@@ -11,8 +11,6 @@ export interface GithubSignInConfig {
   now?: () => number;
   /** Test-only ceiling for the collect gate; approval lifetimes stay intact. */
   pollMaxWaitMs?: number;
-  /** Host setup's real wait between polls; GitHub's interval when absent. */
-  setupPollMs?: number;
 }
 
 const MAX_LIFETIME_MS = 15 * 60_000;
@@ -57,7 +55,7 @@ function providerFailure(error: unknown): GithubFailure {
   return new GithubFailure(code);
 }
 
-/** Requests/tokens stay in memory; sign-in and host setup complete synchronously. */
+/** Requests/tokens stay in memory; sign-in completes synchronously. */
 export class GithubDeviceFlow<Result extends object, Context = undefined> {
   private readonly requests = new Map<string, SignInRequest<Context>>();
   private readonly closed = new AbortController();

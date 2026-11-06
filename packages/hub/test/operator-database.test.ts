@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { PassThrough, Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { adminSocketPath } from "../src/admin-setup.js";
+import { adminSocketPath } from "../src/operator-socket.js";
 import { HubClaimState } from "../src/hub-claim.js";
 import { backupDatabase, checkDatabaseIntegrity, restoreDatabase } from "../src/operator-database.js";
 import { HubDatabase } from "../src/persistence.js";
@@ -150,7 +150,7 @@ describe("offline restore", () => {
     } finally { restored.close(); }
   });
 
-  it("restores a first-admin grant and receipt without documents over a document-only database", async () => {
+  it("restores a workspace admin membership without documents over a document-only database", async () => {
     const live = join(directory(), "hub.sqlite");
     database(live, "old").close();
     const candidate = join(directory(), "first-admin.sqlite");
@@ -158,11 +158,8 @@ describe("offline restore", () => {
     db.exec(`CREATE TABLE documents (name TEXT, data BLOB);
       CREATE TABLE hub_principals (id TEXT, github_account_id TEXT, github_username TEXT);
       CREATE TABLE hub_memberships (workspace_id TEXT, principal_id TEXT, role TEXT);
-      CREATE TABLE hub_admin_setup_grants (setup_id TEXT, workspace_id TEXT, principal_id TEXT,
-        github_account_id TEXT, github_username TEXT, had_documents INTEGER);
       INSERT INTO hub_principals VALUES ('principal', '1234', 'first-admin');
-      INSERT INTO hub_memberships VALUES ('workspace', 'principal', 'admin');
-      INSERT INTO hub_admin_setup_grants VALUES ('setup', 'workspace', 'principal', '1234', 'first-admin', 0)`);
+      INSERT INTO hub_memberships VALUES ('workspace', 'principal', 'admin')`);
     db.close();
     await restoreDatabase(live, candidate);
     expect(readFileSync(live)).toEqual(readFileSync(candidate));

@@ -9,6 +9,7 @@ export interface MembershipRecord {
   workspaceId: string;
   principalId: string;
   role: MembershipRole;
+  addedOnHost?: true;
 }
 
 export interface RemoveMembershipRequest {
@@ -34,6 +35,7 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_memberships (
   workspace_id TEXT NOT NULL,
   principal_id TEXT NOT NULL CHECK(length(principal_id) > 0),
   role TEXT NOT NULL CHECK(role IN ('admin', 'member')),
+  added_on_host INTEGER NOT NULL DEFAULT 0 CHECK(added_on_host IN (0, 1)),
   PRIMARY KEY (workspace_id, principal_id)
 )`;
 
@@ -61,6 +63,7 @@ function validateRole(role: MembershipRole): void {
  */
 export class MembershipRegistry {
   private readonly insert: StatementSync;
+  private readonly insertAdminOnHost: StatementSync;
   private readonly selectRole: StatementSync;
   private readonly selectMembers: StatementSync;
   private readonly selectWorkspaces: StatementSync;
@@ -74,17 +77,26 @@ export class MembershipRegistry {
   constructor(database: HubDatabase) {
     const db = database.connection;
     db.exec(SCHEMA);
+    if (!db.prepare("PRAGMA table_info(hub_memberships)").all().some(column => column.name === "added_on_host")) {
+      db.exec("ALTER TABLE hub_memberships ADD COLUMN added_on_host INTEGER NOT NULL DEFAULT 0 CHECK(added_on_host IN (0, 1))");
+    }
     this.insert = db.prepare(`
       INSERT INTO hub_memberships (workspace_id, principal_id, role)
       VALUES ($workspaceId, $principalId, $role)
       ON CONFLICT(workspace_id, principal_id) DO NOTHING
     `);
+    this.insertAdminOnHost = db.prepare(`
+      INSERT INTO hub_memberships (workspace_id, principal_id, role, added_on_host)
+      VALUES ($workspaceId, $principalId, 'admin', 1)
+      ON CONFLICT(workspace_id, principal_id) DO UPDATE SET role = 'admin', added_on_host = 1
+      WHERE hub_memberships.role <> 'admin'
+    `);
     this.selectRole = db.prepare(`
-      SELECT role FROM hub_memberships
+      SELECT role, added_on_host FROM hub_memberships
       WHERE workspace_id = $workspaceId AND principal_id = $principalId
     `);
     this.selectMembers = db.prepare(`
-      SELECT principal_id, role FROM hub_memberships
+      SELECT principal_id, role, added_on_host FROM hub_memberships
       WHERE workspace_id = $workspaceId ORDER BY principal_id
     `);
     this.selectWorkspaces = db.prepare(`
@@ -97,7 +109,7 @@ export class MembershipRegistry {
     `);
     this.selectAny = db.prepare(`SELECT 1 FROM hub_memberships WHERE workspace_id = $workspaceId LIMIT 1`);
     this.updateRole = db.prepare(`
-      UPDATE hub_memberships SET role = $role
+      UPDATE hub_memberships SET role = $role, added_on_host = 0
       WHERE workspace_id = $workspaceId AND principal_id = $principalId
     `);
     this.deleteMember = db.prepare(`
@@ -116,9 +128,16 @@ export class MembershipRegistry {
       principalId: record.principalId,
       role: record.role,
     });
-    const role = this.roleFor(record.workspaceId, record.principalId);
-    if (role === null) throw new Error("MembershipRegistry: membership was not persisted");
-    return { workspaceId: record.workspaceId, principalId: record.principalId, role };
+    const row = this.selectRole.get({ workspaceId: record.workspaceId, principalId: record.principalId });
+    if (row === undefined) throw new Error("MembershipRegistry: membership was not persisted");
+    return { workspaceId: record.workspaceId, principalId: record.principalId, role: row.role as MembershipRole,
+      ...(row.added_on_host === 1 ? { addedOnHost: true } : {}) };
+  }
+
+  /** Host control only: atomically add or promote without changing an existing admin. */
+  grantAdminOnHost(workspaceId: string, principalId: string): boolean {
+    validateIdentity(workspaceId, principalId);
+    return this.insertAdminOnHost.run({ workspaceId, principalId }).changes !== 0;
   }
 
   /** Trusted callers only, under the same rules as grant. */
@@ -126,7 +145,7 @@ export class MembershipRegistry {
     return this.grant(request);
   }
 
-  /** Internal first-admin guard: even a non-admin membership prevents setup. */
+  /** Inventory and promotion guard: any role counts as existing membership. */
   hasMembership(workspaceId: string): boolean {
     validateIdentity(workspaceId, "internal");
     return this.selectAny.get({ workspaceId }) !== undefined;
@@ -160,6 +179,7 @@ export class MembershipRegistry {
       workspaceId,
       principalId: row.principal_id as string,
       role: row.role as MembershipRole,
+      ...(row.added_on_host === 1 ? { addedOnHost: true as const } : {}),
     }));
   }
 

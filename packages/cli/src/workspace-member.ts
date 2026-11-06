@@ -82,6 +82,7 @@ interface Member {
   githubUsername: string;
   githubAccountId: string;
   role: Role;
+  addedOnHost?: true;
 }
 class MemberRefusal extends Error {}
 
@@ -168,11 +169,12 @@ export async function workspaceMemberCommand(command: "add" | "list" | "role" | 
       return body.members as Member[];
     };
     if (command === "list") {
-      const rows = (await members()).map(({ githubUsername, githubAccountId, role }) => ({ githubUsername, githubAccountId, role }));
+      const rows = (await members()).map(({ githubUsername, githubAccountId, role, addedOnHost }) => ({ githubUsername, githubAccountId, role,
+        ...(addedOnHost === true ? { addedOnHost: true } : {}) }));
       if (json) io.out(`${JSON.stringify({ hub: origin, workspaceId, members: rows })}\n`);
       else {
         io.out(`hub ${origin}\nworkspace ${workspaceId}\n`);
-        for (const row of rows) io.out(`${describe(row)} | ${row.role}\n`);
+        for (const row of rows) io.out(`${describe(row)} | ${row.role}${row.addedOnHost === true ? " (added on the host)" : ""}\n`);
         if (rows.length === 0) io.out("no members\n");
       }
       return 0;
