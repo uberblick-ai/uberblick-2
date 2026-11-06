@@ -86,12 +86,14 @@ whole output directory after preserving the public results.
 
 ## Reference results and defaults
 
-The [reference run](reference-results.json) measured commit
-`b1a569c0e2734cc577e3dac9ba6c5d6e2e2b7716`; the
-[64-call baseline](baseline-64-calls.json) measured
-`77306c38f9b34c467c80c3087a250129d8e8e05e`. Both completed all four scenarios
-without unexpected failures or HTTP 503 responses. Later changes in this
-directory only record those results and their interpretation.
+The [64-call run](baseline-64-calls.json) measured commit
+`77306c38f9b34c467c80c3087a250129d8e8e05e` and supports retaining the existing
+defaults. The [exploratory 16-call run](reference-results.json) measured
+`b1a569c0e2734cc577e3dac9ba6c5d6e2e2b7716`; its historical filename is kept
+with the original data. Both completed all four scenarios without unexpected
+failures or HTTP 503 responses. The figures below use the 64-call run unless
+the comparison table says otherwise. Neither JSON file has been changed to
+reflect the later decision to retain 64.
 
 Machine: an x86_64 KVM VM with eight AMD EPYC-Genoa vCPUs, 15.24 GiB RAM,
 Ubuntu 26.04.1 LTS, Linux 7.0.0-38-generic and Node v26.13.0. The data volume
@@ -102,43 +104,55 @@ descriptors. These budgets were compared with observed use, not enforced as
 container quotas. The remaining memory and disk allow for the OS and other hub
 state. Storage latency materially affects these results.
 
-At 32 searchable runtimes, host RSS was 1.56 GiB. The aggregate increase over the
-empty host was **44.79 MiB per runtime**, with a median individual increment of
-44.58 MiB. Individual increments ranged from −49.95 to 106.17 MiB as GC and the
+At 32 searchable runtimes, host RSS was 1.55 GiB. The aggregate increase over the
+empty host was **44.74 MiB per runtime**, with a median individual increment of
+44.94 MiB. Individual increments ranged from −46.46 to 111.63 MiB as GC and the
 allocator moved RSS; the JSON retains every checkpoint. Allocated mirror storage
-averaged **10.54 MiB per runtime**, including journals, with about **17 additional
+averaged **10.55 MiB per runtime**, including journals, with about **17 additional
 open descriptors** and five mirror files. The earlier spike reported 5–6 MB for
 50 small history-free documents and 10–17 MB for 200, with the hub sharing its
 process. This run includes workers, retained edit structures and source loaders.
 
-| At-cap measurement | 64-call baseline | 16-call reference |
+| At-cap measurement | Retained 64-call default | Exploratory 16-call load |
 | --- | ---: | ---: |
 | Sessions / runtimes | 128 / 32 | 128 / 32 |
 | Search calls / metadata writes | 480 / 160 | 120 / 40 |
+| Total calls / elapsed time | 640 / 222.133 s | 160 / 58.334 s |
+| Completed calls per second | 2.88 | 2.74 |
 | Search p50 / p95 | 2.357 / 32.724 s | 0.783 / 6.582 s |
 | Write p50 / p95 | 10.804 / 28.432 s | 3.961 / 5.432 s |
 | Acknowledged / still-unsynced writes | 82 / 78 | 28 / 12 |
 | Host CPU, 100% = one core | 46.37% | 48.51% |
 | Hub CPU, 100% = one core | 3.19% | 3.43% |
+| Peak host RSS / descriptors | 1.623 GiB / 728 | 1.616 GiB / 688 |
+| Peak sampled hub RSS | 273.45 MiB | 282.55 MiB |
+| Allocated mirror disk after load | 342.75 MiB | 339.96 MiB |
+| HTTP 503 refusals | 0 | 0 |
 
-The reference's at-cap host peak was 1.62 GiB RSS and 688 descriptors; the hub
-peak was 282.55 MiB RSS. Allocated mirror storage after load was 339.96 MiB.
-The lower ceiling reduces batch latency and the proportion of bounded unsynced
-answers; it does not remove them. The benchmark submits ten waves at each
-ceiling, so total request counts differ; it does not establish a fixed-arrival
-throughput or latency guarantee.
+The harness couples offered concurrency to the host's call limit: each of its
+ten waves offers exactly that many calls. Neither run exercised busy refusal.
+Offering four times fewer calls produced shorter queues and lower observed
+latencies, with similar throughput and resource use. The smaller run also had a
+lower unsynced-write share (30% versus 48.75%), but the offered loads differ.
+These single trials do not establish a benefit from lowering the admission
+limit or the completion latency, retry cost and failure rate of calls refused
+above 16. Retain 64: that measured load fits the resource budgets, and the data
+does not justify new refusals for calls 17–64. This is no latency guarantee;
+78 of 160 writes still returned the contract's bounded `synced: false` result.
+Evaluating a lower admission limit would require the same offered load above
+16 at both limits, with completion latency including retries and refusal counts.
 
 Restarting the host with every mirror kept, then reconnecting all 128 clients,
-took **29.523 s** until all clients could search every document, including
-0.544 s listener startup. Peak host RSS was **2.112 GiB**, hub RSS **310.74 MiB**,
-and host descriptors 701. There were zero 503 refusals and no other failures.
-Cold first-request-to-complete-search was **8.220 s empty**, **1.182 s kept**.
+took **29.164 s** until all clients could search every document, including
+0.615 s listener startup. Peak host RSS was **2.111 GiB**, hub RSS **298.71 MiB**,
+and host descriptors 706. There were zero 503 refusals and no other failures.
+Cold first-request-to-complete-search was **6.984 s empty**, **1.111 s kept**.
 
 | Default | Selection from these results |
 | --- | --- |
 | 32 open runtimes | Retained: all 32, including restart, fit the 4 GiB host / 2 GiB hub RSS and 2 GiB mirror budgets. |
-| 128 open sessions | Retained: the at-cap load and complete client restart stayed below the 2,048-descriptor budget, with measured peak 701. |
-| 16 calls in progress | Reduced from 64: the at-cap comparison lowered search/write p95 from 32.72/28.43 s to 6.58/5.43 s and unsynced-write proportion from 48.75% to 30%. |
+| 128 open sessions | Retained: the at-cap load and complete client restart stayed below the 2,048-descriptor budget, with measured peak 728. |
+| 64 calls in progress | Retained: the 64-call load fit the memory, disk and descriptor budgets with about 2.88 completed calls/s. The 16-call run offered less work at similar throughput and resource use; no result supports refusing calls 17–64. |
 | 256 MiB free-space admission floor | Retained: over 24 times the measured mean incremental mirror size, with ample free space on the reference volume. This existing floor gates new runtimes; it is not an ongoing growth quota. Near-full eviction behavior was not capacity-tested. |
 
 The profile retains 55,760 CRDT structures, 22,400 edit transactions and 3,700 hub

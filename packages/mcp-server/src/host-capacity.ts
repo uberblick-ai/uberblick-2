@@ -15,7 +15,7 @@ export interface McpHostLimits {
 export const DEFAULT_HOST_LIMITS: Readonly<McpHostLimits> = {
   maxRuntimes: 32,
   maxSessions: 128,
-  maxCalls: 16,
+  maxCalls: 64,
   minFreeBytes: 256 * 1024 * 1024,
 };
 
