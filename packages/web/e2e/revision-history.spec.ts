@@ -3552,6 +3552,52 @@ test.describe("document history through ub open", () => {
     await expect(page).toHaveURL(address);
   });
 
+  test("comparison viewers keep the other drawing and Copy available when playback cannot load", { tag: "@webkit" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
+      viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false,
+    }, beforeNavigate: async page => {
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", { configurable: true,
+          value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-source", text) } });
+      });
+      await page.route(/\/assets\/ablauf-playback-[^/]+\.js(?:\?.*)?$/, route => route.fulfill({
+        status: 503, contentType: "text/javascript", headers: { "Cache-Control": "no-store" }, body: "Playback unavailable",
+      }));
+    } });
+    const title = docTitle("Ablauf comparison playback failure");
+    const uuid = await newDocument(page, title);
+    const before = 'flow v0\ncolumns main\nbox first "Before drawing"';
+    const after = `${before.replace("Before drawing", "After drawing")}\n\nplay\n  step first`;
+    await serveHistory(page, [
+      { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+      { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+    ], ablaufHistory(uuid, title, [{ before, after }]));
+    await previous(page);
+    const side = earlierSide(page);
+    const preview = side.getByRole("region", { name: "Ablauf preview", exact: true });
+    await expect(preview.locator("svg")).toBeVisible();
+    const address = page.url();
+    const state = await page.evaluate(() => history.state);
+    await side.getByRole("button", { name: "Expand ablauf diagram", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    const dialog = ablaufViewer(page);
+    await expect(dialog.locator("svg")).toContainText("Before drawing");
+    await expect(dialog.getByRole("button", { name: "Source", exact: true })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "After", exact: true }).click();
+    await expect(dialog.locator("svg")).toContainText("After drawing");
+    await expect(dialog.locator("svg")).not.toHaveClass(/\bab-(playing|in-progress)\b/);
+    await expect(dialog.locator("[data-ab-part].ab-current, [data-ab-part].ab-played")).toHaveCount(0);
+    await expect(dialog.locator(".ab-playback")).toHaveCount(0);
+    await expect(side.locator(".ub-ablauf-playback-diagnostics")).toContainText("Playback cannot be loaded:");
+    await dialog.getByRole("button", { name: "Copy source", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-copied-source", after);
+    await page.goBack();
+    await expect(dialog).toHaveCount(0);
+    await expect(preview).toBeFocused();
+    await expect(page).toHaveURL(address);
+    await expect.poll(() => page.evaluate(() => history.state)).toEqual(state);
+  });
+
   test("iPad taps open either fan-out state and the switch restarts zoom", { tag: "@webkit-touch" }, async ({ browser }) => {
     const page = await openApp(browser, "/", { readySelector: ".ub-pane", contextOptions: {
       ...devices["iPad Pro 11"], viewport: { width: 1366, height: 1024 },

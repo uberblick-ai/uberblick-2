@@ -114,13 +114,13 @@ function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
     viewer?.close();
     replacing = false;
   };
-  const open = (opposite = false, focus?: HTMLElement): void => {
+  const open = (opposite = false, focus?: HTMLElement, skipLoad = false): void => {
     const current = options.drawing();
     if (destroyed || current.svg === null || viewer !== undefined) return;
     if (closing) { pendingOpen = () => open(opposite, focus); return; }
     const compared = counterpart();
     if (opposite && compared === undefined) return;
-    if (opposite && compared !== undefined && compared.timelines.length > 0 && playbacks.current() === null) {
+    if (!skipLoad && opposite && compared !== undefined && compared.timelines.length > 0 && playbacks.current() === null) {
       const pendingHistory = history;
       const request = version;
       void playbacks.load().then(() => {
@@ -128,7 +128,7 @@ function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
       }, cause => {
         if (!destroyed && version === request && history === pendingHistory) {
           options.failure(cause);
-          history?.close();
+          open(opposite, focus, true);
         }
       });
       return;
