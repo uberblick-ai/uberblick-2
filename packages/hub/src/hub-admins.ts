@@ -187,7 +187,7 @@ export class HubAdminRegistry {
   private workspaceIds(): string[] {
     const db = this.database.connection;
     const sources = ["SELECT substr(name, 1, instr(name, '/') - 1) AS workspace_id FROM documents WHERE instr(name, '/') > 0"];
-    for (const table of ["hub_memberships", "hub_workspace_promotions", "hub_admin_setup_grants", "hub_workspace_suspensions"] as const) {
+    for (const table of ["hub_memberships", "hub_workspace_promotions", "hub_workspace_suspensions"] as const) {
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined) {
         sources.push(`SELECT workspace_id FROM ${table}`);
       }

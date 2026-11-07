@@ -1,6 +1,6 @@
 # Releasing Uberblick
 
-From 0.5.0 on, each release publishes the Homebrew client and both Docker hub
+Each release publishes the Homebrew client and both Docker hub
 images at one version, from one commit. Client tags are `vX.Y.Z`; hub tags are
 `hub-vX.Y.Z`. A maintainer cuts the release deliberately from their own machine;
 merges, schedules and delivery roles publish nothing.
@@ -8,14 +8,11 @@ merges, schedules and delivery roles publish nothing.
 ## Cut a paired release
 
 Use the maintainer-invoked [release skill](.agents/skills/release/SKILL.md), also
-available at `.claude/skills/release`, for the attended procedure. It establishes
-that GitHub CI is green on the current `origin/main` candidate. Its go/no-go report covers the PRs landed since the previous `v*`
-tag, trusted authors' open PRs marked `ready-to-merge` or `needs-review`, and each
-failing e2e spec. Known-red specs need an open tracking issue or evidence that
-the same spec fails at the previous release; an absent or newly failing spec
-is new. The skill waits for the maintainer's go before tagging. A no-go names
-the blocking items and stops before creating tags. A known-red failure of a
-required CI check is still a no-go.
+available at `.claude/skills/release`. It owns the attended procedure: waiting
+for the release milestone, the go/no-go on the `origin/main` candidate, the
+release command, the Homebrew approval, smoke checks of the published client and
+images, and the CHANGELOG entry. This page describes what the release task and
+publishers do; follow the skill for the steps.
 
 On the maintainer's go, run the single release command:
 
@@ -50,21 +47,11 @@ draft listing merged PR titles and numbers since the previous `v*` tag under
 features, fixes and breaking changes. Those groups are heuristics for a
 maintainer to edit; the task publishes no notes.
 
-After a successful release, edit that draft into a new section at the top of
-[CHANGELOG.md](CHANGELOG.md) and merge it to `main`, following the format its
-introduction describes. The heading must read `## vX.Y.Z — YYYY-MM-DD`, followed
-by a one-sentence summary paragraph: uberblick.ai builds its Recent changes from
-the five newest sections in that form, so a missing or misshapen section leaves
-the home page behind the releases.
-
-After success, the skill upgrades Homebrew, checks the installed `ub --version`
-and reports `ub doctor`. It pulls both images with an empty Docker credential
-configuration for both `linux/amd64` and `linux/arm64`, verifies each platform's
-registry identity rather than dry-run local tags,
-and launches the release's host files in a disposable loopback Compose project.
-It reports `200` for the site and `101` for `/ws`, then removes only that
-project's containers and volumes and its disposable directory. Other deployment
-checks below remain attended checks beyond these smoke checks.
+Each release gets a section at the top of [CHANGELOG.md](CHANGELOG.md), pushed
+directly to `main`. Its heading must read `## vX.Y.Z — YYYY-MM-DD`, followed by a
+one-sentence summary paragraph: uberblick.ai builds its Recent changes from the
+five newest sections in that form, so a missing or misshapen section leaves the
+home page behind the releases.
 
 On the first hub release, make both GHCR packages public as described under
 [one-time registry setup](#one-time-registry-setup). The task reminds you of
@@ -74,8 +61,8 @@ pull during smoke checks also names the visibility step.
 ## Publisher diagnostics
 
 The individual publishers below explain the workflows and allow dry-run
-inspection. They are not separate release paths from 0.5.0 on; use the paired
-task to publish both tags.
+inspection. They are not separate release paths; use the paired task to
+publish both tags.
 
 The publishing jobs create GitHub build-provenance attestations in this
 repository only for artifacts built by that run, then verify them before
@@ -95,8 +82,8 @@ GitHub account or token.
 
 An exact `vMAJOR.MINOR.PATCH` tag starts the repository's `Publish Homebrew
 release` workflow. Its only job runs under the `homebrew-tap` environment,
-whose selected-tag policy is the
-credential boundary for `HOMEBREW_TAP_TOKEN`, which publishes the asset and
+which waits for a required reviewer's approval before the job starts. The
+environment's selected-tag policy is the credential boundary for `HOMEBREW_TAP_TOKEN`, which publishes the asset and
 formula on the tap. The job's `GITHUB_TOKEN` stores attestations in this
 repository; a short-lived OIDC identity signs them. The job
 builds the versioned install payload, checks the payload's own `ub --version`,
@@ -328,8 +315,8 @@ labels as well. Operators can read this metadata with Docker alone as shown in
 [REMOTE.md](REMOTE.md), even without repository access.
 
 `SYNC_PROTOCOL_VERSION` in `packages/schema/src/protocol.ts` is the compatibility
-unit. From 0.5.0 on, the hub and Homebrew client share a release number and source
-commit; matching release numbers alone do not establish wire compatibility.
+unit. The hub and Homebrew client share a release number and source commit;
+matching release numbers alone do not establish wire compatibility.
 An incompatible change to `/auth/github/start`, `/auth/github/collect`,
 `/auth/github/cancel` or `/auth/claim-state` increments this same version. Keep the
 credential-free version probe's envelope and replies stable across versions,

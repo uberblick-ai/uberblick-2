@@ -4,7 +4,9 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { getMethodLiteral } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { RequestId } from "@modelcontextprotocol/sdk/types.js";
 import type { McpConfig } from "./config.js";
 import type { CredentialProvider } from "./credential-provider.js";
 import { registerHelpResources } from "./help-resources.js";
@@ -16,6 +18,7 @@ import { SHUTDOWN_CLOSE_RESERVE_MS, SHUTDOWN_TIMEOUT_MS } from "./shutdown.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { startupInstructions } from "./startup-instructions.js";
 import { registerTools } from "./tools.js";
+import { tools } from "./tool-table.js";
 import { mcpVersion } from "./version.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
 import { startHistoryRefresher } from "./history-refresher.js";
@@ -40,6 +43,9 @@ export interface UberblickMcpSession {
   readonly server: McpServer;
   readonly replicas: Replicas;
   readonly store: MirrorStore;
+  readonly activeCalls: number;
+  /** Await this session's admitted work without closing its transport. */
+  drain(): Promise<void>;
   /** Attach a transport and start serving. */
   connect(transport: Transport): Promise<void>;
   /** Close this session's transport and drain its admitted work. */
@@ -51,6 +57,14 @@ export interface UberblickMcpServer extends Omit<UberblickMcpSession, "close"> {
   close(deadline?: number): Promise<void>;
 }
 
+export interface McpSessionOptions {
+  /** Notify the host after tool lookup, argument validation and execution finish. */
+  onToolCallFinished?: (requestId: RequestId) => void;
+  /** Filter tools/list using the SDK's auth context for that request. */
+  hostedScope?: boolean;
+  assertWriteScope?: () => void;
+}
+
 export interface McpRuntimeOptions {
   /** Adopt and close this mirror; omitted opens `config.databasePath`. */
   store?: MirrorStore;
@@ -58,13 +72,15 @@ export interface McpRuntimeOptions {
   credentialProvider?: CredentialProvider;
   /** Fix the name on this runtime's cursors and MCP update surface. */
   agentName?: string;
+  /** Hosted writes await bounded hub acknowledgement before answering. */
+  waitForWriteAcknowledgement?: boolean;
 }
 
 export interface UberblickMcpRuntime {
   readonly replicas: Replicas;
   readonly store: MirrorStore;
   /** Capture startup instructions and register tools for a new independent session. */
-  openSession(): UberblickMcpSession;
+  openSession(options?: McpSessionOptions): UberblickMcpSession;
   /** Close every session, drain admitted work, then release the shared replicas. */
   close(deadline?: number): Promise<void>;
 }
@@ -100,14 +116,16 @@ function openRuntime(
   return {
     replicas,
     store,
-    openSession() {
+    openSession(sessionOptions = {}) {
       if (closed) throw new ServerShuttingDownError();
       const session = openSession(config, replicas, store, {
+        ...sessionOptions,
         seed() {
           seeding ??= seedTagCatalogOnce(replicas);
           return seeding;
         },
         initializedClientIdentity,
+        waitForWriteAcknowledgement: options.waitForWriteAcknowledgement === true,
         released(session) {
           sessions.delete(session);
         },
@@ -139,9 +157,10 @@ function openSession(
   config: McpConfig,
   replicas: Replicas,
   store: MirrorStore,
-  runtime: {
+  runtime: McpSessionOptions & {
     seed(): Promise<void>;
     initializedClientIdentity: boolean;
+    waitForWriteAcknowledgement: boolean;
     released(session: UberblickMcpSession): void;
   },
 ): UberblickMcpSession {
@@ -161,7 +180,32 @@ function openSession(
       replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
     };
   }
-  const help = registerTools(server, replicas, work);
+  if (runtime.onToolCallFinished !== undefined || runtime.hostedScope) {
+    const onToolCallFinished = runtime.onToolCallFinished;
+    const setRequestHandler = server.server.setRequestHandler.bind(server.server);
+    server.server.setRequestHandler = (schema, handler) => {
+      const method = getMethodLiteral(schema);
+      if (method !== "tools/call" && !(runtime.hostedScope && method === "tools/list")) {
+        setRequestHandler(schema, handler);
+        return;
+      }
+      setRequestHandler(schema, async (request, extra) => {
+        try {
+          const result = await handler(request, extra);
+          if (method === "tools/list" && !extra.authInfo?.scopes.includes("docs:write") &&
+              "tools" in result && Array.isArray(result.tools)) {
+            return { ...result, tools: result.tools.filter((listed: { name: string }) =>
+              tools.some(tool => tool.name === listed.name && tool.writes === null)) };
+          }
+          return result;
+        } finally {
+          // Cancellation suppresses the SDK's reply without ending its handler.
+          if (method === "tools/call") onToolCallFinished?.(extra.requestId);
+        }
+      });
+    };
+  }
+  const help = registerTools(server, replicas, work, runtime.waitForWriteAcknowledgement, runtime.assertWriteScope);
   registerHelpResources(server, help, work);
   let closed = false;
   let closing: Promise<void> | null = null;
@@ -170,6 +214,8 @@ function openSession(
     server,
     replicas,
     store,
+    get activeCalls() { return work.activeCalls; },
+    drain() { return work.drain(); },
     async connect(transport) {
       if (closed) return;
       await work.run(async () => {
@@ -215,6 +261,7 @@ export function createMcpServer(
   const session = runtime.openSession();
   return {
     ...session,
+    get activeCalls() { return session.activeCalls; },
     close(deadline) {
       return runtime.close(deadline);
     },

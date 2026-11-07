@@ -58,6 +58,26 @@ interface Recovery {
  * when the unchanged call cannot succeed after a transient condition passes.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  insufficient_scope: {
+    recoveryClass: "manual",
+    guidance: "Authorize this connection with docs:read docs:write before repeating the call. Nothing was written.",
+  },
+  invalid_render_options: {
+    recoveryClass: "manual",
+    guidance: "Use format png or svg and an integer width from 100 to 2000, or omit both for a 1000-pixel-wide PNG.",
+  },
+  unsupported_block_type: {
+    recoveryClass: "manual",
+    guidance: "Call get_doc and choose a code block with language ablauf; render_block supports only that block type.",
+  },
+  render_too_large: {
+    recoveryClass: "manual",
+    guidance: "Request a smaller width or format: \"svg\". PNG dimensions must be finite and positive and total at most 4,000,000 pixels.",
+  },
+  render_failed: {
+    recoveryClass: "manual",
+    guidance: "Read get_doc and the ablauf help topic, correct the drawing source, or restart the MCP server if the bundled renderer could not load.",
+  },
   unknown_help_topic: {
     recoveryClass: "manual",
     guidance: "Choose one of the valid topic ids in topics, or call get_help with no topic to discover the catalog.",
@@ -275,10 +295,6 @@ const RECOVERIES: Record<string, Recovery> = {
   revisions_local_only: {
     recoveryClass: "manual",
     guidance: "Automatic revisions require a team hub. Use a workspace connected to a team hub before reading revisions.",
-  },
-  decision_no_history: {
-    recoveryClass: "manual",
-    guidance: "Call get_doc for the topic UUID in topic, then read its inForce, pending, conflicts, predecessors and successors records; the topic's records are its history.",
   },
   revisions_unreachable: {
     recoveryClass: "retry",
@@ -550,7 +566,6 @@ const REVISION_FAILURE_CODES: Record<RevisionClientFailure, string> = {
   "sign-in-required": "revisions_sign_in_required",
   forbidden: "revisions_forbidden",
   deleted: "doc_deleted",
-  "decision-no-history": "decision_no_history",
   "revision-not-found": "revision_not_found",
   unsupported: "revisions_unsupported",
   "stale-state": "revision_stale_state",
@@ -603,6 +618,25 @@ function stamped(
   if (recovery === undefined) {
     // An unmapped crash cannot claim whether a write landed or how to recover.
     return failure(payload);
+  }
+  if (tool.name === "edit_block" &&
+      (payload.error === "stale_block" || payload.error === "old_text_mismatch")) {
+    if (payload.error === "stale_block" && payload.expectedRev === null &&
+        typeof payload.expectedText === "string") {
+      const message = "The block may have changed since it was read, or `old_text` is not the block's whole text from get_doc.";
+      payload = { ...payload, message, recovery:
+        `${message} This answer already carries \`currentText\` and \`currentRev\`; use all of \`currentText\` as ` +
+        "`old_text`, re-diff the intended change against it, and call edit_block again with `currentRev`. No extra read is needed.",
+      };
+    }
+    if (typeof payload.expectedText === "string" && typeof payload.currentText === "string" &&
+        payload.expectedText !== payload.currentText && payload.currentText.includes(payload.expectedText)) {
+      const fragment = "`old_text` is only part of the block; it must be the block's whole text as get_doc returns it.";
+      payload = { ...payload,
+        message: `${fragment} ${payload.message}`,
+        recovery: `${payload.recovery ?? recovery.guidance} ${fragment}`,
+      };
+    }
   }
   return failure({
     ...(tool.writes !== null

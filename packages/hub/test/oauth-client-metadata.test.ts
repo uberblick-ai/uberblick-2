@@ -20,6 +20,17 @@ describe("metadata client documents", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("applies the app-scheme redirect rules to metadata documents", async () => {
+    const cursor = "cursor://anysphere.cursor-mcp/oauth/callback";
+    const hostless = "com.example.app:/callback";
+    const clients = new OAuthMetadataClients(async () => ({ ...document(), redirect_uris: [cursor, hostless, "javascript:alert(1)"] }));
+    const client = await clients.lookup(CLIENT_ID);
+    expect(client?.redirectUriAllowed(cursor)).toBe(true);
+    expect(client?.redirectUriAllowed(hostless)).toBe(true);
+    expect(client?.redirectUriAllowed("cursor://ANYSPHERE.cursor-mcp/oauth/callback")).toBe(false);
+    expect(client?.redirectUriAllowed("javascript:alert(1)")).toBe(false);
+  });
+
   it.each([
     null, [], "string", 42,
     { ...document(), client_id: "https://AGENT.example/client.json" },

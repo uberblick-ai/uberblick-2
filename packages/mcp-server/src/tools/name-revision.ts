@@ -13,13 +13,13 @@ export const inputSchema = strictInput({
     .describe("The name the person requested, from 1 to 100 characters on one line."),
 });
 
-export const nameRevisionOperation = operation(DOCUMENT_WRITE, inputSchema, async (context, { uuid, name }) => {
+export const nameRevisionOperation = operation(DOCUMENT_WRITE, inputSchema, async (context, { uuid, name }, request) => {
   context.requireKnownDoc(uuid);
   requireDocumentHistory(context.replicas, uuid);
   const replica = context.requireWritableDoc(uuid);
   const revision = await mutateDocumentRevision(context.replicas, uuid, {
     operation: "name", name, checksum: documentRevisionChecksum(replica.doc),
     surface: context.replicas.createUpdateOrigin().surface ?? { kind: "mcp", name: "unknown MCP client" },
-  });
+  }, { assertWriteScope: request.assertWriteScope });
   return { uuid, revision: revisionOutput(revision), applied: true, synced: true, hub: context.replicas.sync.state() };
 });

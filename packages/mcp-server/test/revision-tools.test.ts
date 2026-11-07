@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
   encodeRevisionResponseFrames, getMeta, readRevisionRequest, readRevisionResponse, roomForDoc,
-  snapshotRevision, tombstoneDirectoryEntry, upsertDirectoryEntry,
+  snapshotRevision, upsertDirectoryEntry,
   type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
@@ -15,8 +16,12 @@ import { HistoryCache } from "../src/history-cache.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { tryAcquireHistoryRefresherRole } from "../src/history-refresher-role.js";
 import { MirrorStore } from "../src/store.js";
+import { ServerWork } from "../src/server-work.js";
+import { guarded } from "../src/tool-adapter.js";
+import { assertWriteScope } from "../src/tool-scope.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import { tools } from "../src/tool-table.js";
+import { createToolContext } from "../src/tools/context.js";
 import {
   cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startServer,
   tempDir, testConfig, WAIT_TIMEOUT_MS, waitUntil,
@@ -122,6 +127,58 @@ function refusal(result: ToolCall, code: string) {
 }
 
 describe("historical reads through the MCP boundary", () => {
+  it.each(["name_revision", "restore_revision"] as const)("refuses %s if its session loses write scope while the hub request waits", async name => {
+    const { rig, uuid } = await admitted();
+    const replicas = rig.instance.replicas;
+    const sync = replicas.sync;
+    const room = roomForDoc(rig.config.workspaceId, uuid);
+    const providers: Map<string, { hasCurrentSync(): boolean }> = Reflect.get(sync, "providers");
+    const provider = providers.get(room);
+    if (provider === undefined) throw new Error("The document has no room provider.");
+    const ready = vi.spyOn(provider, "hasCurrentSync");
+    const send = vi.spyOn(HocuspocusProvider.prototype, "sendStateless");
+    const write = vi.spyOn(rig.instance.store, "appendUpdate");
+    const before = Y.encodeStateAsUpdate(replicas.replica(uuid).doc);
+    let wake: () => void = () => { throw new Error("The revision request did not subscribe to state changes."); };
+    const subscribe = sync.onStateChange.bind(sync);
+    vi.spyOn(sync, "onStateChange").mockImplementation(listener => {
+      wake = listener;
+      return subscribe(listener);
+    });
+    const request = sync.requestRevisions.bind(sync);
+    vi.spyOn(sync, "requestRevisions").mockImplementation((...args) => {
+      ready.mockReturnValue(false);
+      return request(...args);
+    });
+    let scope = ["docs:read", "docs:write"];
+    const check = () => assertWriteScope(scope);
+    const tool = tools.find(candidate => candidate.name === name);
+    if (tool === undefined) throw new Error(`Missing tool ${name}.`);
+    const work = new ServerWork();
+    const call = guarded(tool, createToolContext(replicas, work), false, check);
+    const pending = call(name === "name_revision" ? { uuid, name: "Reviewed" } : { uuid, revision },
+      { signal: new AbortController().signal });
+    try {
+      await waitUntil("the revision request waiting for room admission", () => ready.mock.results.some(result => result.value === false));
+      scope = ["docs:read"];
+      ready.mockReturnValue(true);
+      wake();
+      const response = await pending;
+      expect(response.isError).toBe(true);
+      const content = response.content[0];
+      if (content?.type !== "text") throw new Error("The failure has no text payload.");
+      expect(JSON.parse(content.text)).toMatchObject({ error: "insufficient_scope", applied: false,
+        partial: false, synced: false, recoveryClass: "manual" });
+      expect(send.mock.calls.filter(([payload]) => readRevisionRequest(payload) !== null)).toEqual([]);
+      expect(write).not.toHaveBeenCalled();
+      expect(Y.encodeStateAsUpdate(replicas.replica(uuid).doc)).toEqual(before);
+    } finally {
+      ready.mockRestore();
+      await pending;
+      await work.drain();
+    }
+  });
+
   it("restores through the hub as a closed revision, synchronizes peers and leaves later edits writable", async () => {
     const hub = await createTeamHub({ address: "127.0.0.1", port: 0, databasePath: ":memory:",
       github: { clientId: "Iv1.0123456789abcdef" }, log() {} }, { deviceCredentials: true });
@@ -582,56 +639,75 @@ describe("historical reads through the MCP boundary", () => {
     expect(open.mock.calls.some(([id]) => id === unknown || id === uuid)).toBe(false);
   });
 
-  it("refuses every decision state and archived record uniformly without hydration, hub requests or writes", async () => {
-    const rig = await server();
-    const replicas = rig.instance.replicas;
-    const request = vi.spyOn(replicas.sync, "requestRevisions");
-    for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
-      for (const archived of [false, true]) {
-        const uuid = randomUUID();
-        const topic = randomUUID();
-        upsertDirectoryEntry(replicas.directory().doc, { uuid, title: "Decision elsewhere", kind: "decision", topic, status });
-        if (archived) tombstoneDirectoryEntry(replicas.directory().doc, uuid);
-        expect(replicas.hydrated(uuid)).toBe(false);
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)(
+    "reads and names %s decision history while restore follows its edit rules", async status => {
+      const { rig } = await admitted();
+      const { uuid } = await rig.ok("create_doc", { title: "Why this choice?", description: "A record with recoverable history.",
+        kind: "decision", status: status === "decided" ? "decided" : "open",
+        blocks: [{ type: "paragraph", text: "Use the existing primitive." }] });
+      if (status === "withdrawn") await rig.ok("set_status", { uuid, status });
+      if (status === "rejected") await rig.ok("set_status", { uuid, status, reason: "Another answer was chosen.",
+        answer: { who: "Maintainer", when: "2026-11-04T00:00:00Z", where: "https://github.com/uberblick-ai/uberblick-2/issues/2612" } });
+      expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+      const named = (await rig.ok("name_revision", { uuid, name: "Earlier answer" })).revision;
+      await rig.ok("set_metadata", { uuid, title: "A renamed topic" });
+      expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+      const history = await rig.ok("list_revisions", { uuid, refresh: true });
+      expect(history.revisions.some((entry: { id: string }) => entry.id === named.id)).toBe(true);
+      expect(await rig.ok("get_revision", { uuid, revision: named.id })).toMatchObject({ uuid,
+        title: "Why this choice?", blocks: [{ text: "Use the existing primitive." }] });
+      expect(await rig.ok("get_data", { uuid, revision: named.id })).toMatchObject({ uuid, revision: named.id, data: null });
+      expect(await rig.ok("get_data", { uuid })).toEqual({ uuid, data: null });
+      if (status === "decided") {
+        const request = vi.spyOn(rig.instance.replicas.sync, "requestRevisions");
         const logged = rig.instance.store.logSize();
-        for (const [tool, args] of [...calls(uuid), ["get_data", { uuid, revision }] as const, ...writeCalls(uuid)]) {
-          const result = await rig.call(tool, args);
-          expect(result).toMatchObject({ isError: true, payload: {
-            error: "decision_no_history", message: expect.stringContaining("Decision records have no history"),
-            uuid, topic, recoveryClass: "manual", recovery: expect.stringContaining("topic's records"),
-          } });
-          if (tool === "name_revision" || tool === "restore_revision") {
-            expect(result.payload).toMatchObject({ applied: false, partial: false, synced: false });
-          } else {
-            refusal(result, "decision_no_history");
-          }
-        }
+        expect(await rig.call("restore_revision", { uuid, revision: named.id })).toMatchObject({ isError: true,
+          payload: { error: "decision_read_only", uuid, applied: false, partial: false, synced: false } });
+        expect(request).not.toHaveBeenCalled();
         expect(rig.instance.store.logSize()).toBe(logged);
-        expect(replicas.hydrated(uuid)).toBe(false);
+      } else {
+        expect(await rig.ok("restore_revision", { uuid, revision: named.id })).toMatchObject({ applied: true, synced: true });
+        expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+        expect(await rig.ok("get_doc", { uuid })).toMatchObject({ title: "Why this choice?", kind: "decision", status });
       }
-    }
-    expect(request).not.toHaveBeenCalled();
+      await rig.ok("archive_doc", { uuid });
+      expect(await rig.ok("list_revisions", { uuid, refresh: true })).toMatchObject({ revisions: expect.arrayContaining([
+        expect.objectContaining({ id: named.id }),
+      ]) });
+      expect(await rig.ok("get_revision", { uuid, revision: named.id })).toMatchObject({ title: "Why this choice?" });
+      expect(await rig.ok("get_data", { uuid, revision: named.id })).toMatchObject({ data: null });
+      for (const [tool, args] of [["name_revision", { uuid, name: "Archived" }],
+        ["restore_revision", { uuid, revision: named.id }]] as const) {
+        expect(await rig.call(tool, args)).toMatchObject({ isError: true,
+          payload: { error: "doc_archived", applied: false, partial: false, synced: false } });
+      }
+    },
+  );
+
+  it("keeps page data revisions readable and restorable after conversion to a decision", async () => {
+    const { rig, uuid } = await admitted();
+    await rig.ok("update_data", { uuid, operations: [{ collection: "observations", schema: textSchema,
+      upsert: [{ id: "value", value: { text: "Earlier data" } }] }] });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const earlier = (await rig.ok("name_revision", { uuid, name: "Before conversion" })).revision;
+    await rig.ok("set_status", { uuid, status: "open" });
+    await rig.ok("set_metadata", { uuid, title: "Converted page" });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const converted = (await rig.ok("name_revision", { uuid, name: "After conversion" })).revision;
+    expect((await rig.ok("list_revisions", { uuid, refresh: true })).revisions)
+      .toMatchObject([{ id: converted.id }, { id: earlier.id }]);
+    expect(await rig.ok("get_data", { uuid, revision: earlier.id, collection: "observations" }))
+      .toMatchObject({ records: [{ id: "value", value: { text: "Earlier data" } }] });
+    expect(await rig.ok("restore_revision", { uuid, revision: earlier.id })).toMatchObject({ applied: true, synced: true });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    expect(await rig.ok("get_doc", { uuid })).toMatchObject({ title: "Current document", kind: "decision", status: "open" });
   });
 
-  it("prefers no-history to the decided content lock while preserving live decision data reads", async () => {
-    const rig = await server();
-    const { uuid } = await rig.ok("create_doc", { title: "Why this choice?", description: "A settled decision.",
-      kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "Use the existing primitive." }] });
-    const request = vi.spyOn(rig.instance.replicas.sync, "requestRevisions");
-    const logged = rig.instance.store.logSize();
-    for (const [tool, args] of writeCalls(uuid)) {
-      expect(await rig.call(tool, args)).toMatchObject({ isError: true, payload: {
-        error: "decision_no_history", uuid, topic: uuid, applied: false, partial: false, synced: false,
-      } });
-    }
-    expect(await rig.ok("get_data", { uuid })).toEqual({ uuid, data: null });
-    expect(rig.instance.store.logSize()).toBe(logged);
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("reads downloaded archived history offline without live room hydration or hub requests", async () => {
+  it.each(["page", "decision"] as const)("reads downloaded archived %s history offline without live room hydration or hub requests", async kind => {
     const fixture = await admitted();
     const { rig, uuid } = fixture;
+    if (kind === "decision") await rig.ok("set_status", { uuid, status: "open" });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
     const named = await rig.ok("name_revision", { uuid, name: "Downloaded" });
     await rig.ok("list_revisions", { uuid, refresh: true });
     await rig.ok("get_revision", { uuid, revision: named.revision.id });
@@ -743,10 +819,8 @@ describe("historical reads through the MCP boundary", () => {
       .toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false });
     expect((await rig.ok("get_help", { topic: "restore_revision" })).text).toContain("revision_restore_outcome_unknown");
     expect((await rig.ok("get_help", { topic: "name_revision" })).text).toContain("only when a person asks");
-    for (const name of ["list_revisions", "get_revision", "get_data", "name_revision", "restore_revision"]) {
-      expect((await rig.ok("get_help", { topic: name })).text).toContain("decision_no_history");
-    }
-    for (const code of ["revisions_local_only", "revisions_unreachable", "revisions_sign_in_required", "revisions_forbidden", "revisions_unsupported", "revision_not_found", "doc_deleted", "decision_no_history"]) {
+    expect((await rig.ok("get_help", { topic: "restore_revision" })).text).toContain("decision_read_only");
+    for (const code of ["revisions_local_only", "revisions_unreachable", "revisions_sign_in_required", "revisions_forbidden", "revisions_unsupported", "revision_not_found", "doc_deleted"]) {
       expect(contracts.text).toContain(code);
     }
     for (const tool of tools.filter(tool => tool.writes !== null && tool.name !== "restore_revision")) {

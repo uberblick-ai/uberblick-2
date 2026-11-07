@@ -308,7 +308,7 @@ export async function useRemoteWorkspace(
       const archived = fetched.corpus.entries.filter(doc => doc.deleted).length;
       text = useField("fetched", `${name} from ${displayWorkspaceHub(flags.endpoint)}: ${plural(fetched.corpus.entries.length, "document")}, ${archived} archived`);
       text += useBindingLines(binding, previous, persistence.written[persistence.written.length - 1] ?? "");
-      text += "open it with: ub open\n";
+      text += "open the new workspace with: ub open\n";
     } finally { lock.release(); }
     warn(io, persistence.warnings);
     const source = resolved.binding;

@@ -11,7 +11,7 @@ import { runInProcess } from "./in-process.js";
 afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 afterAll(removeTempDirs);
 
-it.each([cliVersion(), "0.4.5", undefined])("reports recent devices and hub version %s without consuming them, writing the login or adding requests", async hubVersion => {
+it.each([cliVersion(), "0.4.5", undefined])("reports recent devices and hub version %s without consuming them, writing the login or adding version requests", async hubVersion => {
   const remote = await rig([WORKSPACE], true, false, true, undefined, hubVersion);
   // Use the real hub for both sync and device management.
   const origin = `http://127.0.0.1:${remote.hub.port}`;
@@ -26,7 +26,10 @@ it.each([cliVersion(), "0.4.5", undefined])("reports recent devices and hub vers
   issueCredential(remote.hub.credentials!, { principalId: stranger.id, deviceId: randomUUID(), deviceName: "other account", workspaces: [] });
   const before = readFileSync(credentialPath(box));
   const requests: string[] = [];
-  remote.hub.server.httpServer.on("request", request => { requests.push(request.url ?? ""); });
+  remote.hub.server.httpServer.on("request", request => {
+    requests.push(request.url ?? "");
+    if (request.url?.startsWith("/.well-known/")) expect(request.headers.authorization).toBeUndefined();
+  });
 
   const json = await runInProcess(["status", "--json"], box);
   expect(json.status, json.stderr).toBe(0);
@@ -36,7 +39,7 @@ it.each([cliVersion(), "0.4.5", undefined])("reports recent devices and hub vers
   expect(report.version).toEqual({ client: clientVersion, hub: hubVersion ?? null });
   expect(report.problems).toEqual([]);
   expect(json.stderr).toBe("");
-  expect(requests).toEqual(["/auth/manage"]);
+  expect(requests.sort()).toEqual([`/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`, "/auth/manage"]);
   requests.length = 0;
   const text = await runInProcess(["status"], box);
   expect(text.status, text.stderr).toBe(0);
@@ -45,7 +48,7 @@ it.each([cliVersion(), "0.4.5", undefined])("reports recent devices and hub vers
   expect(text.stdout).toContain(`ub auth logout --all-devices ${origin}`);
   expect(text.stdout).toContain("problems    none\n");
   expect(text.stdout).toContain(`hub         ${origin}\nversion     client ${clientVersion}, hub ${hubVersion ?? "unknown"}\n`);
-  expect(requests).toEqual(["/auth/manage"]);
+  expect(requests.sort()).toEqual([`/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`, "/auth/manage"]);
   expect(text.stdout).not.toContain(login.credential.record.deviceId.slice(0, 8));
   expect(text.stdout).not.toContain("other account");
   expect(JSON.parse((await runInProcess(["status", "--json"], box)).stdout).recentDevices).toEqual(report.recentDevices);
@@ -77,19 +80,19 @@ it("withholds the hub version when workspace access is refused even though accou
   expect(report.version).toEqual({ client: cliVersion(), hub: null });
   expect(report.recentDevices).toEqual([{ id: otherId, name: "Other computer", signedInAt: new Date(issued.record.issuedAt).toISOString() }]);
   expect(report.problems).toEqual([{ name: "no-workspace-access", fix: "ask a workspace admin to run: ub workspace member add auth-test-user" }]);
-  expect(requests.sort()).toEqual(["/auth/credential/renew", "/auth/manage"]);
+  expect(requests.sort()).toEqual([`/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`, "/auth/credential/renew", "/auth/manage"]);
   requests.length = 0;
   const text = await runInProcess(["status"], box);
   expect(text.status, text.stderr).toBe(0);
   expect(text.stdout).toContain(`hub         ${origin}\nversion     client ${cliVersion()}, hub unknown\n`);
   expect(text.stdout).toContain("problems    no workspace access\n");
   expect(text.stdout).toContain("new device  Other computer");
-  expect(requests).toEqual(["/auth/manage"]);
+  expect(requests.sort()).toEqual([`/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`, "/auth/manage"]);
   expect(remote.github.calls).toEqual([]);
   expect(readFileSync(credentialPath(box)).equals(before)).toBe(true);
 });
 
-it.each(["headers", "body"])("keeps an unavailable device list silent and within the status deadline (%s)", async phase => {
+it.each(["headers", "body"])("keeps unavailable device and hosted readings silent within the status deadline (%s)", async phase => {
   const deadline = new AbortController();
   const timeout = AbortSignal.timeout;
   const deadlines = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 100 ? deadline.signal : timeout(ms));
@@ -129,12 +132,15 @@ it.each(["headers", "body"])("keeps an unavailable device list silent and within
   const json = await running;
   expect(performance.now() - started).toBeLessThan(1_000);
   expect(deadlines).toHaveBeenCalledWith(100);
-  expect(fetch).toHaveBeenCalledOnce();
-  expect(fetch.mock.calls[0]?.[0]).toBe(`${origin}/auth/manage`);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls.map(([url]) => String(url)).sort()).toEqual([
+    `${origin}/.well-known/oauth-protected-resource/mcp/${WORKSPACE}`, `${origin}/auth/manage`,
+  ]);
   expect(requestSignal?.aborted).toBe(true);
   if (phase === "body") expect(bodyAborted).toBe(true);
   expect(json.status, json.stderr).toBe(0);
   expect(JSON.parse(json.stdout).recentDevices).toBeNull();
+  expect(JSON.parse(json.stdout).hostedMcp).toBeNull();
   expect(JSON.parse(json.stdout).problems.map((problem: { name: string }) => problem.name)).toEqual(["hub-unreachable"]);
   expect(json.stderr).toBe("");
   expect(readFileSync(credentialPath(box)).equals(before)).toBe(true);

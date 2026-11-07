@@ -3,6 +3,7 @@ import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { sanitizeHubVersion } from "@uberblick/mcp-server/management-client";
+import { discoverHostedMcp } from "@uberblick/mcp-server/hosted-mcp";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredSyncStatus, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
@@ -25,6 +26,7 @@ export interface StatusReport {
   projectConfig: string | null;
   version: string;
   hubVersion?: string | null;
+  hostedMcp: string | null;
   /** Bare identity for room names, token claims and database paths; no display slug. */
   workspaceUuid: string;
   workspaceOrigin: Origin;
@@ -87,7 +89,7 @@ export async function statusReport(
   }
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
   const stored = bindingProblem === undefined ? undefined : readStoredSyncStatus(config.databasePath, config.workspaceId);
-  const [sync, deviceReading] = await Promise.all([
+  const [sync, deviceReading, hostedMcp] = await Promise.all([
     stored === undefined ? readSyncStatus(config) : {
       hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
       unsyncedChanges: stored.pendingRooms.length,
@@ -96,6 +98,8 @@ export async function statusReport(
     } satisfies Partial<SyncStatus>,
     bindingProblem !== undefined || config.deviceLogin === undefined || transport !== null ? null
       : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
+    bindingProblem !== undefined || resolved.binding.hubUrl === null ? null
+      : discoverHostedMcp(resolved.binding.hubUrl, config.workspaceId, config.connectTimeoutMs, resolved.env),
   ]);
   // Read the stored account without login or renewal, even after a hub refusal.
   const deviceLogin = bindingProblem !== undefined || config.deviceLogin === undefined
@@ -111,6 +115,7 @@ export async function statusReport(
       projectConfig: resolved.paths.projectConfig,
       version: cliVersion(),
       hubVersion: deviceReading?.hubVersion ?? null,
+      hostedMcp,
       workspaceUuid: config.workspaceId,
       workspaceOrigin: resolved.origins.workspace,
       ...(transport === null ? {} : { hubTransportProblem: transport }),
@@ -130,6 +135,7 @@ export async function statusReport(
 export interface ShortStatusReport {
   workspace: { id: string; name: string | null };
   hub: string | null;
+  hostedMcp: string | null;
   version: { client: string; hub: string | null };
   account: StatusReport["account"];
   chosenBy: { source: "project-config" | "environment"; path: string | null };
@@ -217,6 +223,7 @@ export function shortStatusReport(
   return {
     workspace: { id: report.workspaceUuid, name: workspaceName },
     hub: origin,
+    hostedMcp: origin === null ? null : report.hostedMcp,
     version: statusVersion(report),
     account: origin === null ? null : report.account,
     chosenBy: workspaceSelection(report),
@@ -280,6 +287,7 @@ export function renderStatus(
   let text = field("workspace", short.workspace.name === null
     ? short.workspace.id : `${short.workspace.name} (${short.workspace.id})`);
   text += field("hub", short.hub ?? "local, this computer only");
+  if (short.hostedMcp !== null) text += field("hosted mcp", `${short.hostedMcp} (experimental)`);
   text += field("version", `client ${short.version.client}` +
     (short.connection === null ? "" : `, hub ${short.version.hub ?? "unknown"}`));
   if (short.hub === null) {

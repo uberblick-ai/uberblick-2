@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { runAdminSetup } from "./admin-setup-command.js";
+import { parseWorkspaceId } from "@uberblick/schema";
 import { requestOperator } from "./operator-client.js";
 import { restoreDatabase } from "./operator-database.js";
 import { runOperatorDoctor, type OperatorLiveStatus } from "./operator-doctor.js";
@@ -13,8 +13,7 @@ const USAGE = `usage: ub-hub <command>
 commands:
   status                              Release, database and claim status
   doctor                              Diagnose this hub without changing it
-  admin-setup <workspace-uuid>         Set up the first workspace admin
-  admin-setup status <setup-uuid>       Look up a setup result
+  workspace-admin add <ws-uuid> <gh-login>  Add a workspace admin
   hub-admin add <github-login>         Appoint an account that has signed in
   hub-admin add --account-id <id>      Appoint by durable GitHub account ID
   backup                              Verify and save an online database copy
@@ -104,20 +103,42 @@ async function runHubAdminCommand(args: string[]): Promise<void> {
   await addHubAdmin(requiredHubDatabasePath(), target);
 }
 
+async function runWorkspaceAdminCommand(args: string[]): Promise<void> {
+  const workspaceId = args[2] ?? "";
+  let target: { account: string } | { accountId: string } | undefined;
+  if (args.length === 4 && /^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/.test(args[3] ?? "")) {
+    target = { account: args[3] ?? "" };
+  } else if (args.length === 5 && args[3] === "--account-id" && /^[1-9][0-9]{0,99}$/.test(args[4] ?? "")) {
+    target = { accountId: args[4] ?? "" };
+  }
+  let validWorkspace = false;
+  try { validWorkspace = parseWorkspaceId(workspaceId).uuid === workspaceId; } catch { /* Invalid arguments print usage. */ }
+  if (args[1] !== "add" || !validWorkspace || target === undefined) {
+    console.error(USAGE); process.exitCode = 2; return;
+  }
+  const unknown = "addition result unknown; retry the same workspace and account to check";
+  let result: Record<string, unknown>;
+  try { result = await requestOperator(requiredHubDatabasePath(), { action: "workspace-admin-add", workspaceId, ...target }); }
+  catch (error) { throw new Error(`${String(error)}; ${unknown}`); }
+  if (result.status === "workspace-not-found") throw new Error(`hub has no workspace ${workspaceId}`);
+  if (result.status === "account-not-found") throw new Error("hub has never recorded this account");
+  if (result.status === "sign-in-required") throw new Error("account has no recorded sign-in; sign in to this hub and retry");
+  if (result.status === "ambiguous-account") throw new Error("login matches more than one recorded account; use --account-id <GitHub account ID>");
+  const identity = result.identity as Record<string, unknown> | undefined;
+  if ((result.status !== "complete" && result.status !== "already-admin") || identity === null ||
+      typeof identity !== "object" || typeof identity.githubUsername !== "string" || typeof identity.githubAccountId !== "string") {
+    throw new Error(String(result.error ?? unknown));
+  }
+  console.log(`${result.status === "already-admin" ? "already workspace admin" : "added workspace admin"}  ${identity.githubUsername} (GitHub account ${identity.githubAccountId})`);
+}
+
 export async function runOperatorCommand(args: string[], releasePath = "/release/release.json"): Promise<void> {
   const command = args[0];
   if (args.length === 0 || (args.length === 1 && (command === "--help" || command === "-h"))) {
     console.log(USAGE);
     return;
   }
-  if (command === "admin-setup") {
-    try { await runAdminSetup(args.slice(1)); }
-    catch {
-      console.error("setup result unknown; check the hub host. This does not establish that nothing changed.");
-      process.exitCode = 1;
-    }
-    return;
-  }
+  if (command === "workspace-admin") { await runWorkspaceAdminCommand(args); return; }
   if (command === "hub-admin") { await runHubAdminCommand(args); return; }
   const restoreInput = args[1] === "--yes" ? args[2] : args[1];
   const valid = args.length === 1 && ["status", "doctor", "backup"].includes(command ?? "") ||

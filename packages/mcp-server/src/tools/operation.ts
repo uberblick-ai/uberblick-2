@@ -8,6 +8,8 @@ export interface OperationRequest {
   signal: AbortSignal;
   _meta?: { progressToken?: string | number | undefined; [key: string]: unknown } | undefined;
   progressToken?: string | number | undefined;
+  /** Hosted calls read the calling session's current scope at each write boundary. */
+  assertWriteScope?: (() => void) | undefined;
 }
 
 /**
@@ -60,7 +62,10 @@ export function operation<Args, Payload extends object, W extends Writes>(
 ): ToolOperation<Args, Payload, W> {
   const run = async (context: ToolContext, args: Args, request: OperationRequest): Promise<Payload> => {
     if (gates.settle) await context.replicas.settle();
-    return body(context, args, request);
+    return context.runOperation(() => {
+      if (gates.writes !== null) request.assertWriteScope?.();
+      return body(context, args, request);
+    });
   };
   return Object.assign(run, { writes: gates.writes });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { oauthRedirectUriAllowed } from "../src/oauth-redirect-uri.js";
+import { oauthRedirectUriAllowed, oauthRedirectUriValid } from "../src/oauth-redirect-uri.js";
 
 describe("OAuth redirect URI matching", () => {
   it("matches HTTPS and localhost only by their original strings", () => {
@@ -29,16 +29,41 @@ describe("OAuth redirect URI matching", () => {
   });
 
   it.each([
+    "cursor://anysphere.cursor-mcp/oauth/callback?query=%2F",
+    "com.example.app:/callback",
+    "custom-app:/callback",
+  ])("accepts an app callback only as its identical string: %s", uri => {
+    expect(oauthRedirectUriValid(uri)).toBe(true);
+    expect(oauthRedirectUriAllowed(uri, [uri])).toBe(true);
+    expect(oauthRedirectUriAllowed(uri.toUpperCase(), [uri])).toBe(false);
+    expect(oauthRedirectUriAllowed(`${uri}/other`, [uri])).toBe(false);
+    expect(oauthRedirectUriAllowed(`${uri}#fragment`, [uri])).toBe(false);
+  });
+
+  it.each(["javascript", "data", "file", "blob", "about", "vbscript", "ftp", "ws", "wss"])(
+    "refuses the web or script scheme %s in any letter case", scheme => {
+      for (const spelling of [scheme, scheme.toUpperCase()]) {
+        const uri = `${spelling}://client.example/callback`;
+        expect(oauthRedirectUriValid(uri)).toBe(false);
+        expect(oauthRedirectUriAllowed(uri, [uri])).toBe(false);
+      }
+    });
+
+  it.each([
     "http://localhost.example.com/callback", "http://127.0.0.1.example.com/callback",
     "http://127.0.0.2/callback", "http://127.1/callback", "http://0x7f000001/callback",
     "http://2130706433/callback", "http://[0:0:0:0:0:0:0:1]/callback", "http://localhost./callback",
     "http://[::ffff:127.0.0.1]/callback", "http://private.example/callback", "http://192.168.1.1/callback",
-    "custom-app:/callback", "javascript:alert(1)", "/callback", "https:///callback",
+    "javascript:alert(1)", "/callback", "https:///callback", "https:/client.example/callback",
     "https://client.example/callback#fragment", "https://client.example/callback#",
     "https://user:password@client.example/callback", "https://@client.example/callback",
     "http://user@127.0.0.1/callback", "http://127.0.0.1:/callback", "http://127.0.0.1:65536/callback",
     "http://127.0.0.1\\evil.example/callback", " https://client.example/callback", "https://client.example/call\nback",
+    "cursor://user:password@anysphere.cursor-mcp/callback", "cursor://@anysphere.cursor-mcp/callback",
+    "com.example.app:/callback#fragment", "cursor://anysphere.cursor-mcp/callback#",
+    "cursor://anysphere.cursor-mcp/call\\back", "cursor://anysphere.cursor-mcp/call\nback",
   ])("refuses unsupported or ambiguous callback %s even when registered", uri => {
+    expect(oauthRedirectUriValid(uri)).toBe(false);
     expect(oauthRedirectUriAllowed(uri, [uri])).toBe(false);
   });
 

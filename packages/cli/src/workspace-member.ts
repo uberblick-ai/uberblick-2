@@ -11,20 +11,11 @@ import type { Io } from "./io.js";
 
 export const WORKSPACE_MEMBER_HELP = `usage: ub workspace member <command>
 
-Manage access to the project's bound hub workspace as a workspace admin.
-Uses this machine's stored device login; never starts a GitHub sign-in.
-
-<member> is a GitHub login (case-insensitive) or permanent account ID.
-The project binding and UB_WORKSPACE_ID/UB_HUB_URL select the target.
-
 commands:
-  add <github-handle> [--role admin|member] [--yes]  confirm a resolved account and grant access
-  list [--json]                                      list members, account IDs and roles
-  role <member> <admin|member>                       change a member's role
-  remove <member>                                    end a member's access on every device
-
-options:
-  -h, --help        show this help
+  add <github-handle> [--role admin|member] [--yes]  # Confirm the GitHub account, then grant access
+  list [--json]                                      # Members, their account IDs and roles (alias: ls)
+  role <member> <admin|member>                       # Change a member's role
+  remove <member>                                    # End a member's access on every device (alias: rm)
 `;
 
 export const WORKSPACE_MEMBER_SUBCOMMAND_HELP = {
@@ -82,6 +73,7 @@ interface Member {
   githubUsername: string;
   githubAccountId: string;
   role: Role;
+  addedOnHost?: true;
 }
 class MemberRefusal extends Error {}
 
@@ -168,11 +160,12 @@ export async function workspaceMemberCommand(command: "add" | "list" | "role" | 
       return body.members as Member[];
     };
     if (command === "list") {
-      const rows = (await members()).map(({ githubUsername, githubAccountId, role }) => ({ githubUsername, githubAccountId, role }));
+      const rows = (await members()).map(({ githubUsername, githubAccountId, role, addedOnHost }) => ({ githubUsername, githubAccountId, role,
+        ...(addedOnHost === true ? { addedOnHost: true } : {}) }));
       if (json) io.out(`${JSON.stringify({ hub: origin, workspaceId, members: rows })}\n`);
       else {
         io.out(`hub ${origin}\nworkspace ${workspaceId}\n`);
-        for (const row of rows) io.out(`${describe(row)} | ${row.role}\n`);
+        for (const row of rows) io.out(`${describe(row)} | ${row.role}${row.addedOnHost === true ? " (added on the host)" : ""}\n`);
         if (rows.length === 0) io.out("no members\n");
       }
       return 0;

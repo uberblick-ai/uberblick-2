@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type * as Y from "yjs";
-import { getDirectoryEntry, getMeta, isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
+import { isDocId, snapshotRevision, type RevisionEntry, type RevisionRequest } from "@uberblick/schema";
 import type { Replicas } from "./replica.js";
 import { HistoryMirrorCache } from "./history-mirror-cache.js";
 import { HistoryReader } from "./history-reader.js";
@@ -17,7 +17,6 @@ export type RevisionClientFailure =
   | "sign-in-required"
   | "forbidden"
   | "deleted"
-  | "decision-no-history"
   | "revision-not-found"
   | "unsupported"
   | "stale-state"
@@ -35,7 +34,6 @@ const failureMessages: Record<RevisionClientFailure, string> = {
   "sign-in-required": "Sign in to read document revisions.",
   forbidden: "The hub refused access to document revisions.",
   deleted: "The document was permanently deleted.",
-  "decision-no-history": "Decision records have no history; the topic's record timeline is their history.",
   "revision-not-found": "The revision does not belong to this document or does not exist.",
   unsupported: "This hub does not serve automatic document revisions.",
   "stale-state": "The displayed document differs from the hub or has changes awaiting synchronization. Nothing was changed.",
@@ -60,6 +58,11 @@ export interface RevisionReadOptions {
   includeTitles?: boolean;
   /** Explicitly revalidate the cached catalog, including after an unknown mutation outcome. */
   refresh?: true;
+}
+
+export interface RevisionMutationOptions extends RevisionReadOptions {
+  /** Recheck the calling session immediately before the hub request is sent. */
+  assertWriteScope?: (() => void) | undefined;
 }
 
 const readers = new WeakMap<Replicas, { reader: HistoryReader; clock: HubHistoryClock }>();
@@ -107,14 +110,9 @@ export async function closeDocumentHistory(replicas: Replicas): Promise<void> {
   await current.reader.close();
 }
 
-/** Refuse history before hydration, writable-state checks or hub requests. */
+/** Refuse permanently deleted history before hydration, cache access or hub requests. */
 export function requireDocumentHistory(replicas: Replicas, uuid: string): void {
   if (replicas.isDeleted(uuid)) throw new RevisionClientError("deleted", { uuid });
-  const stub = getDirectoryEntry(replicas.directory().doc, uuid);
-  const meta = replicas.hydrated(uuid) ? getMeta(replicas.replica(uuid).doc) : undefined;
-  if (stub?.kind === "decision" || meta?.kind === "decision") {
-    throw new RevisionClientError("decision-no-history", { uuid, topic: meta?.topic ?? stub?.topic ?? uuid });
-  }
 }
 
 function roomGuard(replicas: Replicas, uuid: string): void {
@@ -132,10 +130,11 @@ async function requestRevisions(
   replicas: Replicas,
   uuid: string,
   operation: Omit<RevisionRequest, "requestId">,
-  options: RevisionReadOptions,
+  options: RevisionMutationOptions,
 ) {
   try {
-    return await replicas.sync.requestRevisions(room(replicas, uuid), operation, options.timeoutMs);
+    return await replicas.sync.requestRevisions(room(replicas, uuid), operation, options.timeoutMs,
+      { assertWriteScope: options.assertWriteScope });
   } catch (error) {
     if (error instanceof RevisionClientError && error.code === "deleted") {
       throw new RevisionClientError("deleted", { ...error.details, uuid });
@@ -161,7 +160,7 @@ export async function mutateDocumentRevision(
   replicas: Replicas,
   uuid: string,
   mutation: Omit<RevisionRequest, "requestId">,
-  options: RevisionReadOptions = {},
+  options: RevisionMutationOptions = {},
 ): Promise<RevisionEntry> {
   const response = await requestRevisions(replicas, uuid, mutation, options);
   if (!response.ok) {
@@ -184,7 +183,7 @@ export async function restoreDocumentRevision(
   replicas: Replicas,
   uuid: string,
   mutation: { operation: "restore"; revisionId: string; checksum: string; surface: { kind: string; name: string } },
-  options: RevisionReadOptions = {},
+  options: RevisionMutationOptions = {},
 ): Promise<{ revision: RevisionEntry; applied: boolean }> {
   const response = await requestRevisions(replicas, uuid, mutation, options);
   if (!response.ok) {

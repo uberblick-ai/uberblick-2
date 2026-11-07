@@ -31,6 +31,74 @@ afterEach(() => {
 });
 
 describe("hub-owned workspace memberships", () => {
+  it("adds or promotes only the selected membership on the host and preserves existing admins", () => {
+    const store = registry();
+    grant(store, "admin", "admin");
+    grant(store, "member");
+    grant(store, "untouched");
+    grant(store, "member", "member", OTHER_WORKSPACE);
+    expect(store.grantAdminOnHost(WORKSPACE, "new-admin")).toBe(true);
+    expect(store.grantAdminOnHost(WORKSPACE, "member")).toBe(true);
+    for (const principalId of ["new-admin", "member"]) {
+      expect(store.grantAdminOnHost(WORKSPACE, principalId)).toBe(false);
+      expect(store.grantMember({ workspaceId: WORKSPACE, principalId, role: "member" }))
+        .toEqual({ workspaceId: WORKSPACE, principalId, role: "admin", addedOnHost: true });
+    }
+    expect(store.grantAdminOnHost(WORKSPACE, "admin")).toBe(false);
+    expect(store.listMembers(WORKSPACE)).toEqual([
+      { workspaceId: WORKSPACE, principalId: "admin", role: "admin" },
+      { workspaceId: WORKSPACE, principalId: "member", role: "admin", addedOnHost: true },
+      { workspaceId: WORKSPACE, principalId: "new-admin", role: "admin", addedOnHost: true },
+      { workspaceId: WORKSPACE, principalId: "untouched", role: "member" },
+    ]);
+    expect(store.listMembers(OTHER_WORKSPACE)).toEqual([{ workspaceId: OTHER_WORKSPACE, principalId: "member", role: "member" }]);
+  });
+
+  it("clears host attribution on ordinary role changes and removal while protecting the last admin", () => {
+    const store = registry();
+    store.grantAdminOnHost(WORKSPACE, "host-admin");
+    const request = { workspaceId: WORKSPACE, principalId: "host-admin" };
+    expect(() => store.changeRole({ ...request, role: "member" })).toThrow("final workspace admin must remain");
+    expect(() => store.remove(request)).toThrow("final workspace admin must remain");
+    expect(store.listMembers(WORKSPACE)).toEqual([{ ...request, role: "admin", addedOnHost: true }]);
+    grant(store, "admin", "admin");
+    store.changeRole({ ...request, role: "admin" });
+    expect(store.listMembers(WORKSPACE)).toContainEqual({ ...request, role: "admin" });
+    store.changeRole({ ...request, role: "member" });
+    store.grantAdminOnHost(WORKSPACE, "host-admin");
+    store.changeRole({ ...request, role: "member" });
+    expect(store.listMembers(WORKSPACE)).toContainEqual({ ...request, role: "member" });
+    store.grantAdminOnHost(WORKSPACE, "host-admin");
+    store.remove(request);
+    expect(store.grantMember({ ...request, role: "admin" })).toEqual({ ...request, role: "admin" });
+  });
+
+  it("upgrades existing membership storage without attribution and persists host grants through restart", () => {
+    const path = tempDatabasePath();
+    const initial = database(path);
+    initial.connection.exec(`CREATE TABLE hub_memberships (
+      workspace_id TEXT NOT NULL, principal_id TEXT NOT NULL, role TEXT NOT NULL,
+      PRIMARY KEY (workspace_id, principal_id))`);
+    initial.connection.prepare("INSERT INTO hub_memberships VALUES (?, ?, 'member')").run(WORKSPACE, "member");
+    const store = new MembershipRegistry(initial);
+    expect(store.listMembers(WORKSPACE)).toEqual([{ workspaceId: WORKSPACE, principalId: "member", role: "member" }]);
+    store.grantAdminOnHost(WORKSPACE, "member");
+    initial.close();
+    expect(registry(path).listMembers(WORKSPACE)).toEqual([
+      { workspaceId: WORKSPACE, principalId: "member", role: "admin", addedOnHost: true },
+    ]);
+  });
+
+  it("leaves both role and attribution untouched when the atomic host promotion fails", () => {
+    const db = database();
+    const store = new MembershipRegistry(db);
+    grant(store, "member");
+    db.connection.exec(`CREATE TRIGGER refuse_host_promotion BEFORE UPDATE ON hub_memberships
+      WHEN NEW.added_on_host = 1 BEGIN SELECT RAISE(ABORT, 'test host promotion failure'); END`);
+    expect(() => store.grantAdminOnHost(WORKSPACE, "member")).toThrow("test host promotion failure");
+    expect(store.listMembers(WORKSPACE)).toEqual([{ workspaceId: WORKSPACE, principalId: "member", role: "member" }]);
+  });
+
   it.each(["member", "foreign-admin", "outsider"])("requires workspace admin authority from %s", (actorPrincipalId) => {
     const store = registry();
     grant(store, "admin", "admin");

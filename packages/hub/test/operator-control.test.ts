@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { requestOperator } from "../src/operator-client.js";
-import { adminSocketPath } from "../src/admin-setup.js";
+import { adminSocketPath } from "../src/operator-socket.js";
 import { runOperatorCommand } from "../src/operator-command.js";
 import { createTeamHub, type TeamHub } from "../src/team.js";
 import { createClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom, token, waitUntil, type TestClient } from "./helpers.js";
@@ -181,7 +181,7 @@ it("status prints image identity even when stopped; help and usage honor their e
     expect(output.join("\n")).toContain(`commit     ${"a".repeat(40)}`);
     expect(output.join("\n")).toContain("hub        not running");
     expect(process.exitCode).toBe(1);
-    for (const args of [[], ["--help"], ["admin-setup", "--help"], ["admin-setup", "-h"]]) {
+    for (const args of [[], ["--help"]]) {
       process.exitCode = 0;
       await runOperatorCommand(args);
       expect(process.exitCode).toBe(0);

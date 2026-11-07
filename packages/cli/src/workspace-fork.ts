@@ -8,6 +8,7 @@ import { NO_BINDING, resolveProjectBinding, writeProjectBinding } from "@uberbli
 import { reportEnvironmentBinding } from "./workspace-create.js";
 import { readWorkspaceHub, withWorkspaceBindings } from "@uberblick/mcp-server/workspace-registry";
 import { useField, workspaceLabel } from "./workspace-use-output.js";
+import { shortWorkspaceId } from "./workspace-inventory.js";
 
 export const WORKSPACE_FORK_HELP = `usage: ub workspace fork
 
@@ -53,8 +54,9 @@ export async function forkWorkspaceCommand(io: Io): Promise<number> {
       const path = withWorkspaceBindings([binding], () => writeProjectBinding(binding, { record: false }));
       output = useField("forked", workspaceLabel(binding)) + useField("wrote", path);
       if (previous !== null) {
-        output += useField("previous", workspaceLabel(previous)) +
-          `switch back with: ub workspace use ${shellArgument(previous.workspaceId)}\n`;
+        const hint = previous.hubUrl === null ? "switch to previous workspace" : "switch back to the hub connected workspace";
+        output += `${useField("previous", workspaceLabel(previous))}\n` +
+          `${hint} with: ub workspace use ${shortWorkspaceId(previous.workspaceId)}\n`;
       }
     } finally { lock.release(); }
     io.out(output);

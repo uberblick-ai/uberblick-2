@@ -79,6 +79,13 @@ export function formulaFor(tag, version, sha256, url = assetUrl(tag, version)) {
     bin.install_symlink libexec/"bin/uberblick"
   end
 
+  def caveats
+    <<~EOS
+      Uberblick keeps workspaces in ~/.local/share/uberblick and logins in ~/.config/uberblick.
+      brew uninstall leaves them in place; run ub uninstall to remove Uberblick and choose whether to delete them.
+    EOS
+  end
+
   test do
     assert_equal version.to_s, shell_output("#{bin}/ub --version").strip
     assert_equal version.to_s, shell_output("#{bin}/uberblick --version").strip

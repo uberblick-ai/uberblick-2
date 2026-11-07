@@ -9,13 +9,14 @@ import { openCommand, OPEN_HELP, OPEN_OPTIONS } from "./open.js";
 import { serveCommand } from "./serve.js";
 import { statusCommand, STATUS_HELP, STATUS_OPTIONS } from "./status.js";
 import { updateCommand, UPDATE_HELP } from "./update.js";
+import { uninstallCommand, UNINSTALL_HELP, UNINSTALL_OPTIONS } from "./uninstall.js";
 import { cliVersion } from "./version.js";
 import {
   listWorkspacesCommand, removeWorkspaceCommand, useWorkspaceCommand,
   WORKSPACE_HELP, WORKSPACE_LIST_HELP, WORKSPACE_LIST_OPTIONS,
   WORKSPACE_REMOVE_HELP, WORKSPACE_REMOVE_OPTIONS, WORKSPACE_USE_HELP, WORKSPACE_USE_OPTIONS,
 } from "./workspace.js";
-import { createWorkspaceCommand, WORKSPACE_CREATE_HELP } from "./workspace-create.js";
+import { createWorkspaceCommand, WORKSPACE_CREATE_HELP, WORKSPACE_CREATE_OPTIONS } from "./workspace-create.js";
 import { forkWorkspaceCommand, WORKSPACE_FORK_HELP } from "./workspace-fork.js";
 import { detachWorkspaceCommand, WORKSPACE_DETACH_HELP } from "./workspace-detach.js";
 import { promoteWorkspaceCommand, WORKSPACE_PROMOTE_HELP } from "./workspace-promote.js";
@@ -29,6 +30,8 @@ export const HELP = `uberblick — local-first, CRDT-backed collaborative docume
 usage: ub <command> [options]
 
 commands:
+  uninstall [options]    remove the Homebrew installation and choose whether
+                         to delete this computer's data
   update                 update the Homebrew installation; for a checkout, run
                          git pull, then mise run setup
   open [options]         serve the web app and a hub in the foreground, and
@@ -54,6 +57,7 @@ commands:
 
 options for install:
   --user             # Register for every project of this user, not just this project
+  --remote           # Register this workspace's hosted URL (experimental)
   --print            # Print the entry to paste, and run nothing
 `;
 
@@ -64,6 +68,8 @@ const authParseError = (error: unknown): string =>
 export const COMMAND_TREE: CommandGroup = {
   path: [], help: HELP, version: cliVersion,
   children: [
+    command({ path: ["uninstall"], help: UNINSTALL_HELP, options: UNINSTALL_OPTIONS, positionals: false,
+      run: (args, io, options) => uninstallCommand(args, io, options.uninstallHost) }),
     command({ path: ["update"], help: UPDATE_HELP, options: {}, positionals: false,
       argumentError: args => args.length === 0 ? undefined : `expected no arguments, got ${JSON.stringify(args[0])}`,
       run: (_args, io, options) => updateCommand(io, options.updateHost) }),
@@ -78,7 +84,7 @@ export const COMMAND_TREE: CommandGroup = {
         positionals: { min: 1, max: 1, error: "expected one document and --file <path|->" }, run: updateDataCommand }),
     ] },
     { path: ["workspace"], help: WORKSPACE_HELP, children: [
-      command({ path: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {},
+      command({ path: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: WORKSPACE_CREATE_OPTIONS,
         positionals: { min: 1, max: 1, error: "expected exactly one workspace name" }, run: createWorkspaceCommand }),
       command({ path: ["workspace", "fork"], help: WORKSPACE_FORK_HELP, options: {}, positionals: false,
         run: (_args, io) => forkWorkspaceCommand(io) }),
@@ -89,14 +95,14 @@ export const COMMAND_TREE: CommandGroup = {
       { path: ["workspace", "member"], help: WORKSPACE_MEMBER_HELP, children: [
         command({ path: ["workspace", "member", "add"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.add, options: WORKSPACE_MEMBER_ADD_OPTIONS,
           positionals: { min: 1, max: 1, error: "expected 1 argument" }, run: (args, io) => workspaceMemberCommand("add", args, io) }),
-        command({ path: ["workspace", "member", "list"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.list, options: WORKSPACE_MEMBER_LIST_OPTIONS,
+        command({ path: ["workspace", "member", "list"], aliases: ["ls"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.list, options: WORKSPACE_MEMBER_LIST_OPTIONS,
           positionals: { min: 0, max: 0, error: "expected 0 arguments" }, run: (args, io) => workspaceMemberCommand("list", args, io) }),
         command({ path: ["workspace", "member", "role"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.role, options: {},
           positionals: { min: 2, max: 2, error: "expected 2 arguments" }, run: (args, io) => workspaceMemberCommand("role", args, io) }),
-        command({ path: ["workspace", "member", "remove"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.remove, options: {},
+        command({ path: ["workspace", "member", "remove"], aliases: ["rm"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.remove, options: {},
           positionals: { min: 1, max: 1, error: "expected 1 argument" }, run: (args, io) => workspaceMemberCommand("remove", args, io) }),
       ] },
-      command({ path: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS, positionals: false, run: listWorkspacesCommand }),
+      command({ path: ["workspace", "list"], aliases: ["ls"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS, positionals: false, run: listWorkspacesCommand }),
       command({ path: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS,
         positionals: { min: 1, max: 1, error: "expected exactly one workspace link or id" }, run: useWorkspaceCommand }),
       command({ path: ["workspace", "remove"], aliases: ["rm"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS,

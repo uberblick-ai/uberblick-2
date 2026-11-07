@@ -142,6 +142,7 @@ globalThis.fetch = () => { throw new Error("detach must make no hub request"); }
     expect(result.stdout).toContain(WORKSPACE);
     expect(result.stdout).toContain("https://detach.example.test");
     expect(result.stdout).toContain("ub workspace use");
+    expect(result.stdout).toContain(`this computer no longer syncs with it.\n\nreconnect with: ub workspace use https://detach.example.test/${WORKSPACE}\n`);
     expect(result.stdout).toContain(join(box.cwd, ".uberblick.json"));
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBeNull();
     expect(selected(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: null });

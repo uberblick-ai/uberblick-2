@@ -79,8 +79,8 @@ async function fixture() {
     const instance = createRuntime(config, options);
     runtimes.push(instance);
     const openSession = instance.openSession;
-    vi.spyOn(instance, "openSession").mockImplementation(() => {
-      const session = openSession();
+    vi.spyOn(instance, "openSession").mockImplementation((...args) => {
+      const session = openSession(...args);
       sessions.push(session);
       return session;
     });
@@ -164,8 +164,8 @@ it("coalesces concurrent sessions of a grant, isolates its credentials, and hide
 
   const second = await connect(rig.url, "second", "second-client");
   expect(rig.opening).toHaveBeenCalledTimes(2);
-  expect(rig.opening.mock.calls[0]![1]).toEqual(rig.first.credentials);
-  expect(rig.opening.mock.calls[1]![1]).toEqual(rig.second.credentials);
+  expect(rig.opening.mock.calls[0]![1]).toEqual({ ...rig.first.credentials, waitForWriteAcknowledgement: true });
+  expect(rig.opening.mock.calls[1]![1]).toEqual({ ...rig.second.credentials, waitForWriteAcknowledgement: true });
   expect(rig.opening.mock.calls[0]![0].databasePath).not.toBe(rig.opening.mock.calls[1]![0].databasePath);
   expect(rig.runtimes[0]!.store).not.toBe(rig.runtimes[1]!.store);
   await first.ok("list_docs");

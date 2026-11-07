@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
-import { assertHubTransport, authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
+import { assertHubTransport, authenticationOrigin, hubIdentity, normalizeRemoteUrl, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { defaultWorkspaceDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
 import { isUuid, parseWorkspaceId } from "@uberblick/schema";
@@ -17,6 +17,7 @@ import { resolveProjectBinding, writeProjectBinding } from "@uberblick/mcp-serve
 import { corpusProblem, verify } from "./remote.js";
 import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { reportEnvironmentBinding } from "./workspace-create.js";
+import { displayWorkspaceHub, useField } from "./workspace-use-output.js";
 
 export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>
 
@@ -45,6 +46,13 @@ options:
 function bindingBytes(path: string): string | null {
   try { return readFileSync(path, "utf8"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+}
+
+function displayPromotionHub(endpoint: string, workspaceId: string): string {
+  const display = displayWorkspaceHub(endpoint);
+  const joined = parseJoinTarget(`${display}/${workspaceId}`);
+  // A web origin defaults to /ws; an explicit WebSocket root must stay explicit.
+  return hubIdentity(joined.endpoint) === hubIdentity(endpoint) ? display : endpoint;
 }
 
 /** Saved before the first request; a lost response must not lose the attempt. */
@@ -170,7 +178,10 @@ export async function promoteWorkspaceCommand({ positionals }: CommandArgs<Recor
       const env = { ...resolved.env, WORKSPACE_ID: workspaceId, HUB_URL: endpoint, UB_HUB_URL: endpoint,
         HUB_ADMISSION: "device", HUB_AUTH_TOKEN: undefined };
       const base = bridgeConfig(resolveMcpConfig(env), env);
-      io.err(`Uploading workspace ${selected.workspaceId} to ${endpoint}…\n`);
+      const displayHub = displayPromotionHub(endpoint, workspaceId);
+      const name = readWorkspaceName(base.databasePath, workspaceId);
+      const label = name === null ? workspaceId : `${name} (${workspaceId})`;
+      io.out(useField("uploading", `${label} to ${displayHub}`));
       const uploaded = await syncWorkspace(base);
       const problem = corpusProblem(endpoint, uploaded);
       if (problem !== null) throw new Error(problem.trim());
@@ -193,8 +204,11 @@ export async function promoteWorkspaceCommand({ positionals }: CommandArgs<Recor
         for (const warning of admission.warnings) io.err(`ub: warning: ${warning}\n`);
         writeProjectBinding(binding, { path, record: "promote" });
       } finally { bindingLock.release(); }
-      io.out(`Promoted workspace ${selected.workspaceId} to ${endpoint}.\nProject connected; ${uploaded.entries.length} documents verified, including archived documents.\n` +
-        `Use on another machine: ub workspace use ${endpoint.replace(/\/$/, "")}/${selected.workspaceId}\n`);
+      const promoted = name === null ? `${workspaceId} (${displayHub})` : `${name} (${workspaceId}, ${displayHub})`;
+      io.out(useField("verified", `${uploaded.entries.length} documents, including archived ones`) +
+        useField("promoted", promoted) + useField("wrote", path) +
+        `\nshare link: ${displayHub}/${workspaceId}\n` +
+        "commit .uberblick.json so teammates only need `ub auth login` to access it\n");
       reportEnvironmentBinding(io);
       return 0;
     } finally { lock.release(); }

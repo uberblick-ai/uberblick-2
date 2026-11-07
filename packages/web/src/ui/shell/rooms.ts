@@ -15,7 +15,7 @@ function resolveSelection(route: Route, topics: DecisionTopicResolution[], direc
   const candidateSelection = directory === null ? null : topic === null ? (route.kind === "decision" ? null : routedSelection)
     : route.kind === "decision"
       ? topic.allRecords.find((record) => record.uuid === route.record)?.uuid ?? null
-      : route.kind === "doc" && route.uuid !== topic.topic && topic.archivedRecords.some((record) => record.uuid === route.uuid)
+      : route.kind === "doc" && (route.history !== undefined || (route.uuid !== topic.topic && topic.archivedRecords.some((record) => record.uuid === route.uuid)))
         ? route.uuid : decisionCurrentRecord(topic)?.uuid ?? null;
   const selected = directory !== null && candidateSelection !== null &&
     isDirectoryEntryDeleted(directory.ydoc, candidateSelection)

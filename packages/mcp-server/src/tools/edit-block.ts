@@ -10,7 +10,7 @@ import { summarizeWrittenBlocks } from "./chart-summary.js";
 export const inputSchema = strictInput({
   uuid: uuidArg,
   block_id: z.string().min(1),
-  old_text: z.string().describe("The block text you read. Asserted before the splice."),
+  old_text: z.string().describe("The block's whole text as get_doc returns it, not a fragment. Asserted before the splice."),
   new_text: z.string().describe("Replacement text. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."),
   column_widths: columnWidthsArg,
   list: listStyleArg.optional().describe("New list style on an existing list item; omitted keeps its style. Refused on other block types."),

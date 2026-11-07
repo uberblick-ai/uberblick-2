@@ -290,6 +290,17 @@ export class CredentialRegistry {
     return row === undefined ? null : recordFromRow(row);
   }
 
+  inspectGrantCredential(grantId: string, credential?: { id: string; publicKey: Uint8Array }): { current: boolean; hasCredential: boolean; now: number } {
+    const now = this.now();
+    const grant = this.grants.get(grantId);
+    const hasCredential = grant !== null && this.selectDeviceCredentials.get({ principalId: grant.principalId, deviceId: grant.deviceId }) !== undefined;
+    if (credential === undefined) return { current: false, hasCredential, now };
+    const record = this.get(credential.id);
+    const key = this.selectKey.get({ id: credential.id })?.public_key;
+    return { current: record?.ceiling?.grantId === grantId && !("failure" in this.usable(record)) &&
+      key instanceof Uint8Array && Buffer.from(key).equals(credential.publicKey), hasCredential, now };
+  }
+
   remainingLifetime(record: CredentialRecord): number {
     return record.issuedAt + DEVICE_CREDENTIAL_LIFETIME_MS - this.now();
   }

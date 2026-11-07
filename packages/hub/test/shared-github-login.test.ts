@@ -1,10 +1,7 @@
 import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
-import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { adminSocketPath, type SetupGrant } from "../src/admin-setup.js";
 import { resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/team-config.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import type { SignInCollection } from "../src/github-sign-in.js";
@@ -62,7 +59,7 @@ async function rig(authSecret: string) {
   const databasePath = tempDatabasePath();
   const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: authSecret, HUB_DB_PATH: databasePath, PORT: "0" });
   expect(config.github?.clientId).toBe(SHARED_GITHUB_CLIENT_ID);
-  const hub = await createHub({ ...config, github: { ...config.github!, fetch: github.fetch, now: () => github.time, setupPollMs: 5 },
+  const hub = await createHub({ ...config, github: { ...config.github!, fetch: github.fetch, now: () => github.time },
     log: silentLogger }, { operatorSetup: true });
   hubs.push(hub);
   return { hub, github, databasePath };
@@ -93,29 +90,10 @@ async function complete(testRig: Rig, request: Approval): Promise<Complete> {
   return response.result as unknown as Complete;
 }
 
-async function firstAdmin(testRig: Rig): Promise<SetupGrant> {
-  const socket = createConnection(adminSocketPath(testRig.databasePath));
-  const reader = createInterface({ input: socket });
-  const lines = reader[Symbol.asyncIterator]();
-  const next = async () => {
-    const line = await lines.next();
-    expect(line.done).toBe(false);
-    return JSON.parse(line.value!) as Record<string, unknown>;
-  };
-  try {
-    socket.write(`${JSON.stringify({ action: "start", workspaceId: WORKSPACE })}\n`);
-    const starting = await next();
-    expect(starting).toMatchObject({ status: "starting", workspaceId: WORKSPACE });
-    expect(await next()).toMatchObject({ status: "pending", setupId: starting.setupId, userCode: "ABCD-EFGH" });
-    testRig.github.time += 1000;
-    // The host setup owns its timer; allow its real one-second poll to run.
-    const result = await next();
-    expect(result).toMatchObject({ status: "complete", setupId: starting.setupId, workspaceId: WORKSPACE });
-    return result as unknown as SetupGrant;
-  } finally {
-    reader.close();
-    socket.destroy();
-  }
+async function firstAdmin(testRig: Rig) {
+  const signedIn = await complete(testRig, await start(testRig));
+  testRig.hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: signedIn.identity.id, role: "admin" });
+  return signedIn.identity;
 }
 
 function privateRows(path: string) {
@@ -163,7 +141,7 @@ describe("independent hubs sharing the public GitHub app", () => {
     }
     const loginA = await complete(a, requestA);
     const loginB = await complete(b, requestB);
-    expect(loginA.identity).toEqual(admin.identity);
+    expect(loginA.identity).toEqual(admin);
     expect(loginA.identity.githubAccountId).toBe(String(ACCOUNT.id));
     expect(loginB.identity.githubAccountId).toBe(loginA.identity.githubAccountId);
     expect(loginB.identity.id).not.toBe(loginA.identity.id);
@@ -172,7 +150,7 @@ describe("independent hubs sharing the public GitHub app", () => {
     expect(loginB.credential.record.id).not.toBe(loginA.credential.record.id);
     expect(credentialPrivateKey(loginB.credential.record)).not.toEqual(credentialPrivateKey(loginA.credential.record));
     expect(privateRows(a.databasePath).memberships).toEqual([
-      { workspace_id: WORKSPACE, principal_id: loginA.identity.id, role: "admin" },
+      { workspace_id: WORKSPACE, principal_id: loginA.identity.id, role: "admin", added_on_host: 0 },
     ]);
     expect(privateRows(b.databasePath).memberships).toEqual([]);
     expectDirectGithub(a.github, 2);

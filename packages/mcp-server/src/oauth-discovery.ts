@@ -44,3 +44,13 @@ export function replyMcpUnauthorized(response: ServerResponse, issuer: string | 
   });
   response.end();
 }
+
+export function replyMcpInsufficientScope(response: ServerResponse, issuer: string | undefined, workspaceId: string): void {
+  response.writeHead(403, {
+    "Cache-Control": "no-store",
+    ...(issuer === undefined ? {} : {
+      "WWW-Authenticate": `Bearer error="insufficient_scope", scope="${OAUTH_SCOPES.join(" ")}", resource_metadata="${protectedResourceMetadataUrl(issuer, workspaceId)}"`,
+    }),
+  });
+  response.end();
+}

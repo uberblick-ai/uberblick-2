@@ -13,6 +13,7 @@ import { writeHubLogin } from "../src/auth-store.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { documentRevisionChecksum, mutateDocumentRevision, readDocumentHistory, readDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
+import { assertWriteScope } from "../src/tool-scope.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, tempDir, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
@@ -224,28 +225,38 @@ it("rechecks background priority at send time while foreground history remains a
   expect(requests).toHaveLength(2);
 });
 
-it.each(["directory", "document"] as const)("refuses decision history known through the %s before sending any client request", async source => {
-  const opened = workspace();
-  const uuid = randomUUID();
+it.each(["directory", "document"] as const)("uses the revision transport for a decision known through the %s", async source => {
+  const { opened, uuid, replica, reply } = await admitted();
   const topic = randomUUID();
   if (source === "directory") {
     upsertDirectoryEntry(opened.replicas.directory().doc, { uuid, title: "Decision", kind: "decision", topic, status: "open" });
   } else {
-    const doc = opened.replicas.replica(uuid).doc;
-    initDoc(doc, { uuid, title: "Decision" });
-    getMetaMap(doc).set("kind", "decision");
-    getMetaMap(doc).set("topic", topic);
+    getMetaMap(replica.doc).set("kind", "decision");
+    getMetaMap(replica.doc).set("topic", topic);
   }
-  const request = vi.spyOn(opened.replicas.sync, "requestRevisions");
-  const expected = { code: "decision-no-history", details: { uuid, topic } };
-  await expect(readDocumentHistory(opened.replicas, uuid)).rejects.toMatchObject(expected);
-  await expect(readDocumentRevision(opened.replicas, uuid, "earlier")).rejects.toMatchObject(expected);
-  await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum: "unused" }))
-    .rejects.toMatchObject(expected);
+  expect(await opened.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+  const checksum = documentRevisionChecksum(replica.doc);
+  const entry = { id: "earlier", author: null, startedAt: 100, endedAt: 200, checksum,
+    name: { text: "Reviewed", namer: null, namedAt: 200, canManage: true } };
+  const requests: RevisionRequest[] = [];
+  reply((request, send) => {
+    requests.push(request);
+    if (request.operation === "list") send({ requestId: request.requestId, ok: true, revisions: [entry] });
+    else if (request.operation === "get") send({ requestId: request.requestId, ok: true,
+      state: Y.encodeStateAsUpdate(replica.doc), revisionId: entry.id, checksum });
+    else if (request.operation === "restore") send({ requestId: request.requestId, ok: true, revision: entry, applied: true });
+    else send({ requestId: request.requestId, ok: true, revision: entry });
+  });
+  await expect(readDocumentHistory(opened.replicas, uuid)).resolves.toMatchObject({ revisions: [entry] });
+  const read = await readDocumentRevision(opened.replicas, uuid, entry.id);
+  try { expect(getMeta(read.doc).title).toBe("Current document"); }
+  finally { read.doc.destroy(); }
+  await expect(mutateDocumentRevision(opened.replicas, uuid, { operation: "name", name: "Reviewed", checksum,
+    surface: { kind: "mcp", name: "Codex" } }))
+    .resolves.toEqual(entry);
   await expect(restoreDocumentRevision(opened.replicas, uuid, { operation: "restore", revisionId: "earlier",
-    checksum: "unused", surface: { kind: "mcp", name: "Codex" } })).rejects.toMatchObject(expected);
-  expect(request).not.toHaveBeenCalled();
-  expect(opened.replicas.hydrated(uuid)).toBe(source === "document");
+    checksum, surface: { kind: "mcp", name: "Codex" } })).resolves.toEqual({ revision: entry, applied: true });
+  expect(requests.map(request => request.operation)).toEqual(["list", "get", "name", "restore"]);
 });
 
 it("preserves independent names and titles options at the revision transport boundary", async () => {
@@ -276,13 +287,15 @@ it("preserves independent names and titles options at the revision transport bou
   await expect(list({ includeTitles: true })).resolves.toMatchObject({ revisions: [entry] });
 });
 
-it("does not claim a sent naming request made no change when its reply is lost or unavailable", async () => {
+it("keeps a sent naming outcome unknown when its scope narrows and the reply is lost", async () => {
   const fixture = await admitted();
   const mutation = { operation: "name" as const, name: "Reviewed", checksum: documentRevisionChecksum(fixture.replica.doc),
     surface: { kind: "mcp", name: "Claude Code" } };
   const committed: string[] = [];
-  fixture.reply(request => { committed.push(request.name!); });
-  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+  let scope = ["docs:read", "docs:write"];
+  const check = () => assertWriteScope(scope);
+  fixture.reply(request => { committed.push(request.name!); scope = ["docs:read"]; });
+  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100, assertWriteScope: check }))
     .rejects.toMatchObject({ code: "naming-outcome-unknown", details: { applied: null, reason: "unsupported" } });
   expect(committed).toEqual(["Reviewed"]);
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));
@@ -302,8 +315,10 @@ it("preserves restore no-op results and treats missing restore acknowledgements 
   await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
     .resolves.toEqual({ revision: entry, applied: false });
   const requests: RevisionRequest[] = [];
-  fixture.reply(request => { requests.push(request); });
-  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+  let scope = ["docs:read", "docs:write"];
+  const check = () => assertWriteScope(scope);
+  fixture.reply(request => { requests.push(request); scope = ["docs:read"]; });
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100, assertWriteScope: check }))
     .rejects.toMatchObject({ code: "restore-outcome-unknown", details: { applied: null, reason: "unsupported" } });
   expect(requests).toMatchObject([mutation]);
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));

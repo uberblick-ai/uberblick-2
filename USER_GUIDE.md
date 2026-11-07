@@ -284,3 +284,14 @@ defaults.
 A replica database records the workspace it holds: pointing `UBERBLICK_DB`
 at another workspace's file makes the server exit non-zero naming both IDs and
 the path, rather than merging two corpora into one index.
+
+`ub uninstall` removes a Homebrew installation. It lists the local workspaces
+and logins above, warns about workspaces that may have their only copy here or
+hold changes no hub has acknowledged, and asks separately before deleting
+both roots. Both answers default to no. Stop `ub open` before choosing to
+delete data. For scripts, `ub uninstall --yes` removes the program and keeps
+the data; add `--delete-data` to delete it too.
+
+`brew uninstall uberblick-ai/tap/uberblick` removes only the program and keeps
+both roots. Uninstalling leaves databases outside those roots, project
+`.uberblick.json` files, MCP client registrations and hub data in place.

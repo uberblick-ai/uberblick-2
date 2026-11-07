@@ -20,11 +20,13 @@ import {
   FAILURE_CODES,
   INTERNAL_ERROR_MESSAGE,
   PERSISTENCE_ERROR_MESSAGE,
+  ToolError,
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
 import { RevisionClientError } from "../src/revision-client.js";
 import { ServerShuttingDownError } from "../src/server-work.js";
+import { assertWriteScope } from "../src/tool-scope.js";
 import { MirrorStore, WorkspaceDetachedError, WorkspaceRemovedError } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
 import {
@@ -48,7 +50,6 @@ const REVISION_FAILURES = [
   ["sign-in-required", "revisions_sign_in_required", "manual", "ub auth login"],
   ["forbidden", "revisions_forbidden", "manual", "grant read access"],
   ["deleted", "doc_deleted", "manual", "permanently deleted"],
-  ["decision-no-history", "decision_no_history", "manual", "topic's records"],
   ["revision-not-found", "revision_not_found", "reread", "list_revisions"],
   ["unsupported", "revisions_unsupported", "manual", "update the hub"],
 ] as const;
@@ -109,7 +110,12 @@ const EXPECTED: Record<
   string,
   { recoveryClass: string | null; detail: string[] }
 > = {
+  invalid_render_options: { recoveryClass: "manual", detail: ["field"] },
+  unsupported_block_type: { recoveryClass: "manual", detail: ["uuid", "block_id"] },
+  render_too_large: { recoveryClass: "manual", detail: ["uuid", "block_id", "maxPixels"] },
+  render_failed: { recoveryClass: "manual", detail: ["uuid", "block_id"] },
   server_shutting_down: { recoveryClass: "manual", detail: [] },
+  insufficient_scope: { recoveryClass: "manual", detail: [] },
   data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
   data_collection_not_found: { recoveryClass: "reread", detail: ["uuid", "collection"] },
   data_schema_invalid: { recoveryClass: "manual", detail: ["collection", "path"] },
@@ -181,7 +187,6 @@ const EXPECTED: Record<
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
   doc_deleted: { recoveryClass: "manual", detail: ["uuid"] },
-  decision_no_history: { recoveryClass: "manual", detail: [] },
   revisions_local_only: { recoveryClass: "manual", detail: [] },
   revisions_unreachable: { recoveryClass: "retry", detail: [] },
   revisions_downloading: { recoveryClass: "retry", detail: [] },
@@ -287,6 +292,14 @@ describe("the failure contract", () => {
     const record = (payload: any): void => {
       failures.set(payload.error, payload);
     };
+    const renderDoc = await seeded(rig);
+    record((await rig.call("render_block", { uuid: renderDoc.uuid, block_id: renderDoc.blockId, width: 0 })).payload);
+    record((await rig.call("render_block", { uuid: renderDoc.uuid, block_id: renderDoc.blockId })).payload);
+    const tall = await rig.ok("insert_block", { uuid: renderDoc.uuid, blocks: [{ type: "code", language: "ablauf",
+      text: 'flow v0\ncolumns main\nbox a "A" gap=100000\nbox b "B"' }] });
+    record((await rig.call("render_block", { uuid: renderDoc.uuid, block_id: tall.blocks[0].id })).payload);
+    record(toFailure(toolNamed("render_block"), new ToolError("render_failed", "The bundled renderer failed.",
+      { uuid: renderDoc.uuid, block_id: tall.blocks[0].id })).payload);
 
     const deletionDoc = await seeded(rig);
     const comments = await rig.ok("annotate", { uuid: deletionDoc.uuid, block_id: deletionDoc.blockId, start: 0, end: 1, text: "Deletion failure cases" });
@@ -657,6 +670,8 @@ describe("the failure contract", () => {
     record(toFailure(toolNamed("set_metadata"), new ServerShuttingDownError()).payload);
     record(toFailure(toolNamed("create_doc"), new WorkspaceRemovedError()).payload);
     record(toFailure(toolNamed("create_doc"), new WorkspaceDetachedError()).payload);
+    try { assertWriteScope(["docs:read"]); }
+    catch (error) { record(toFailure(toolNamed("set_metadata"), error).payload); }
 
     // Valid MCP inputs cannot cross decision kinds; retain the defensive
     // mapper for shared-model lifecycle errors from an internal caller.

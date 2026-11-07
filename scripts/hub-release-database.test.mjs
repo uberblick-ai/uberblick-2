@@ -5,7 +5,7 @@ import { CREDENTIAL_SCHEMA, revokeHmacCredentials } from "../packages/hub/src/cr
 import { PrincipalRegistry } from "../packages/hub/src/principals.ts";
 import { assertHubDatabaseUpgrade, seedReleaseCredential, snapshotHubDatabase } from "./lib/hub-release-database.mjs";
 
-const tables = ["hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_claim_state"];
+const tables = ["hub_principals", "hub_credentials", "hub_memberships", "hub_claim_state"];
 // Exercise the source-text form sent to release images, with no module closure.
 const seed = new Function("db", `(${seedReleaseCredential.toString()})(db, "principal", "workspace")`);
 const read = new Function("db", "tables", `return (${snapshotHubDatabase.toString()})(db, tables)`);
@@ -20,8 +20,6 @@ function fixture(schema) {
 		INSERT INTO hub_principals VALUES ('principal', '123', 'release-proof');
 		CREATE TABLE hub_memberships(workspace_id TEXT, principal_id TEXT, role TEXT);
 		INSERT INTO hub_memberships VALUES ('workspace', 'principal', 'admin');
-		CREATE TABLE hub_admin_setup_grants(id TEXT, completed INTEGER);
-		INSERT INTO hub_admin_setup_grants VALUES ('setup', 1);
 		CREATE TABLE hub_claim_state(id INTEGER, default_workspace_id TEXT, unclaimed INTEGER);
 		INSERT INTO hub_claim_state VALUES (1, 'workspace', 0);`);
 	seed(db);
@@ -119,5 +117,24 @@ test("release proof exposes browser sessions and refuses unmodeled legacy browse
 		assert.equal(original.hub_browser_sessions.length, 1);
 		new PrincipalRegistry({ connection: db }, () => 2000);
 		assert.throws(() => assertHubDatabaseUpgrade(snapshot(db), original), /no unmodeled browser sign-in evidence/);
+	} finally { db.close(); }
+});
+
+test("release proof accepts the host marker's additive default without changing membership", () => {
+	const db = fixture(CREDENTIAL_SCHEMA);
+	try {
+		const original = snapshot(db);
+		db.exec("ALTER TABLE hub_memberships ADD COLUMN added_on_host INTEGER NOT NULL DEFAULT 0");
+		const upgraded = snapshot(db);
+		assertHubDatabaseUpgrade(upgraded, original);
+		for (const mutate of [
+			(value) => { value.hub_memberships[0].added_on_host = 1; },
+			(value) => { value.hub_memberships[0].role = "member"; },
+			(value) => { value.hub_memberships[0].principal_id = "other"; },
+		]) {
+			const damaged = structuredClone(upgraded);
+			mutate(damaged);
+			assert.throws(() => assertHubDatabaseUpgrade(damaged, original), assert.AssertionError);
+		}
 	} finally { db.close(); }
 });

@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
-import { adminSocketPath } from "./admin-setup.js";
+import { adminSocketPath } from "./operator-socket.js";
 import { restoreAccessChanges, writeAccessRecovery } from "./operator-restore-access.js";
 import { checkDatabaseIntegrity, syncDatabaseFile, tableHasRows } from "./database-backup.js";
 
@@ -23,7 +23,6 @@ const PRIVATE_ACCESS_TABLES = [
   "hub_principals",
   "hub_credentials",
   "hub_memberships",
-  "hub_admin_setup_grants",
   "hub_claim_state",
 ];
 

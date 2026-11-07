@@ -11,11 +11,13 @@ import {
   directoryRoom,
   enforceDeletedDirectoryEntries,
   getDirectoryEntry,
+  initDoc,
   isDirectoryEntryDeleted,
   parseRoom,
   roomForDoc,
   resolveDecisionTopics,
   restoreDirectoryEntry,
+  setKind,
   tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -39,6 +41,15 @@ import {
 
 const clients: TestClient[] = [];
 const hubs: Hub[] = [];
+
+function decision(uuid: string, topic: string): Y.Doc {
+  const document = new Y.Doc();
+  document.transact(() => {
+    initDoc(document, { uuid, title: "Question", topic, ...(uuid === topic ? {} : { supersedes: topic }) });
+    setKind(document, "decision");
+  });
+  return document;
+}
 
 async function hub(databasePath: string): Promise<Hub> {
   const started = await startHub({ databasePath, debounce: 60_000, maxDebounce: 60_000 });
@@ -73,7 +84,7 @@ afterEach(async () => {
 });
 
 describe("permanent room deletion", () => {
-  it.each(["coalesced reconnect", "ordered updates"])("keeps single-record marks through %s and cleanup, without deleting the topic", async (delivery) => {
+  it.each(["coalesced reconnect", "ordered updates"])("keeps single-record marks through %s without deleting the topic, and requires rearchiving a late record", async (delivery) => {
     const databasePath = tempDatabasePath();
     const first = await hub(databasePath);
     const topicRoom = testRoom();
@@ -82,9 +93,9 @@ describe("permanent room deletion", () => {
     const topic = parseRoom(topicRoom).uuid;
     const middle = parseRoom(middleRoom).uuid;
     const late = parseRoom(lateRoom).uuid;
-    const topicWriter = await client(first, topicRoom);
-    const middleWriter = await client(first, middleRoom);
-    const lateWriter = await client(first, lateRoom);
+    const topicWriter = await client(first, topicRoom, decision(topic, topic));
+    const middleWriter = await client(first, middleRoom, decision(middle, topic));
+    const lateWriter = await client(first, lateRoom, decision(late, topic));
     const directory = await client(first, directoryRoom(WORKSPACE));
     await Promise.all([topicWriter.synced, middleWriter.synced, lateWriter.synced, directory.synced]);
     topicWriter.text.insert(0, "first answer stays");
@@ -120,17 +131,21 @@ describe("permanent room deletion", () => {
       expect(storedText(databasePath, topicRoom)).toBe("first answer stays");
       expect(storedText(databasePath, lateRoom)).toBe("late answer removed later");
 
-      // Released peers remove the data-free archive witness after accepting its mark.
-      directory.doc.getMap("docs").delete(middle);
-      await acknowledged(directory, "witness cleanup");
       expect(isDirectoryEntryDeleted(directory.doc, middle)).toBe(true);
       expect(directory.doc.getMap("docs").has(middle)).toBe(false);
 
       Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory.doc));
+      expect(deleteDecisionRecord(offline, late)).toBe(false);
+      restoreDirectoryEntry(directory.doc, topic);
+      await acknowledged(directory, "topic restoration before rearchiving");
+      tombstoneDirectoryEntry(directory.doc, topic);
+      await acknowledged(directory, "topic rearchive includes late record");
+      expect(getDirectoryEntry(directory.doc, late)?.deleted).toBe(true);
+      Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory.doc));
       expect(deleteDecisionRecord(offline, late)).toBe(true);
       const deletion = Y.encodeStateAsUpdate(offline, Y.encodeStateVector(directory.doc));
       Y.applyUpdate(directory.doc, deletion);
-      await acknowledged(directory, "late-record deletion in one update");
+      await acknowledged(directory, "rearchived late-record deletion in one update");
       expect(await lateWriter.denied).toBe(DOC_DELETED_REASON);
       expect(isDirectoryEntryDeleted(directory.doc, late)).toBe(true);
       expect(isDirectoryEntryDeleted(directory.doc, topic)).toBe(false);
@@ -166,10 +181,10 @@ describe("permanent room deletion", () => {
     const former = parseRoom(formerRoom).uuid;
     const current = parseRoom(currentRoom).uuid;
     const late = parseRoom(lateRoom).uuid;
-    const topicWriter = await client(first, topicRoom);
-    const formerWriter = await client(first, formerRoom);
-    const currentWriter = await client(first, currentRoom);
-    const lateWriter = await client(first, lateRoom);
+    const topicWriter = await client(first, topicRoom, decision(topic, topic));
+    const formerWriter = await client(first, formerRoom, decision(former, topic));
+    const currentWriter = await client(first, currentRoom, decision(current, topic));
+    const lateWriter = await client(first, lateRoom, arrival === "after archive" ? decision(late, topic) : undefined);
     const directory = await client(first, directoryRoom(WORKSPACE));
     await Promise.all([topicWriter.synced, formerWriter.synced, currentWriter.synced, lateWriter.synced, directory.synced]);
     for (const writer of [topicWriter, formerWriter, currentWriter]) {
@@ -235,8 +250,8 @@ describe("permanent room deletion", () => {
     const recordRoom = testRoom();
     const topic = parseRoom(topicRoom).uuid;
     const record = parseRoom(recordRoom).uuid;
-    const topicWriter = await client(started, topicRoom);
-    const recordWriter = await client(started, recordRoom);
+    const topicWriter = await client(started, topicRoom, decision(topic, topic));
+    const recordWriter = await client(started, recordRoom, decision(record, topic));
     const directory = await client(started, directoryRoom(WORKSPACE));
     await Promise.all([topicWriter.synced, recordWriter.synced, directory.synced]);
     topicWriter.text.insert(0, "live topic");
@@ -257,6 +272,55 @@ describe("permanent room deletion", () => {
     await started.flush();
     expect(storedText(databasePath, topicRoom)).toBe("live topic");
     expect(storedText(databasePath, recordRoom)).toBe("archived record");
+  });
+
+  it("converges after refusing a page's false membership in a deleted topic", async () => {
+    const databasePath = tempDatabasePath();
+    const started = await hub(databasePath);
+    const topicRoom = testRoom();
+    const pageRoom = testRoom();
+    const topic = parseRoom(topicRoom).uuid;
+    const page = parseRoom(pageRoom).uuid;
+    const topicWriter = await client(started, topicRoom, decision(topic, topic));
+    const pageDocument = new Y.Doc();
+    initDoc(pageDocument, { uuid: page, title: "Live page" });
+    const pageWriter = await client(started, pageRoom, pageDocument);
+    const writer = await client(started, directoryRoom(WORKSPACE));
+    const reader = await client(started, directoryRoom(WORKSPACE));
+    await Promise.all([topicWriter.synced, pageWriter.synced, writer.synced, reader.synced]);
+    pageWriter.text.insert(0, "Kept page");
+    await acknowledged(pageWriter);
+    upsertDirectoryEntry(writer.doc, { uuid: topic, title: "Archived topic", kind: "decision", topic, status: "open" });
+    upsertDirectoryEntry(writer.doc, { uuid: page, title: "Live page" });
+    await acknowledged(writer, "initial directory");
+    await started.flush();
+    tombstoneDirectoryEntry(writer.doc, topic);
+    await acknowledged(writer, "topic archive");
+    writer.doc.getMap("docs").set(page, { title: "False membership", tags: [], kind: "decision", topic });
+    await acknowledged(writer, "false topic membership");
+    writer.doc.getMap("deleted-docs").set(topic, true);
+    await acknowledged(writer, "topic deletion");
+    await waitUntil("the corrected entry to reach both directory replicas", () =>
+      [writer, reader].every(replica =>
+        getDirectoryEntry(replica.doc, page)?.title === "False membership" && !isDirectoryEntryDeleted(replica.doc, page)),
+    );
+
+    for (const replica of [writer, reader]) {
+      enforceDeletedDirectoryEntries(replica.doc);
+      expect(isDirectoryEntryDeleted(replica.doc, page)).toBe(false);
+    }
+    const barrier = parseRoom(testRoom()).uuid;
+    upsertDirectoryEntry(writer.doc, { uuid: barrier, title: "Later directory update" });
+    await acknowledged(writer, "later directory update");
+    await waitUntil("the later directory update to reach the reader", () => getDirectoryEntry(reader.doc, barrier) !== undefined);
+    const held = started.hocuspocus.documents.get(directoryRoom(WORKSPACE))!;
+    expect(isDirectoryEntryDeleted(held, page)).toBe(false);
+    expect(isDirectoryEntryDeleted(reader.doc, page)).toBe(false);
+    pageWriter.text.insert(pageWriter.text.length, ", still writable");
+    await acknowledged(pageWriter);
+    await started.flush();
+    expect(storedText(databasePath, pageRoom)).toBe("Kept page, still writable");
+    expect(started.hocuspocus.documents.has(pageRoom)).toBe(true);
   });
 
   it("persists fresh deletion before acknowledgement while later directory writes stay debounced", async () => {

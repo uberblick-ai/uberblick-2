@@ -160,7 +160,8 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
       database.prepare("INSERT INTO hub_principals (id, github_account_id, github_username) VALUES (?, ?, ?)")
         .run(principalId, "1234", USERNAME);
       for (const workspace of workspaces) {
-        database.prepare("INSERT INTO hub_memberships VALUES (?, ?, ?)").run(workspace, principalId, "member");
+        database.prepare("INSERT INTO hub_memberships (workspace_id, principal_id, role) VALUES (?, ?, ?)")
+          .run(workspace, principalId, "member");
       }
     } finally { database.close(); }
   }

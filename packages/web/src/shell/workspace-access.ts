@@ -14,6 +14,7 @@ export interface AccessMember {
   githubAccountId: string;
   githubUsername: string;
   role: AccessRole;
+  addedOnHost?: true;
 }
 interface AccessDeviceFields {
   deviceId: string;
@@ -72,9 +73,11 @@ function member(value: unknown): AccessMember {
   const item = object(value);
   if (item === null || typeof item.principalId !== "string" ||
     typeof item.githubAccountId !== "string" || typeof item.githubUsername !== "string" ||
-    !role(item.role)) throw new Error("Invalid access answer");
+    !role(item.role) || (item.addedOnHost !== undefined && typeof item.addedOnHost !== "boolean") ||
+    (item.addedOnHost === true && item.role !== "admin")) throw new Error("Invalid access answer");
   return { principalId: item.principalId, githubAccountId: item.githubAccountId,
-    githubUsername: item.githubUsername, role: item.role };
+    githubUsername: item.githubUsername, role: item.role,
+    ...(item.addedOnHost === true ? { addedOnHost: true } : {}) };
 }
 function count(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;

@@ -5,6 +5,17 @@ import { activateControl, createDoc, setupHarness } from "./app-helpers.js";
 import { waitForAcknowledged } from "./settle.js";
 
 const { harness, openApp } = setupHarness({ accessRole: "admin" });
+const HOSTED_ORIGIN = "https://workspace-hosted-access-for-browser-tests.example.test";
+
+function hostedUrl(): string {
+  return `${HOSTED_ORIGIN}/mcp/${harness().workspaceUuid}`;
+}
+
+async function hostedAccess(page: Page): Promise<void> {
+  await page.route(`**/api/hosted-mcp?workspace=${harness().workspaceUuid}`, (route) => route.fulfill({
+    json: { hostedMcp: hostedUrl() },
+  }));
+}
 
 function value(page: Page, label: string): Locator {
   return page.locator("[data-settings-facts] > div").filter({
@@ -37,7 +48,7 @@ for (const touch of [false, true]) {
           colorScheme: "light", reducedMotion: "reduce",
         },
         readySelector: "[data-settings-page]",
-        beforeNavigate: async (target) => { await target.addInitScript(() => {
+        beforeNavigate: async (target) => { await hostedAccess(target); await target.addInitScript(() => {
           const state = window as unknown as { workspaceCopies: string[]; workspaceCopyFails: boolean };
           state.workspaceCopies = [];
           state.workspaceCopyFails = false;
@@ -56,11 +67,13 @@ for (const touch of [false, true]) {
       const name = pane.getByLabel("Name", { exact: true });
       const details = pane.getByRole("button", { name: "Connection details", exact: true });
       const copy = pane.getByRole("button", { name: "Copy workspace ID", exact: true });
+      const copyHosted = pane.getByRole("button", { name: "Copy hosted MCP URL", exact: true });
       await expect(name).toBeEnabled();
       await expect(name).toHaveAccessibleDescription("Shown in the sidebar header and the workspace menu.");
       await expect(pane.getByRole("heading", { level: 2 })).toHaveText([
-        "Where it lives", "About this workspace", "Connection details", "On this computer",
+        "Where it lives", "About this workspace", "Connection details", "Hosted MCP", "On this computer",
       ]);
+      await expect(pane.getByText(hostedUrl(), { exact: true })).toHaveCSS("font-family", /monospace/);
       await expect(pane.locator('[class~="bg-card"], [data-slot="card"]')).toHaveCount(0);
       await expect(pane.locator('button[data-variant="default"]')).toHaveText("Save");
       await expect(pane.getByLabel("Main repository", { exact: true })).toBeVisible();
@@ -121,6 +134,8 @@ for (const touch of [false, true]) {
         }
       }
 
+      await activateControl(copyHosted, { touch });
+      await expect(notice(page, "Hosted MCP URL copied")).toHaveAttribute("data-type", "success");
       if (touch) await copy.tap();
       else {
         await copy.focus();
@@ -132,7 +147,7 @@ for (const touch of [false, true]) {
         await expect(notice(page, "Workspace ID copied")).toHaveAttribute("data-type", "success");
       }
       expect(await page.evaluate(() => (window as unknown as { workspaceCopies: string[] }).workspaceCopies))
-        .toEqual([harness().workspaceUuid]);
+        .toEqual([hostedUrl(), harness().workspaceUuid]);
       await page.evaluate(() => { (window as unknown as { workspaceCopyFails: boolean }).workspaceCopyFails = true; });
       await page.clock.install();
       await activateControl(copy, { touch });
@@ -148,3 +163,18 @@ for (const touch of [false, true]) {
       await expect(page.getByRole("button", { name: "Connection details", exact: true })).toHaveAttribute("aria-expanded", "false");
     });
 }
+
+test("Hosted MCP Copy writes the real browser clipboard through pointer and keyboard", async ({ browser }) => {
+  const page = await openApp(browser, `/${harness().workspace}/settings`, {
+    contextOptions: { permissions: ["clipboard-read", "clipboard-write"] },
+    readySelector: "[data-settings-page]",
+    beforeNavigate: hostedAccess,
+  });
+  const copy = page.getByRole("button", { name: "Copy hosted MCP URL", exact: true });
+  await copy.click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(hostedUrl());
+  await page.evaluate(() => navigator.clipboard.writeText("Before keyboard Copy"));
+  await copy.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(hostedUrl());
+});

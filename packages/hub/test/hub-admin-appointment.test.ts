@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { adminSocketPath } from "../src/admin-setup.js";
+import { adminSocketPath } from "../src/operator-socket.js";
 import type { HubLogRecord } from "../src/log.js";
 import { requestOperator } from "../src/operator-client.js";
 import { runOperatorCommand } from "../src/operator-command.js";

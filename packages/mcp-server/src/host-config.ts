@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { parseHubPublicUrl } from "@uberblick/schema/oauth";
 import { DEFAULT_HUB_URL } from "./config.js";
+import { resolveHostLimits } from "./host-capacity.js";
 import type { McpHostConfig } from "./http-host.js";
 import { resolveStorage } from "./storage.js";
 
@@ -15,6 +16,7 @@ export function resolveMcpHostConfig(env: NodeJS.ProcessEnv = process.env): McpH
     hubUrl: env.HUB_URL ?? DEFAULT_HUB_URL,
     hubMcpSocket: env.HUB_MCP_SOCKET?.trim() || undefined,
     databaseDirectory: env.MCP_DATA_DIR ?? join(resolveStorage({ env }).dataDir, "mcp-host"),
+    limits: resolveHostLimits(env),
     host: env.MCP_HOST ?? "127.0.0.1",
     port,
   };

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ServingSyncStatus, UberblickMcpEngine } from "@uberblick/mcp-server";
+import { discoverHostedMcp } from "@uberblick/mcp-server/hosted-mcp";
 import { SYNC_PROTOCOL_VERSION, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { clampToken, importRootSecret, verifyToken } from "@uberblick/schema/token";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
@@ -18,6 +19,7 @@ const SEARCH_PATH = "/api/search";
 const REVISIONS_PATH = "/api/revisions";
 const STATUS_PATH = "/api/status";
 const LOCAL_SETTINGS_PATH = "/api/local-settings";
+const HOSTED_MCP_PATH = "/api/hosted-mcp";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
 const DEVICE_LOGIN_PATH = "/api/device-login";
@@ -257,6 +259,12 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
   }
   if (target.pathname === STATUS_PATH) {
     apiResponse(request, response, 200, status());
+    return;
+  }
+  if (target.pathname === HOSTED_MCP_PATH) {
+    const hostedMcp = workspace.binding.hubUrl === null ? null
+      : await discoverHostedMcp(workspace.binding.hubUrl, workspaceId, workspace.config.connectTimeoutMs, workspace.env);
+    apiResponse(request, response, 200, { hostedMcp });
     return;
   }
   if (target.pathname === ACCOUNT_PATH) {

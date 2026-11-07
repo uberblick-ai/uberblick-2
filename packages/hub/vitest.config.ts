@@ -5,8 +5,8 @@ import { vitestBudgets } from "../../scripts/vitest-budget-config.mjs";
 // can differ by OS: file modes, locks and paths, signals and process
 // lifecycles. List a suite here when it tests such a seam.
 const osSensitive = [
-  "admin-setup",
-  "admin-setup-public",
+  "operator-socket",
+  "workspace-admin-appointment",
   "mcp-channel",
   "operator-restore-access",
   "operator-restore-command",

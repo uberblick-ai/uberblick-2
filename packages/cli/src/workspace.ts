@@ -2,9 +2,8 @@ import { useRemoteWorkspace } from "./remote.js";
 import { assertHubTransport, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { ORIGIN_LABELS, displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
-import { readdirSync, rmSync } from "node:fs";
-import { createInterface } from "node:readline/promises";
-import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
+import { rmSync } from "node:fs";
+import { confirm } from "./confirmation.js";
 import { acquireWorkspaceRemovalRole, defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "@uberblick/mcp-server/project-config";
@@ -16,20 +15,20 @@ import type { InitLock } from "@uberblick/mcp-server/init-lock";
 import { acquireInitLock } from "@uberblick/mcp-server/init-lock";
 import type { Io } from "./io.js";
 import { shellArgument, warn } from "./io.js";
-import { describeFsError } from "@uberblick/mcp-server/safe-write";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
+import { workspaceDatabaseIds } from "./workspace-inventory.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  create <name>               create and select a separate local-only workspace
-  fork                        copy this workspace independently and select the local copy
-  promote <hub>               upload, verify and connect this local workspace
-  detach <id|prefix>          make this computer's hub workspace copy local
-  member <command>            grant workspace access and manage members
-  list [--json]               workspaces this machine has a database for
-  use <link|id>               fetch a shared workspace or select a local replica
-  remove <id|prefix> [--yes]  delete this computer's copy of a workspace (alias: rm)
+  create <name> [--empty]     # create and select a separate local-only workspace
+  fork                        # copy this workspace independently and select the local copy
+  promote <hub>               # upload, verify and connect this local workspace
+  detach <id|prefix>          # make this computer's hub workspace copy local
+  member <command>            # grant workspace access and manage members
+  list [--json]               # workspaces this machine has a database for (alias: ls)
+  use <link|id>               # fetch a shared workspace or select a local replica
+  remove <id|prefix> [--yes]  # delete this computer's copy of a workspace (alias: rm)
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -39,11 +38,6 @@ const UUID_PREFIX = /^[0-9a-f][0-9a-f-]*$/;
 
 /** A full UUID or longer input cannot be a UUID prefix. */
 const UUID_LENGTH = 36;
-
-/** Delegate platform layout to the storage owner. */
-function databaseDirectory(env: NodeJS.ProcessEnv): string {
-  return resolveStorage({ env }).workspaceDir;
-}
 
 export interface WorkspaceEntry {
   /** The bare uuid. */
@@ -87,23 +81,7 @@ export function listWorkspaces(
   const env = options.env ?? process.env;
   const current = inForce(options);
 
-  const uuids = new Set<string>();
-  const directory = databaseDirectory(env);
-  let names: string[] = [];
-  try {
-    names = readdirSync(directory);
-  } catch (error) {
-    // Only absence means an empty inventory; other errors would corrupt prefix lookup.
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw new Error(`cannot list ${directory}: ${describeFsError(error)}`);
-    }
-  }
-  for (const name of names) {
-    const match = WORKSPACE_DATABASE_FILE.exec(name);
-    if (match?.[1] !== undefined) {
-      uuids.add(match[1]);
-    }
-  }
+  const uuids = workspaceDatabaseIds(env);
   if (current.uuid !== null) {
     uuids.add(current.uuid);
   }
@@ -176,16 +154,7 @@ export async function removeWorkspaceCommand({ positionals, values }: CommandArg
           ? "This is the only copy of this local-only workspace."
           : `The hub keeps the workspace; fetch it again with \`ub workspace use ${shellArgument(`${displayWorkspaceHub(hub).replace(/\/$/, "")}/${id}`)}\`. ` +
             "Any local changes the hub has not acknowledged would be lost.";
-      const terminal = createInterface({ input: process.stdin, output: process.stderr });
-      let answer: string;
-      try {
-        answer = await terminal.question(`Delete this computer's copy of workspace ${id}? ${loss} [y/N] `);
-      } catch {
-        throw new Error("confirmation ended; nothing was removed");
-      } finally {
-        terminal.close();
-      }
-      if (!/^(y|yes)$/i.test(answer.trim())) {
+      if (!await confirm(`Delete this computer's copy of workspace ${id}? ${loss}`)) {
         io.out("cancelled; nothing was removed\n");
         return 0;
       }
@@ -267,6 +236,16 @@ export function listWorkspacesCommand({ values }: CommandArgs<typeof WORKSPACE_L
     return 1;
   }
   const { entries, warnings, selectionNote } = listed;
+  entries.sort((left, right) => {
+    const leftName = left.name?.toLowerCase() ?? null;
+    const rightName = right.name?.toLowerCase() ?? null;
+    if (leftName !== rightName) {
+      if (leftName === null) return 1;
+      if (rightName === null) return -1;
+      return leftName < rightName ? -1 : 1;
+    }
+    return left.uuid < right.uuid ? -1 : left.uuid > right.uuid ? 1 : 0;
+  });
   warn(io, warnings);
   if (selectionNote !== null) io.err(`${selectionNote}\n`);
 

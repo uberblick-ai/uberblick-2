@@ -13,13 +13,18 @@ import { seedStarterDocs } from "./starter.js";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 import { useBindingLines } from "./workspace-use-output.js";
 
-export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name>
+export const WORKSPACE_CREATE_OPTIONS = {
+  empty: { type: "boolean", default: false },
+} as const;
+
+export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name> [--empty]
 
 Create a separate local-only workspace with starter documents, and select it in
 this directory's .uberblick.json. No hub or login is needed. Other workspaces,
 project bindings and MCP registrations stay as they are.
 
 options:
+  --empty           skip the starter documents and their sidebar group
   -h, --help        show this help
 `;
 
@@ -30,7 +35,7 @@ export function reportEnvironmentBinding(io: Io): void {
   }
 }
 
-export async function createWorkspaceCommand({ positionals }: CommandArgs<Record<string, never>>, io: Io): Promise<number> {
+export async function createWorkspaceCommand({ positionals, values }: CommandArgs<typeof WORKSPACE_CREATE_OPTIONS>, io: Io): Promise<number> {
   let name: string;
   try {
     name = validateWorkspaceName(positionals[0] ?? "");
@@ -68,11 +73,11 @@ export async function createWorkspaceCommand({ positionals }: CommandArgs<Record
       const seedLock = await acquireInitLock(process.env, { path: seedLockPath(), command: "ub workspace create" });
       try {
         storeWorkspaceName(config, name);
-        await seedStarterDocs(env, config);
+        if (!values.empty) await seedStarterDocs(env, config);
         await fillMainRepositoryFromOrigin(uuid, null, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });
-      output = `${useBindingLines(binding, previous, path, "created")}open it with: ub open\n`;
+      output = `${useBindingLines(binding, previous, path, "created")}open the new workspace with: ub open\n`;
     } finally { lock.release(); }
     io.out(output);
     reportEnvironmentBinding(io);

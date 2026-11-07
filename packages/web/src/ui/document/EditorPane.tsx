@@ -97,7 +97,7 @@ function canWriteContent(connection: RoomConnection, contentReadOnly: boolean): 
 }
 
 /** The room and directory must agree on the open record before authoring. */
-function canEditAnswer(connection: RoomConnection, directory: RoomConnection | null, readOnly: boolean, decisionView: boolean): boolean {
+export function canEditAnswer(connection: RoomConnection, directory: RoomConnection | null, readOnly: boolean, decisionView: boolean): boolean {
   if (readOnly || !connection.status.writable) return false;
   if (directory !== null && isDirectoryEntryArchived(directory.ydoc, parseRoom(connection.room).uuid)) return false;
   const meta = getMeta(connection.ydoc);

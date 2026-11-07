@@ -36,7 +36,9 @@ import type { DecisionStatus } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import * as guardedBinding from "../src/editor/guarded-binding.js";
 import { act, renderSettled } from "./react-render.js";
-import { decisionRecordPath, docPath } from "../src/ui/route.js";
+import { decisionRecordPath, docPath, parseRoute, revisionPath } from "../src/ui/route.js";
+import { useShellRooms } from "../src/ui/shell/rooms.js";
+import type { ShellEnvironment } from "../src/ui/shell/environment.js";
 import { DecisionTopicPane } from "../src/ui/document/DecisionTopicPane.js";
 import { createDocLinkContext } from "../src/editor/doc-links.js";
 import { watchDocumentStub } from "../src/collab/directory-stub.js";
@@ -319,6 +321,23 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it.each([
+    { uuid: FIRST, text: "Keep the original answer." },
+    { uuid: REJECTED, text: "Use the rejected alternative." },
+  ])("pins the record named by a revision address instead of selecting the answer in force: $uuid", async ({ uuid, text }) => {
+    story();
+    const path = revisionPath(WORKSPACE, uuid, RFC, EARLIER_RFC);
+    function RoutedSelection() {
+      const { selected, doc } = useShellRooms({
+        roomReady: true, workspace: { uuid: WORKSPACE, segment: WORKSPACE },
+        defaultIdentity: { name: "Reader", color: "#888888" }, route: parseRoute(path, null), serving: null,
+      } as ShellEnvironment);
+      return <output>{selected}: {doc === null ? "" : getBlocks(doc.ydoc).map(block => block.text).join(" ")}</output>;
+    }
+    const view = await renderSettled(<RoutedSelection />);
+    expect(view.container.textContent).toBe(`${uuid}: ${text}`);
+  });
+
   it.each([RELATED_FIRST, RELATED_CURRENT])("lists a multi-page topic and header count on related page %s through its earlier record", async (uuid) => {
     for (const related of [RELATED_FIRST, RELATED_CURRENT]) {
       const page = room(roomForDoc(WORKSPACE, related)).ydoc;

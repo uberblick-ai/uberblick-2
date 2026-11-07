@@ -10,13 +10,20 @@ export type TargetName = (typeof TARGETS)[number];
 
 export type Scope = "project" | "user";
 
-export interface Entry {
+export interface StdioEntry {
   name: string;
   command: string;
   args: string[];
 }
 
-export const DEFAULT_ENTRY: Entry = {
+export interface RemoteEntry {
+  name: string;
+  url: string;
+}
+
+export type Entry = StdioEntry | RemoteEntry;
+
+export const DEFAULT_ENTRY: StdioEntry = {
   name: SERVER_NAME,
   command: "ub",
   args: ["mcp", "serve"],
@@ -68,7 +75,7 @@ export function codexHome(cwd: string): string {
 export type Presence =
   /** Nothing there: no file, or a file that registers nothing of ours. */
   | "absent"
-  /** Semantically the plain entry, including vendor-written empty defaults. */
+  /** Semantically the requested entry, including vendor-written defaults. */
   | "ours"
   /** Something else under our name; not ours to replace. */
   | "foreign"
@@ -200,10 +207,11 @@ function doctorTomlEntry(text: string): DoctorEntry {
 }
 
 /**
- * Vendor-written stdio type and empty env are equivalent to omitted defaults.
- * Reject unknown fields, including cwd and URL transports, as foreign entries.
+ * Vendor-written transport types and empty stdio env match omitted defaults.
+ * Unknown fields and credentials keep an entry foreign.
  */
 const KNOWN_JSON_KEYS = new Set(["type", "command", "args", "env"]);
+const REMOTE_JSON_KEYS = new Set(["type", "url"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -211,6 +219,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function jsonMatches(held: unknown, entry: Entry): boolean {
   if (!isObject(held)) return false;
+  if ("url" in entry) {
+    return Object.keys(held).every((key) => REMOTE_JSON_KEYS.has(key)) &&
+      (held.type === undefined || held.type === "http") && held.url === entry.url;
+  }
   if (Object.keys(held).some((key) => !KNOWN_JSON_KEYS.has(key))) return false;
   if (held.type !== undefined && held.type !== "stdio") return false;
   const args = held.args ?? [];
@@ -233,6 +245,9 @@ function tomlString(value: string): string {
 }
 
 function tomlBlock(entry: Entry): string {
+  if ("url" in entry) {
+    return `[mcp_servers.${entry.name}]\nurl = ${tomlString(entry.url)}\n`;
+  }
   const args = entry.args.map(tomlString).join(", ");
   return (
     `[mcp_servers.${entry.name}]\n` +
@@ -241,15 +256,18 @@ function tomlBlock(entry: Entry): string {
   );
 }
 
-function serverObject(entry: Entry): Record<string, unknown> {
+function serverObject(entry: Entry, target?: TargetName): Record<string, unknown> {
+  if ("url" in entry) {
+    return { ...(target === "claude" ? { type: "http" } : {}), url: entry.url };
+  }
   return {
     command: entry.command,
     args: entry.args,
   };
 }
 
-export function snippet(format: Format, entry: Entry): string {
+export function snippet(format: Format, entry: Entry, target?: TargetName): string {
   return format === "json"
-    ? `${JSON.stringify({ mcpServers: { [entry.name]: serverObject(entry) } }, null, 2)}\n`
+    ? `${JSON.stringify({ mcpServers: { [entry.name]: serverObject(entry, target) } }, null, 2)}\n`
     : tomlBlock(entry);
 }

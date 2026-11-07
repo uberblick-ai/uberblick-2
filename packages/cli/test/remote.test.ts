@@ -596,8 +596,9 @@ describe("ub workspace use <link>", () => {
         `using      ${WORKSPACE} (${remote.origin}/custom-proxy-path)`,
         `wrote      ${join(box.cwd, ".uberblick.json")}`,
         `previous   ${previous.workspaceId} (local)`,
-        `switch back with: ub workspace use ${previous.workspaceId}`,
-        "open it with: ub open",
+        "",
+        `switch to previous workspace with: ub workspace use ${String(previous.workspaceId).slice(0, 8)}`,
+        "open the new workspace with: ub open",
         "",
       ]);
       expect(joined.stderr.trim().split("\n").filter(Boolean)).toHaveLength(1);
@@ -748,7 +749,7 @@ describe("ub workspace use <link>", () => {
       `fetched    Shared workspace from http://127.0.0.1:${hub.port}: 1 document, 0 archived`,
       `using      Shared workspace (${WORKSPACE}, http://127.0.0.1:${hub.port})`,
       `wrote      ${join(box.cwd, ".uberblick.json")}`,
-      "open it with: ub open",
+      "open the new workspace with: ub open",
       "",
     ]);
     expect(run.stderr.trim().split("\n")).toEqual([
@@ -817,7 +818,7 @@ describe("ub workspace use <link>", () => {
       rememberWorkspaceBindings([{ workspaceId: previousId, hubUrl: url(nextHub) }], box.env);
       const selected = await runInProcess(["workspace", "use", joinUrl(nextHub)], box, { UB_TEST_MAX_WAIT_MS: "5000" });
       expect(selected.status, selected.output).toBe(0);
-      const command = selected.stdout.match(/^switch back with: (.+)$/m)?.[1];
+      const command = selected.stdout.match(/^switch to previous workspace with: (.+)$/m)?.[1];
       expect(command).toBeDefined();
       const target = command!.slice("ub workspace use ".length);
       expect(parseJoinTarget(target)).toEqual({ endpoint: url(previousHub), workspace: previousId });
@@ -872,17 +873,20 @@ describe("ub workspace use <link>", () => {
     if (changed) expect(run.stdout).toContain(`previous   ${previousId} (${previousEndpoint === null ? "local" : previousEndpoint.replace(/^ws/, "http")})`);
     if (prior === "remote" || prior === "other-remote") {
       const command = `ub workspace use ${previousHub}/${previousId}`;
-      expect(run.stdout).toContain(`switch back with: ${command}`);
+      expect(run.stdout).toContain(`\n\nswitch to previous workspace with: ${command}`);
       expect(parseJoinTarget(command.slice("ub workspace use ".length))).toEqual({ endpoint: previousHub, workspace: previousId });
     }
     if (prior === "local" || prior === "other-local") {
-      expect(run.stdout).toContain(`Switch back for this session: UB_WORKSPACE_ID=${previousId} UB_HUB_URL=local ub open`);
-      expect(run.stdout).not.toContain("switch back with:");
+      expect(run.stdout).toContain(`\n\nswitch to previous workspace for this session with: UB_WORKSPACE_ID=${previousId} UB_HUB_URL=local ub open`);
+      expect(run.stdout).not.toContain("switch to previous workspace with:");
       expect(resolveProjectBinding({ cwd: box.cwd, env: { UB_WORKSPACE_ID: previousId, UB_HUB_URL: "local" } }).binding)
         .toEqual({ workspaceId: previousId, hubUrl: null });
     }
-    if (prior === "other") expect(run.stdout).toContain(`switch back with: ub workspace use ${otherWorkspace}`);
-    if (!changed) expect(run.stdout).not.toContain("switch back");
+    if (prior === "other") expect(run.stdout).toContain(`\n\nswitch to previous workspace with: ub workspace use ${otherWorkspace.slice(0, 8)}`);
+    if (!changed) {
+      expect(run.stdout).not.toContain("switch to previous workspace");
+      expect(run.stdout).not.toContain("\n\n");
+    }
   });
 
   it.each([false, true])("keeps environment and snapshot warnings on stderr (json: %s)", async (json) => {
@@ -1447,7 +1451,7 @@ describe("ub workspace use <link>", () => {
     // …and told where the other one went, because it did not go anywhere.
     expect(run.stdout).toContain(mine);
     expect(run.stdout).toContain("previous   ");
-    expect(run.stdout).toContain(`ub workspace use ${mine}\n`);
+    expect(run.stdout).toContain(`ub workspace use ${mine.slice(0, 8)}\n`);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(remote));
     // Passive replacement preserves the local record established by init.
     expect(readWorkspaceHub(mine, box.env)).toBeNull();

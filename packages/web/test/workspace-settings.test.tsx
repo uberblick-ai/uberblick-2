@@ -46,6 +46,24 @@ const ENDPOINT: HubEndpoint = {
   source: "document",
 };
 
+const HOSTED_URL = `https://public.example.test/mcp/${WORKSPACE.uuid}`;
+const SERVING = { workspace: WORKSPACE.uuid, remoteHubUrl: ENDPOINT.url, localOnly: false, rebound: false };
+
+function hostedGeneral(overrides: Partial<Parameters<typeof WorkspaceSettings>[0]> = {}) {
+  return <WorkspaceSettings admin={false} member workspace={WORKSPACE} endpoint={ENDPOINT}
+    connection={null} agentSessions={2} serving={SERVING} {...overrides} />;
+}
+
+function hostedAnswer(body: unknown, status = 200) {
+  const fetchImpl = vi.fn(async (path: RequestInfo | URL) => Response.json(
+    String(path).startsWith("/api/hosted-mcp?") ? body
+      : { size: null, retention: { mode: "recent", days: 30, keepNamed: true } },
+    { status },
+  ));
+  vi.stubGlobal("fetch", fetchImpl);
+  return fetchImpl;
+}
+
 const SYNCED: RoomStatus = {
   connected: true,
   synced: true,
@@ -301,6 +319,81 @@ it.each([true, false])("copies the bare workspace ID and reports clipboard succe
     copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
     { id: "copy-workspace-id" },
   );
+});
+
+it.each([false, true])("shows the confirmed hosted URL before local controls for admin=%s", async (admin) => {
+  const fetchImpl = hostedAnswer({ hostedMcp: HOSTED_URL });
+  mounted = await renderSettled(hostedGeneral({ admin }));
+  const host = within(mounted.container);
+  const headings = host.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+  expect(headings.slice(-2)).toEqual(["Hosted MCP", "On this computer"]);
+  expect(host.getByText(/^Experimental\./)).toBeTruthy();
+  if (!admin) {
+    expect(headings).toEqual(["Hosted MCP", "On this computer"]);
+    expect(host.queryByRole("textbox", { name: "Name" })).toBeNull();
+  }
+  expect(host.getByText(HOSTED_URL).className).toContain("font-(family-name:--font-mono)");
+  const discovery = fetchImpl.mock.calls.find(([path]) => String(path).startsWith("/api/hosted-mcp?"));
+  expect(discovery?.[0]).toBe(`/api/hosted-mcp?workspace=${WORKSPACE.uuid}`);
+  await act(async () => host.getByRole<HTMLButtonElement>("button", { name: "Copy hosted MCP URL" }).click());
+  expect(writeToClipboard).toHaveBeenLastCalledWith(HOSTED_URL);
+  expect(toast.success).toHaveBeenLastCalledWith("Hosted MCP URL copied", { id: "copy-hosted-mcp" });
+  vi.mocked(writeToClipboard).mockResolvedValueOnce(false);
+  await act(async () => host.getByRole<HTMLButtonElement>("button", { name: "Copy hosted MCP URL" }).click());
+  expect(toast.error).toHaveBeenLastCalledWith(
+    "Couldn't copy the hosted MCP URL. Try again in a browser with clipboard access.", { id: "copy-hosted-mcp" },
+  );
+});
+
+it.each([
+  ["disabled", { hostedMcp: null }, 200],
+  ["malformed", { hostedMcp: 42 }, 200],
+  ["refused", { hostedMcp: HOSTED_URL }, 503],
+] as const)("hides hosted access when the local lookup is %s", async (_reason, answer, status) => {
+  hostedAnswer(answer, status);
+  mounted = await renderSettled(hostedGeneral());
+  const host = within(mounted.container);
+  expect(host.queryByRole("heading", { name: "Hosted MCP" })).toBeNull();
+  expect(host.queryByRole("button", { name: "Copy hosted MCP URL" })).toBeNull();
+});
+
+it("hides hosted access when discovery fails", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Hub down")));
+  mounted = await renderSettled(hostedGeneral());
+  expect(within(mounted.container).queryByRole("heading", { name: "Hosted MCP" })).toBeNull();
+});
+
+it.each([
+  { local: true },
+  { serving: null },
+  { serving: { ...SERVING, localOnly: true, remoteHubUrl: null } },
+  { serving: { ...SERVING, rebound: true } },
+  { serving: { ...SERVING, workspace: "bd8a25b1-6f45-4ca9-b371-e299cff7da4f" } },
+])("does not discover hosted access outside the served remote workspace: %j", async (overrides) => {
+  const fetchImpl = hostedAnswer({ hostedMcp: HOSTED_URL });
+  mounted = await renderSettled(hostedGeneral(overrides));
+  expect(fetchImpl.mock.calls.some(([path]) => String(path).startsWith("/api/hosted-mcp?"))).toBe(false);
+  expect(within(mounted.container).queryByRole("heading", { name: "Hosted MCP" })).toBeNull();
+});
+
+it("ignores a late hosted reply for the previous workspace and aborts on leaving", async () => {
+  const pending: { finish: (response: Response) => void; signal: AbortSignal }[] = [];
+  vi.stubGlobal("fetch", vi.fn((path: RequestInfo | URL, init: RequestInit) => {
+    if (!String(path).startsWith("/api/hosted-mcp?")) return Promise.resolve(Response.json({ size: null }));
+    return new Promise<Response>((finish) => pending.push({ finish, signal: init.signal as AbortSignal }));
+  }));
+  mounted = await renderSettled(hostedGeneral());
+  expect(within(mounted.container).queryByRole("heading", { name: "Hosted MCP" })).toBeNull();
+  const next = { uuid: "bd8a25b1-6f45-4ca9-b371-e299cff7da4f", segment: "next-bd8a25b1-6f45-4ca9-b371-e299cff7da4f" };
+  await act(async () => mounted?.rerender(hostedGeneral({ workspace: next, serving: { ...SERVING, workspace: next.uuid } })));
+  expect(pending[0]?.signal.aborted).toBe(true);
+  await act(async () => pending[0]?.finish(Response.json({ hostedMcp: HOSTED_URL })));
+  expect(within(mounted.container).queryByText(HOSTED_URL)).toBeNull();
+  const nextUrl = `https://public.example.test/mcp/${next.uuid}`;
+  await act(async () => pending[1]?.finish(Response.json({ hostedMcp: nextUrl })));
+  expect(within(mounted.container).getByText(nextUrl)).toBeDefined();
+  mounted.unmount();
+  expect(pending[1]?.signal.aborted).toBe(true);
 });
 
 it("counts regular documents and active tags live, and takes the newest stamp from live document and decision entries", async () => {

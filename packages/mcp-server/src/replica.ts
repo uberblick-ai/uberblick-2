@@ -1049,9 +1049,7 @@ export class Replicas {
         this.refreshLocal();
         const state = collectReplicaSyncState(this);
         if (options.rooms === undefined) return state.caughtUp;
-        return state.hub.status === "connected" &&
-          !this.sync.isDraining() && this.store.pendingRooms().length === 0 &&
-          options.rooms.every((room) => state.acknowledged.get(room) === true);
+        return options.rooms.every((room) => state.acknowledged.get(room) === true);
       },
     });
   }

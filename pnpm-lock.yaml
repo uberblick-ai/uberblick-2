@@ -121,9 +121,12 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(zod@4.6.6)
+      '@resvg/resvg-wasm':
+        specifier: 2.6.2
+        version: 2.6.2
       '@uberblick/ablauf':
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.3.1
+        version: 0.3.1
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
@@ -198,9 +201,6 @@ importers:
       '@hocuspocus/provider':
         specifier: 4.7.1
         version: 4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
-      '@panzoom/panzoom':
-        specifier: 4.6.0
-        version: 4.6.0
       '@radix-ui/react-alert-dialog':
         specifier: 1.1.23
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -232,8 +232,8 @@ importers:
         specifier: ^3.30.5
         version: 3.30.5
       '@uberblick/ablauf':
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.3.1
+        version: 0.3.1
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
@@ -711,9 +711,6 @@ packages:
   '@oxc-project/types@0.155.0':
     resolution: {integrity: sha512-SeE8JPwW1xs1tHeNycjUtUBdhorRa8o4jlvjwk49R7/Z291i+4DQa7JJIgOm/TaYQZx+QrPQbVJ/9c8dMIZN8Q==}
 
-  '@panzoom/panzoom@4.6.0':
-    resolution: {integrity: sha512-3KxkY1lNKFn98fW5ZFR6vV0YzsXj3I4EQDyFWSXME6/cic86eSS7VjuqIjrA3PEpySo0r5fFtlX8eYCt4JPUFQ==}
-
   '@playwright/test@1.64.1':
     resolution: {integrity: sha512-IaYGml/nSOiZWROfPtuIL7neuu9qDOZ3TNvNljUIrhDMxiGTgPjzj/g9p9RxpS2tSepPDRY+UwAaEeiKtUvIAg==}
     engines: {node: '>=20'}
@@ -1179,6 +1176,10 @@ packages:
   '@radix-ui/rect@1.1.3':
     resolution: {integrity: sha512-JtyZR+mqgBibTo8xea3B6ZRmzZiM/YeVBtUkas6zMuXjAlfIFIW2FgqeM9eLyvEaYX66vr6DJMK+4U6LV0KhNw==}
 
+  '@resvg/resvg-wasm@2.6.2':
+    resolution: {integrity: sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw==}
+    engines: {node: '>= 10'}
+
   '@rolldown/binding-android-arm-eabi@1.2.15':
     resolution: {integrity: sha512-aLcgK9gIJ3YRvrrtfSBbRa27F5WrpiTaPulnFpsHPxpUHgFlSgnU4854MHwoRGEBhfRJDWCS2WQ7lIjskE9Olw==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1563,8 +1564,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@uberblick/ablauf@0.3.0':
-    resolution: {integrity: sha512-bN1/QQavNbgOcM6l1SI04zJ5I6sbd/nAvdiTf4DS9xuVGF2/ILTEjosn37n+jrz0QGCLqy+So8ecBXzrSyLnyQ==}
+  '@uberblick/ablauf@0.3.1':
+    resolution: {integrity: sha512-CC2lwrgFc31J6ejJNZdEsuFOWpmuL6p9EOG6SWZ1dexMA2M5iFKWYuqSA19TgsE1axiXMs7vOPAMI/8UVBY/ow==}
     engines: {node: '>=22.18'}
 
   '@uberblick/wireframe@0.3.2':
@@ -2992,8 +2993,6 @@ snapshots:
 
   '@oxc-project/types@0.155.0': {}
 
-  '@panzoom/panzoom@4.6.0': {}
-
   '@playwright/test@1.64.1':
     dependencies:
       playwright: 1.64.1
@@ -3449,6 +3448,8 @@ snapshots:
 
   '@radix-ui/rect@1.1.3': {}
 
+  '@resvg/resvg-wasm@2.6.2': {}
+
   '@rolldown/binding-android-arm-eabi@1.2.15':
     optional: true
 
@@ -3709,7 +3710,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@uberblick/ablauf@0.3.0': {}
+  '@uberblick/ablauf@0.3.1': {}
 
   '@uberblick/wireframe@0.3.2': {}
 

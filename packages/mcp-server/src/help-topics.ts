@@ -79,6 +79,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 
 - One block per paragraph, heading, list item, quote, callout, code fence or table. Lists are flat: \`indent\` 0–3.
 - Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
+- \`## > Title\` is a toggle heading whose section starts collapsed; see \`markdown\` for details.
 - A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
 - Visual blocks: flow, fan-out and sequence diagrams in \`ablauf\`, UI sketches in \`wireframe\`, charts, scatter plots and data tables in \`data\`, and Figma designs in \`markdown\`.
@@ -188,6 +189,23 @@ Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:1
 
 Write emoji as characters, such as 😃 or 🚀. MCP never converts \`:name:\` to emoji: \`:smiley:\` and \`:rocket:\` remain literal in writes, reads and Markdown import/export. The web editor's typed emoji conversion does not apply to MCP or imported Markdown.
 
+## Toggle headings
+
+A toggle heading is a heading whose text starts with \`> \` (a \`>\` and a space). For Markdown import, use an ATX heading:
+
+    ## > Title
+    > quoted text
+
+The first line is a toggle heading; the second is a quote block, not a heading. Over MCP, use a \`heading\` block whose \`text\` starts with \`> \`, such as \`{ "type": "heading", "level": 2, "text": "> Title" }\`.
+
+Its section includes every following block until the next heading with the same number of \`#\` or fewer, or the document's end. A heading with more \`#\` stays inside the section and can be a toggle heading itself.
+
+Each toggle heading starts collapsed for every reader when the page opens in the web. Its open state stays in that view and is never saved or shared. Collapsing only affects the web display: \`get_doc\` and \`export_markdown\` still return every block in the section, and \`search\` still searches its full content.
+
+The \`> \` prefix is stored heading text: \`get_doc\` and \`search\` retain it in returned heading text. Markdown import and export keep it as \`## > Title\`; other Markdown viewers show the \`>\` literally. When editing, keep the prefix to keep the toggle. Removing it makes an ordinary open heading; adding it to an existing heading folds that heading's section.
+
+Use a toggle heading for a section most readers can skip, such as alternatives considered on an RFC page. Do not use one for content a reader needs to understand or act on the page.
+
 ## Callouts
 
 A callout sets one short passage apart with a label and an icon: \`note\`, \`tip\`, \`important\`, \`warning\` or \`caution\`. Write it as a quote whose first line is the marker alone:
@@ -227,12 +245,12 @@ An embed is visual content the web draws from data stored in the document: a flo
 
 | Embed | Written as | Data |
 | --- | --- | --- |
-| Ablauf | \`ablauf\` fence | flow, fan-out or sequence source; a flow may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
+| Ablauf | \`ablauf\` fence | flow, fan-out or sequence source; flows and sequences may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
 | Wireframe | \`wireframe\` fence | wireframe-md source; see [Wireframes](uberblick://help/wireframe) |
 | Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
 | Figma | \`:::figma\` container | link, title, height and caption |
 
-Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. The web draws embeds. Chart-source writes also report what the mapping can draw from the document's current data, and ablauf and wireframe writes report the drawing's diagnostics; inspect appearance in the web editor.
+Markdown and MCP keep an embed's data as text: ablauf and wireframe are code blocks with that language, a chart is its own \`chart\` block, and MCP reads and writes the source as the block's \`text\`. The web draws embeds. Chart-source writes also report what the mapping can draw from the document's current data, and ablauf and wireframe writes report the drawing's diagnostics. After writing ablauf source, use [render_block](uberblick://help/render_block) to view its drawing and fix what you see. Inspect wireframe and chart appearance in the web editor.
 
 ### Figma
 
@@ -402,14 +420,19 @@ answers with a \`drawing\` summary for it: \`status\` \`clean\`, \`warnings\` or
 \`errors\`, and the renderer's diagnostics with their source lines, the same list
 the web editor shows below the drawing. Fix every diagnostic and write again.
 The check never refuses the write. A clean source can still cross or crowd, so
-inspect the drawing in the web editor when someone can open it.
+after writing call [render_block](uberblick://help/render_block) with the document
+UUID and block id. Inspect the returned PNG, or request SVG, and fix visible
+crossings, crowded labels and misplaced nodes before reporting back. Rendering
+never changes the document; it shows the whole flow before playback.
 
 ## Flow playback
 
-A flow may end with one or more \`play\` sections. In the web editor the drawing
-stays whole and undimmed until the reader presses Play. Play adds scenario tabs,
-step controls and captions under the drawing and starts playback. Each step
-names a node id and lights it plus the edge from the previous step:
+A flow may end with one or more \`play\` sections. In the web editor ablauf's
+scenario tabs, step controls and captions appear with the drawing. The drawing
+stays whole and undimmed until the reader presses Play. Play starts the selected
+scene; its end returns the whole figure. Expand opens ablauf's full-screen viewer,
+with playback controls, zoom, Fit and Copy of the source. Each flow step names a
+node id and lights it plus the edge from the previous step:
 
 \`\`\`ablauf
 flow v0
@@ -476,6 +499,11 @@ Studio --> Studio: Check session
 else New session
 Studio -.-> Creator: Sign in again
 end
+
+play "Sign in"
+  step 1 "Start signing in"
+  step 2
+  step 3
 \`\`\`
 
 Use UML groups \`alt LABEL\`, \`opt LABEL\`, \`loop LABEL\` or \`group LABEL\`,
@@ -500,10 +528,22 @@ and leave the group/phase state unchanged. Unclosed groups draw to the end of
 source and diagnose their opening lines.
 
 In Uberblick, the drawing fits the column without sideways scrolling and all
-sequence text uses Geist Mono. Sequence diagrams take no \`play\` sections;
-each \`play\` line reports \`sequence playback is not supported yet\`.
+sequence text uses Geist Mono.
 
-[Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.3.0/spike/PRIMER.md)`;
+### Sequence playback
+
+Sequences accept the same \`play\` sections as flows. Targets are positive decimal
+message numbers shown in the drawing; \`1\` and \`01\` select the first message.
+Steps may skip messages and branches without a connecting edge. Participant ids,
+zero and numbers beyond the last message diagnose and skip the step.
+
+Each step lights its message row, participant headers and attached annotations.
+The default actor names the sender and receiver, or just the participant for a
+self-message; \`actor=\` overrides it. Durations and captions use the flow playback
+grammar. The controls and viewer work like flow playback, with the whole figure
+visible until Play.
+
+[Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.3.1/docs/PRIMER.md)`;
 
 const wireframe = `# Wireframes
 
@@ -738,7 +778,7 @@ const toolContracts = `# Shared tool contracts
 
 ## Arguments and results
 
-Every registered tool declares its input and output schemas. Input objects accept only declared fields; unknown or misspelled fields and mixed action shapes are refused before the handler runs. Successful results carry \`structuredContent\` and a text block containing the same JSON. Server-produced result objects are closed: an undeclared key, missing required field or wrong type yields a text-only \`internal_error\`, with mismatch detail on server stderr. Caller-stored schemas and record values are passed through without normalization, and data diagnostics remain free-form.
+Every registered tool declares its input and output schemas. Input objects accept only declared fields; unknown or misspelled fields and mixed action shapes are refused before the handler runs. Successful results carry \`structuredContent\` and a text block containing the same compact JSON. A PNG from \`render_block\` also carries one MCP image content item; the structured answer and its text copy give dimensions and drawing diagnostics without duplicating image bytes. SVG output is text in the structured answer and its JSON copy, with no image item. Server-produced result objects are closed: an undeclared key, missing required field or wrong type yields a text-only \`internal_error\`, with mismatch detail on server stderr. Caller-stored schemas and record values are passed through without normalization, and data diagnostics remain free-form.
 
 ## Failures and recovery
 
@@ -746,7 +786,7 @@ ${FAILURE_INSTRUCTIONS}
 
 Failures are marked \`isError: true\` and omit structuredContent, so success-schema validation does not misinterpret a failure. A call started after shutdown begins is refused with \`server_shutting_down\`; begin a new MCP session before repeating that call. A persistence failure quarantines the replica until restart: ordinary workspace reads also refuse rather than returning state ahead of its durable log. A workspace removed from this computer refuses with \`workspace_removed\`; writes report \`applied: false\`. Fetching a new copy does not revive the old session: restart the MCP server to use it. The diagnostic tool sync_status still answers. Static help reads and get_help remain available because they do not open or settle replicas.
 
-\`list_revisions\`, \`get_revision\` and \`get_data\` with \`revision\` answer from this computer's history cache. A cached read sends no hub request and remains readable offline, while signed out or after access is refused. Connected reads first download missing catalogs or checksum-verified snapshots into the cache within a bounded wait. A timed-out download continues and later reads find what it stored. Results include \`history\`: catalog \`complete\`, \`lastRefresh\` (ISO 8601 UTC or null), \`refreshFailed\`, \`offline\` and \`newestDownloadedRevision\` (ID or null). Completeness refers to the full catalog, not downloaded snapshot coverage. The newest downloaded state is not a claim about the hub's current state. Cached \`canManage\` and an open \`endedAt: null\` describe the last refresh. An unknown document UUID refuses with \`doc_not_found\`; permanent deletion refuses with \`doc_deleted\`, and decision records refuse with \`decision_no_history\`, before cache or hub access. History failures keep these specific codes and recoveries:
+\`list_revisions\`, \`get_revision\` and \`get_data\` with \`revision\` answer from this computer's history cache. A cached read sends no hub request and remains readable offline, while signed out or after access is refused. Connected reads first download missing catalogs or checksum-verified snapshots into the cache within a bounded wait. A timed-out download continues and later reads find what it stored. Results include \`history\`: catalog \`complete\`, \`lastRefresh\` (ISO 8601 UTC or null), \`refreshFailed\`, \`offline\` and \`newestDownloadedRevision\` (ID or null). Completeness refers to the full catalog, not downloaded snapshot coverage. The newest downloaded state is not a claim about the hub's current state. Cached \`canManage\` and an open \`endedAt: null\` describe the last refresh. An unknown document UUID refuses with \`doc_not_found\`; permanent deletion refuses with \`doc_deleted\` before cache or hub access. Decision records use the same history. Restoring a decided answer refuses with \`decision_read_only\`; naming is independent of the answer lock. History failures keep these specific codes and recoveries:
 
 | Code | Recovery |
 | --- | --- |
@@ -757,7 +797,6 @@ Failures are marked \`isError: true\` and omit structuredContent, so success-sch
 | \`revisions_sign_in_required\` | Run ub auth login, restart the MCP server, then repeat the read. |
 | \`revisions_forbidden\` | Ask a workspace maintainer to grant read access before repeating the read. |
 | \`revisions_unsupported\` | Ask the hub operator to update to a version that serves automatic revisions with snapshot checksums. |
-| \`decision_no_history\` | Decision records have no history. Read the topic's records with get_doc instead. |
 | \`revision_not_found\` | The catalog was revalidated online; list this document's revisions and select an ID belonging to it. Offline, an unknown ID is not downloaded instead. |
 | \`revision_stale_state\` | Synchronize, read and review the current state before naming or restoring. |
 | \`revision_restore_outcome_unknown\` | Call list_revisions with refresh: true, wait for success, and read get_doc before retrying a restore whose reply was lost. |
@@ -816,7 +855,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "ablauf",
     title: "Ablauf diagrams",
-    description: "Reading, writing and editing flow, fan-out and sequence diagrams: participants, messages, placement, nodes, edges, legends, flow playback and editing recipes.",
+    description: "Reading, writing and editing flow, fan-out and sequence diagrams: participants, messages, placement, nodes, edges, legends, flow and sequence playback and editing recipes.",
     text: ablauf,
   },
   {

@@ -47,7 +47,9 @@ function MemberRow({ member, current, disabled, change, remove }: {
   const [role, setRole] = useState(member.role);
   useEffect(() => setRole(member.role), [member]);
   return <tr>
-    <th className={ROW_HEADER} scope="row">{member.githubUsername}{current && <span className="ub-muted ml-2">you</span>}</th>
+    <th className={ROW_HEADER} scope="row">{member.githubUsername}{current && <span className="ub-muted ml-2">you</span>}
+      {member.addedOnHost === true && <span className="ub-muted ml-2">added on the host</span>}
+    </th>
     <td className={CELL}>
       <RoleSelect label={`Role for ${member.githubUsername}`} value={role} onChange={(next) => {
         if (next !== member.role) { setRole(next); change(member, next); }
