@@ -9,7 +9,7 @@ import { tryAcquireInitLock } from "./init-lock.js";
 import type { HistoryRetention } from "./local-settings.js";
 import { authenticationOrigin, hubIdentity } from "./remote-url.js";
 import { readWorkspaceHub } from "./workspace-registry.js";
-import { captureWorkspaceDetachGeneration, workspaceDetachGeneration } from "./workspace-generation.js";
+import { captureWorkspaceDetachGeneration, prepareWorkspaceDetachGeneration } from "./workspace-generation.js";
 
 export const HISTORY_CACHE_FORMAT = 1;
 const CHUNK_BYTES = 64 * 1024;
@@ -77,6 +77,7 @@ export interface CachedHistoryCatalog {
   catalog: string;
 }
 type Header = HistoryCacheToken & { format: number };
+type CacheConnection = { db: DatabaseSync; readDetachGeneration: () => string | null };
 class CacheRefusal extends Error {
   constructor(readonly status: "unavailable" | "update-required" | "superseded") { super(status); }
 }
@@ -95,7 +96,7 @@ function chunks(bytes: Uint8Array): Uint8Array[] {
 
 /** Disposable storage uses its own connection and never participates in a document transaction. */
 export class HistoryCache {
-  private db: DatabaseSync | undefined;
+  private database: CacheConnection | undefined;
   private session: HistoryHoldSession | undefined;
   private identity: HistoryCacheFileIdentity | null | undefined;
   private closed = false;
@@ -109,25 +110,26 @@ export class HistoryCache {
     this.detachGeneration = detachGeneration;
   }
 
-  private connection(): DatabaseSync {
+  private connection(): CacheConnection {
     if (this.closed || this.path === ":memory:" || this.identity === null) throw new CacheRefusal("unavailable");
     const identity = statSync(this.path);
     if (this.identity !== undefined && (identity.dev !== this.identity.dev || identity.ino !== this.identity.ino)) {
       throw new CacheRefusal("unavailable");
     }
-    if (this.db === undefined) {
+    if (this.database === undefined) {
       const db = new DatabaseSync(this.path);
       try {
         db.exec("PRAGMA busy_timeout = 0");
         if (db.prepare("SELECT value FROM meta WHERE key = 'workspace'").get()?.value !== this.workspace) {
           throw new CacheRefusal("unavailable");
         }
+        const connection = { db, readDetachGeneration: prepareWorkspaceDetachGeneration(db) };
         this.identity = identity;
-        this.db = db;
+        this.database = connection;
       } catch (error) { db.close(); throw error; }
     }
-    if (workspaceDetachGeneration(this.db) !== this.detachGeneration) throw new CacheRefusal("superseded");
-    return this.db;
+    if (this.database.readDetachGeneration() !== this.detachGeneration) throw new CacheRefusal("superseded");
+    return this.database;
   }
 
   private result<T>(action: () => T): HistoryCacheResult<T> {
@@ -136,7 +138,7 @@ export class HistoryCache {
   }
 
   private header(): Header | null {
-    const db = this.connection();
+    const { db } = this.connection();
     if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'history_cache' AND type = 'table'").get()) return null;
     const row = db.prepare("SELECT format, generation, hub, workspace, account FROM history_cache WHERE singleton = 1").get();
     if (row === undefined) return null;
@@ -175,7 +177,7 @@ export class HistoryCache {
     const deadline = Date.now() + RETRY_TIMEOUT_MS;
     for (;;) {
       let lock: ReturnType<typeof tryAcquireInitLock> = null;
-      const db = this.connection();
+      const { db, readDetachGeneration } = this.connection();
       try {
         // Detect a future format before schema preparation, configuration checks or writes.
         this.header();
@@ -192,7 +194,7 @@ export class HistoryCache {
         }
         db.exec("BEGIN IMMEDIATE");
         try {
-          if (workspaceDetachGeneration(db) !== this.detachGeneration) throw new CacheRefusal("superseded");
+          if (readDetachGeneration() !== this.detachGeneration) throw new CacheRefusal("superseded");
           this.header();
           if (token !== null) this.check(token);
           const value = action(db);
@@ -210,7 +212,7 @@ export class HistoryCache {
   }
 
   private read<T>(token: HistoryCacheToken, action: (db: DatabaseSync) => T, purge = false): T {
-    const db = this.connection();
+    const { db } = this.connection();
     if (!purge) this.authority(token, this.header());
     db.exec("BEGIN");
     try {
@@ -541,6 +543,6 @@ export class HistoryCache {
   close(): void {
     this.closed = true;
     try { this.session?.close(); } catch { /* Disposable locks must not fail store shutdown. */ }
-    try { this.db?.close(); } catch { /* Disposable connections must not fail store shutdown. */ }
+    try { this.database?.db.close(); } catch { /* Disposable connections must not fail store shutdown. */ }
   }
 }

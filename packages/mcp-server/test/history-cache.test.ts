@@ -85,6 +85,28 @@ function authoritativeRows(database: DatabaseSync) {
 }
 
 describe("disposable history storage", () => {
+  it("prepares the detach-generation query once per live store and cache connection", async () => {
+    const preparations = new Map<DatabaseSync, number>();
+    const original = DatabaseSync.prototype.prepare;
+    vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function(this: DatabaseSync, sql: string) {
+      if (sql === "SELECT value FROM meta WHERE key = 'workspace_detach_generation'") {
+        preparations.set(this, (preparations.get(this) ?? 0) + 1);
+      }
+      return original.call(this, sql);
+    });
+    const test = await fixture();
+    catalog(test.cache, test.token, [entry("one")]);
+    expect(ready(test.cache.readCatalog(test.token, PAGE))?.failed).toBe(false);
+    ready(test.cache.markRefreshFailed(test.token, PAGE));
+    expect(ready(test.cache.readCatalog(test.token, PAGE))?.failed).toBe(true);
+    test.store.appendUpdate(`${WORKSPACE}/${PAGE}`, new Uint8Array([0, 0]), "local");
+    expect(test.store.updatesAfter(`${WORKSPACE}/${PAGE}`, 0)).toHaveLength(1);
+    expect(test.store.isDetached()).toBe(false);
+    const livePreparations = [...preparations].filter(([db]) => db.isOpen);
+    expect(livePreparations).toHaveLength(2);
+    expect(livePreparations.map(([, count]) => count)).toEqual([1, 1]);
+  });
+
   it("roundtrips catalog metadata and large snapshots across restart, and records refresh failure separately", async () => {
     const test = await fixture();
     const revisions = [entry("open", {
@@ -158,6 +180,24 @@ describe("disposable history storage", () => {
     expect(test.database.prepare("SELECT failed FROM history_v1_pages WHERE generation = ? AND uuid = ?")
       .get(test.token.generation, PAGE)?.failed).toBe(0);
     expect(test.database.prepare("SELECT generation FROM history_cache").get()?.generation).toBe(nextGeneration);
+  });
+
+  it("refuses a detach committed between the connection check and the write transaction", async () => {
+    const test = await fixture();
+    catalog(test.cache, test.token, [entry("one")]);
+    const original = DatabaseSync.prototype.exec;
+    let detached = false;
+    vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function(this: DatabaseSync, sql: string) {
+      if (sql === "BEGIN IMMEDIATE" && !detached) {
+        detached = true;
+        test.database.prepare("INSERT INTO meta (key, value) VALUES ('workspace_detach_generation', ?)").run(randomUUID());
+      }
+      return original.call(this, sql);
+    });
+    expect(test.cache.markRefreshFailed(test.token, PAGE)).toEqual({ status: "superseded" });
+    expect(detached).toBe(true);
+    expect(test.database.prepare("SELECT failed FROM history_v1_pages WHERE generation = ? AND uuid = ?")
+      .get(test.token.generation, PAGE)?.failed).toBe(0);
   });
 
   it("keeps the generation and downloaded content through logout and login renewal by the same account", async () => {
