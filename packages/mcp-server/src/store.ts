@@ -14,7 +14,7 @@ import type {
 import { log } from "./log.js";
 import { discardDownloadedHistory, HistoryCache } from "./history-cache.js";
 import { parseHistoryRetention, type HistoryRetention, type WorkspaceSize } from "./local-settings.js";
-import { workspaceDetachGeneration, WorkspaceDetachedError } from "./workspace-generation.js";
+import { prepareWorkspaceDetachGeneration, WorkspaceDetachedError } from "./workspace-generation.js";
 export { WorkspaceDetachedError } from "./workspace-generation.js";
 
 const BUSY_TIMEOUT_MS = 5_000;
@@ -498,6 +498,7 @@ export class MirrorStore {
 
   private removed = false;
   private detachGeneration: string | null | undefined;
+  private readonly readDetachGeneration: () => string | null;
   private detached = false;
 
   private fragmentPruneVersion: number | null = null;
@@ -628,7 +629,8 @@ export class MirrorStore {
         .get() !== undefined;
     // Refuse foreign workspaces before any corpus schema, index or migration writes.
     this.db.exec(META_SCHEMA);
-    this.detachGeneration = workspaceDetachGeneration(this.db);
+    this.readDetachGeneration = prepareWorkspaceDetachGeneration(this.db);
+    this.detachGeneration = this.readDetachGeneration();
     this.history = new HistoryCache(databasePath, workspaceId, process.env, undefined, this.detachGeneration);
     this.claimWorkspace(workspaceId, preexisting);
     this.db.exec(SCHEMA);
@@ -1534,7 +1536,7 @@ export class MirrorStore {
   /** A session stays fenced even after the workspace reconnects to its old hub. */
   isDetached(): boolean {
     if (!this.detached && this.detachGeneration !== undefined) {
-      this.detached = workspaceDetachGeneration(this.db) !== this.detachGeneration;
+      this.detached = this.readDetachGeneration() !== this.detachGeneration;
     }
     return this.detached;
   }
