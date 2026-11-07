@@ -188,10 +188,22 @@ describe("unknown fields", () => {
 });
 
 describe("other validation messages", () => {
-  it("preserves wrong-type, missing-field and mode-conflict refusals", async () => {
+  it("preserves format, wrong-type, missing-field and mode-conflict refusals", async () => {
     const rig = await localRig();
     const logged = rig.instance.store.logSize();
     const calls: [string, Record<string, unknown>, string][] = [
+      ["set_metadata", { uuid: "not-a-uuid", title: "Rejected" }, "Invalid UUID at uuid"],
+      ["create_doc", {
+        title: "Rejected document reference",
+        description: "An invalid reference must not create a document.",
+        blocks: [{ type: "paragraph", inline: [{ text: "Target", marks: { docLink: "not-a-uuid" } }] }],
+      }, "a document reference is a target document UUID, never a path or a title at blocks[0].inline[0].marks.docLink"],
+      ["create_doc", {
+        title: "Rejected answer time",
+        description: "An invalid answer time must not create a document.",
+        kind: "decision",
+        answer: { who: "A workspace member", when: "yesterday", where: "A conversation" },
+      }, "Use an ISO 8601 date-time with a time zone, e.g. 2026-10-24T10:55:00Z; pass the current time if the answer was given just now. at answer.when"],
       ["search", { query: 7 }, "Invalid input: expected string, received number at query"],
       ["search", {}, "Invalid input: expected string, received undefined at query"],
       ["sidebar_group", {
