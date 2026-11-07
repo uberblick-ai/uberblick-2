@@ -245,7 +245,7 @@ An embed is visual content the web draws from data stored in the document: a flo
 
 | Embed | Written as | Data |
 | --- | --- | --- |
-| Ablauf | \`ablauf\` fence | flow, fan-out or sequence source; a flow may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
+| Ablauf | \`ablauf\` fence | flow, fan-out or sequence source; flows and sequences may end with one or more \`play\` sections that readers play step by step; see [Ablauf diagrams](uberblick://help/ablauf) and its primer |
 | Wireframe | \`wireframe\` fence | wireframe-md source; see [Wireframes](uberblick://help/wireframe) |
 | Chart or data table | \`chart\` fence | JSON mapping to the document's structured data; see [Structured data](uberblick://help/data) |
 | Figma | \`:::figma\` container | link, title, height and caption |
@@ -427,10 +427,12 @@ never changes the document; it shows the whole flow before playback.
 
 ## Flow playback
 
-A flow may end with one or more \`play\` sections. In the web editor the drawing
-stays whole and undimmed until the reader presses Play. Play adds scenario tabs,
-step controls and captions under the drawing and starts playback. Each step
-names a node id and lights it plus the edge from the previous step:
+A flow may end with one or more \`play\` sections. In the web editor ablauf's
+scenario tabs, step controls and captions appear with the drawing. The drawing
+stays whole and undimmed until the reader presses Play. Play starts the selected
+scene; its end returns the whole figure. Expand opens ablauf's full-screen viewer,
+with playback controls, zoom, Fit and Copy of the source. Each flow step names a
+node id and lights it plus the edge from the previous step:
 
 \`\`\`ablauf
 flow v0
@@ -497,6 +499,11 @@ Studio --> Studio: Check session
 else New session
 Studio -.-> Creator: Sign in again
 end
+
+play "Sign in"
+  step 1 "Start signing in"
+  step 2
+  step 3
 \`\`\`
 
 Use UML groups \`alt LABEL\`, \`opt LABEL\`, \`loop LABEL\` or \`group LABEL\`,
@@ -521,10 +528,22 @@ and leave the group/phase state unchanged. Unclosed groups draw to the end of
 source and diagnose their opening lines.
 
 In Uberblick, the drawing fits the column without sideways scrolling and all
-sequence text uses Geist Mono. Sequence diagrams take no \`play\` sections;
-each \`play\` line reports \`sequence playback is not supported yet\`.
+sequence text uses Geist Mono.
 
-[Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.3.0/spike/PRIMER.md)`;
+### Sequence playback
+
+Sequences accept the same \`play\` sections as flows. Targets are positive decimal
+message numbers shown in the drawing; \`1\` and \`01\` select the first message.
+Steps may skip messages and branches without a connecting edge. Participant ids,
+zero and numbers beyond the last message diagnose and skip the step.
+
+Each step lights its message row, participant headers and attached annotations.
+The default actor names the sender and receiver, or just the participant for a
+self-message; \`actor=\` overrides it. Durations and captions use the flow playback
+grammar. The controls and viewer work like flow playback, with the whole figure
+visible until Play.
+
+[Full Ablauf authoring primer](https://github.com/uberblick-ai/ablauf/blob/v0.3.1/docs/PRIMER.md)`;
 
 const wireframe = `# Wireframes
 
@@ -836,7 +855,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "ablauf",
     title: "Ablauf diagrams",
-    description: "Reading, writing and editing flow, fan-out and sequence diagrams: participants, messages, placement, nodes, edges, legends, flow playback and editing recipes.",
+    description: "Reading, writing and editing flow, fan-out and sequence diagrams: participants, messages, placement, nodes, edges, legends, flow and sequence playback and editing recipes.",
     text: ablauf,
   },
   {

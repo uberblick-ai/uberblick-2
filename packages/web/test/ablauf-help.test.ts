@@ -28,5 +28,5 @@ it("ends the help with the primer at the web editor's declared ablauf version", 
   expect(version, `Unrecognized ablauf version specifier: ${specifier}`).toBeDefined();
   const text = new HelpCatalog().read("ablauf").text.trim();
   const closingLink = text.match(/\]\(([^)\s]+)\)\.?$/)?.[1];
-  expect(closingLink).toBe(`https://github.com/uberblick-ai/ablauf/blob/v${version}/spike/PRIMER.md`);
+  expect(closingLink).toBe(`https://github.com/uberblick-ai/ablauf/blob/v${version}/docs/PRIMER.md`);
 });

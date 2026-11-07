@@ -5,17 +5,21 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { AllSelection, Selection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import type { Diagnostic, FontOptions, TextStyle, Timeline } from "@uberblick/ablauf";
+import type { PlaybackMount } from "@uberblick/ablauf/playback";
+import { openViewer as viewDrawing } from "@uberblick/ablauf/viewer";
+import type { Viewer, ViewerAction } from "@uberblick/ablauf/viewer";
 import {
   blockCaption, carriesComment, chromeFilters, codeBlockChrome, lazyRenderer, openSource,
   selectedBlock, showDiagnostics, showFailure, sourceButton, sourceEditingPlugin,
 } from "./source-chrome.js";
-import { openAblaufViewer } from "./ablauf-viewer.js";
-import type { AblaufComparison, AblaufDrawing } from "./ablauf-viewer.js";
-import { ablaufPlayback, withoutPlayback } from "./ablauf-playback.js";
+import { figureHistory } from "./figure-history.js";
+import playbackUrl from "./ablauf-playback-url.js";
 import rendererUrl from "./ablauf-renderer-url.js";
 import { DRAW_ATTRIBUTES, dataRevision, recordDraw } from "./render-state.js";
+import "../ui/figure-viewer.css";
 
 const renderers = lazyRenderer(() => import("@uberblick/ablauf"), rendererUrl);
+const playbacks = lazyRenderer(() => import("@uberblick/ablauf/playback"), playbackUrl);
 let nextId = 0;
 
 function toggleSource(editor: Editor, getPos: () => number | undefined, viewport: HTMLElement): (event: Event) => void {
@@ -56,28 +60,177 @@ function expandButton(): HTMLButtonElement {
   return expand;
 }
 
+function diagnosticList(className: string): HTMLUListElement {
+  const list = document.createElement("ul");
+  list.className = className;
+  list.hidden = true;
+  return list;
+}
+
 export function ablaufBlockView(comparison?: { source: string; side: "before" | "after" }): NodeViewRenderer {
   return (props) => ablaufNodeView(props, comparison);
 }
 
-function renderDrawing(text: string, idPrefix: string, mono: FontOptions): AblaufDrawing & { diagnostics: Diagnostic[]; timelines: Timeline[] } {
+function renderDrawing(text: string, idPrefix: string, mono: FontOptions): {
+  svg: SVGSVGElement; width: number; height: number; diagnostics: Diagnostic[]; timelines: Timeline[];
+} {
   const renderer = renderers.current();
   if (renderer === null) throw new Error("Renderer is unavailable");
   const result = renderer.render(text, { idPrefix, fonts: { mono } });
   // Source-derived text and attributes are escaped by the renderer. Parse
   // as SVG, then adopt its nodes; never interpret the source as HTML.
   const parsed = new DOMParser().parseFromString(result.svg, "image/svg+xml");
-  const svg = parsed.documentElement;
-  if (svg.localName !== "svg") throw new Error("Renderer returned invalid SVG");
+  const svg = parsed.querySelector("svg");
+  if (svg === null || parsed.documentElement.localName !== "svg") throw new Error("Renderer returned invalid SVG");
   const width = Number(svg.getAttribute("width"));
   const height = Number(svg.getAttribute("height"));
   if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) throw new Error("Renderer returned invalid dimensions");
-  const hostStyle = document.createElement("style");
-  hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; background: var(--ab-bg); }';
-  const drawing = document.createElement("div");
-  drawing.className = "ub-ablauf-drawing";
-  drawing.attachShadow({ mode: "open" }).replaceChildren(document.importNode(svg, true), hostStyle);
-  return { drawing, width, height, diagnostics: result.diagnostics, timelines: result.timelines };
+  return { svg: document.importNode(svg, true), width, height, diagnostics: result.diagnostics, timelines: result.timelines };
+}
+
+function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
+  drawing: () => { svg: SVGSVGElement | null; mount: PlaybackMount | null; source: string };
+  editable: () => boolean;
+  source: () => void;
+  failure: (cause: unknown) => void;
+  comparison?: { side: "before" | "after"; draw: () => ReturnType<typeof renderDrawing> & { source: string } };
+}) {
+  let viewer: Viewer | undefined;
+  let history: ReturnType<typeof figureHistory> | undefined;
+  let other = false;
+  let editable = options.editable();
+  let replacing = false;
+  let destroyed = false;
+  let version = 0;
+  let closing = false;
+  let pendingOpen: (() => void) | undefined;
+  const counterpart = () => {
+    try { return options.comparison?.draw(); }
+    catch { return undefined; }
+  };
+  const closeForReplacement = (): void => {
+    replacing = true;
+    viewer?.close();
+    replacing = false;
+  };
+  const open = (opposite = false, focus?: HTMLElement): void => {
+    const current = options.drawing();
+    if (destroyed || current.svg === null || viewer !== undefined) return;
+    if (closing) { pendingOpen = () => open(opposite, focus); return; }
+    const compared = counterpart();
+    if (opposite && compared === undefined) return;
+    if (opposite && compared !== undefined && compared.timelines.length > 0 && playbacks.current() === null) {
+      const pendingHistory = history;
+      const request = version;
+      void playbacks.load().then(() => {
+        if (version === request && history === pendingHistory) open(opposite, focus);
+      }, cause => {
+        if (!destroyed && version === request && history === pendingHistory) {
+          options.failure(cause);
+          history?.close();
+        }
+      });
+      return;
+    }
+    const holder = opposite ? document.createElement("div") : null;
+    let otherMount: PlaybackMount | undefined;
+    const shown = opposite && compared !== undefined ? compared.svg : current.svg;
+    if (holder !== null && compared !== undefined) {
+      shadow.append(holder);
+      holder.append(shown);
+      otherMount = playbacks.current()?.mountPlayback(holder, shown, compared.timelines);
+    }
+    other = opposite;
+    editable = options.editable();
+    const actions: ViewerAction[] = [];
+    if (editable) actions.push({ label: "Source", onClick: handle => {
+      handle.close();
+      if (options.editable()) options.source();
+    } });
+    if (compared !== undefined) actions.push({
+      label: opposite === (options.comparison?.side === "before") ? "Before" : "After",
+      onClick: () => { closeForReplacement(); open(!opposite); },
+    });
+    viewport.focus({ preventScroll: true });
+    const settings = {
+      source: opposite && compared !== undefined ? compared.source : current.source,
+      actions,
+      onClose: () => {
+        viewer = undefined;
+        otherMount?.destroy();
+        holder?.remove();
+        if (!replacing) {
+          version += 1;
+          viewport.focus({ preventScroll: true });
+          closing = history !== undefined;
+          history?.close();
+        }
+      },
+    };
+    viewer = (opposite ? otherMount : current.mount)?.expand(settings) ?? viewDrawing(shown, settings);
+    history ??= figureHistory(() => {
+      version += 1;
+      history = undefined;
+      closing = false;
+      viewer?.close();
+      const next = pendingOpen;
+      pendingOpen = undefined;
+      next?.();
+    });
+    if (focus?.isConnected) focus.focus({ preventScroll: true });
+  };
+  return {
+    open: (): void => { version += 1; open(); },
+    redraw: (): (() => void) => {
+      if (viewer === undefined) return () => {};
+      const side = other;
+      const entry = history;
+      const request = version;
+      const focus = shadow.activeElement instanceof HTMLElement ? shadow.activeElement : undefined;
+      // Copy captures source at open; replace the viewer together with the drawing.
+      closeForReplacement();
+      return () => { if (version === request && history === entry) open(side, focus); };
+    },
+    sync: (): void => {
+      if (viewer === undefined || editable === options.editable()) return;
+      editable = options.editable();
+      closeForReplacement();
+      open(other);
+    },
+    destroy: (): void => { destroyed = true; version += 1; pendingOpen = undefined; viewer?.close(); },
+  };
+}
+
+function bindPlayback(shadow: ShadowRoot, diagnostics: HTMLElement) {
+  let mount: PlaybackMount | null = null;
+  let generation = 0;
+  return {
+    current: () => mount,
+    redraw(svg: SVGSVGElement, timelines: Timeline[], reopen: () => void, beforeBind: () => () => void): void {
+      const drawn = ++generation;
+      const bind = (module: typeof import("@uberblick/ablauf/playback")): void => {
+        if (drawn !== generation) return;
+        const resume = beforeBind();
+        if (mount === null) mount = module.mountPlayback(shadow, svg, timelines);
+        else {
+          mount.update(svg, timelines);
+          mount.player.seek(-1);
+        }
+        reopen();
+        resume();
+      };
+      showDiagnostics(diagnostics, []);
+      const module = playbacks.current();
+      if (module !== null && (mount !== null || timelines.length > 0)) bind(module);
+      else if (timelines.length > 0) void playbacks.load().then(bind, (cause: unknown) => {
+        if (drawn !== generation) return;
+        showFailure(diagnostics, "Playback cannot be loaded", cause);
+        reopen();
+      });
+      else reopen();
+    },
+    destroy: (): void => { generation += 1; mount?.destroy(); },
+  };
 }
 
 function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
@@ -88,8 +241,8 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   let hasDrawing = false;
   let fontsReady = false;
   let naturalWidth = 0;
-  let naturalHeight = 0;
-  let viewer: ReturnType<typeof openAblaufViewer> | undefined;
+  let svg: SVGSVGElement | null = null;
+  let drawnSource = "";
   const idPrefix = `ub-ablauf-${++nextId}`;
   const dom = document.createElement("div");
   dom.className = "ub-code ub-ablauf";
@@ -111,56 +264,38 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   // Each renderer emits document-wide .ab rules, with different fonts and
   // optional shape rules. A shadow tree isolates them while inheriting tokens.
   const shadow = drawing.attachShadow({ mode: "open" });
+  const hostStyle = document.createElement("style");
+  hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; max-width: var(--ub-ablauf-natural); margin-inline: auto; background: var(--ab-bg); }';
+  shadow.append(hostStyle);
   viewport.append(drawing);
   const showSource = (): void => openSource(editor, getPos, true)(new Event("source"));
   const source = sourceButton("Open ablauf source", toggleSource(editor, getPos, viewport));
   const expand = expandButton();
-  const playback = ablaufPlayback(dom);
   const toolbar = document.createElement("div");
   toolbar.className = "ub-figure-toolbar";
   toolbar.contentEditable = "false";
-  toolbar.append(source, playback.play, expand);
-  const openViewer = (): void => {
-    if (!hasDrawing || destroyed) return;
-    viewer?.close();
-    const fullDrawing = document.createElement("div");
-    fullDrawing.className = "ub-ablauf-drawing";
-    fullDrawing.attachShadow({ mode: "open" }).replaceChildren(...Array.from(shadow.childNodes, (child) => child.cloneNode(true)));
-    if (fullDrawing.shadowRoot !== null) withoutPlayback(fullDrawing.shadowRoot);
-    let compared: AblaufComparison | undefined;
-    if (comparison !== undefined) {
-      try {
-        const other = renderDrawing(comparison.source, `${idPrefix}-other`, { family: monoFamily(), measureText });
-        compared = { side: comparison.side, other: { ...other, source: () => comparison.source } };
-      } catch {
-        // A state without a drawing has no visual counterpart to switch to.
-      }
-    }
-    viewer = openAblaufViewer({
-      drawing: fullDrawing, width: naturalWidth, height: naturalHeight,
-      source: () => current.textContent, editable: editor.isEditable, openSource: showSource, returnFocus: viewport,
-      ...(compared === undefined ? {} : { comparison: compared }),
-    });
-  };
+  toolbar.append(source, expand);
   expand.addEventListener("mousedown", (event) => event.preventDefault());
-  expand.addEventListener("click", openViewer);
+  expand.addEventListener("click", () => viewer.open());
   viewport.addEventListener("click", (event) => {
-    if ((event instanceof PointerEvent && event.pointerType === "touch")
-      || matchMedia("(pointer: coarse)").matches || viewport.dataset.zoomable === "true") openViewer();
+    if (svg !== null && event.composedPath().includes(svg)
+      && ((event instanceof PointerEvent && event.pointerType === "touch")
+      || matchMedia("(pointer: coarse)").matches || viewport.dataset.zoomable === "true")) viewer.open();
   });
   const resized = (): void => {
+    panel.style.setProperty("--ub-ablauf-column", `${dom.getBoundingClientRect().width}px`);
     viewport.dataset.zoomable = String(naturalWidth > 0 && viewport.getBoundingClientRect().width / naturalWidth < 0.75);
   };
   const resize = new ResizeObserver(resized);
   resize.observe(viewport);
+  resize.observe(dom);
   const stale = document.createElement("p");
   stale.className = "ub-ablauf-stale";
   stale.textContent = "Preview is stale";
   stale.hidden = true;
-  const diagnostics = document.createElement("ul");
-  diagnostics.className = "ub-ablauf-diagnostics";
-  diagnostics.hidden = true;
-  panel.append(viewport, toolbar, playback.controls, playback.touchPlay, stale, diagnostics, playback.diagnostics);
+  const diagnostics = diagnosticList("ub-ablauf-diagnostics");
+  const playbackDiagnostics = diagnosticList("ub-ablauf-playback-diagnostics");
+  panel.append(viewport, toolbar, stale, diagnostics, playbackDiagnostics);
   const contentDOM = document.createElement("pre");
   contentDOM.className = "ub-ablauf-source";
   sourceFrame.append(header.row, contentDOM);
@@ -181,6 +316,17 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
     context.font = `${style.fontWeight} ${style.fontSize}px "${monoFamily()}"`;
     return context.measureText(text).width;
   };
+  const playback = bindPlayback(shadow, playbackDiagnostics);
+  const viewer = ablaufViewer(viewport, shadow, {
+    drawing: () => ({ svg, mount: playback.current(), source: drawnSource }),
+    editable: () => editor.isEditable,
+    source: showSource,
+    failure: cause => showFailure(playbackDiagnostics, "Playback cannot be loaded", cause),
+    ...(comparison === undefined ? {} : { comparison: {
+      side: comparison.side,
+      draw: () => ({ ...renderDrawing(comparison.source, `${idPrefix}-other`, { family: monoFamily(), measureText }), source: comparison.source }),
+    } }),
+  });
   const draw = (): void => {
     pending = null;
     if (destroyed) return;
@@ -197,12 +343,17 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
     }
     try {
       const result = renderDrawing(current.textContent, idPrefix, { family: monoFamily(), measureText });
-      const { width, height } = result;
-      shadow.replaceChildren(...Array.from(result.drawing.shadowRoot?.childNodes ?? []));
-      playback.redraw(shadow.querySelector("svg"), result.timelines);
+      const { width } = result;
+      const reopen = viewer.redraw();
+      if (svg === null) shadow.append(result.svg);
+      else svg.replaceWith(result.svg);
+      svg = result.svg;
+      drawnSource = current.textContent;
+      playback.redraw(svg, result.timelines, reopen, viewer.redraw);
       naturalWidth = width;
-      naturalHeight = height;
-      panel.style.width = `min(100%, ${width}px)`;
+      panel.style.setProperty("--ub-ablauf-natural", `${width}px`);
+      panel.style.width = result.timelines.length > 0
+        ? `min(100%, max(${width}px, min(22rem, var(--ub-ablauf-column, 100%))))` : `min(100%, ${width}px)`;
       hasDrawing = true;
       viewport.hidden = false;
       expand.disabled = false;
@@ -223,7 +374,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   const sync = (): void => {
     codeBlockChrome.sync(current, dom);
     source.hidden = !editor.isEditable;
-    viewer?.setEditable(editor.isEditable);
+    viewer.sync();
     dom.dataset.annotated = String(carriesComment(current));
     source.setAttribute("aria-expanded", String(selectedBlock(editor.state, "code")?.pos === getPos() || carriesComment(current)));
   };
@@ -246,8 +397,8 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
     ...chromeFilters(dom, [header.row, panel], ["id", "data-language", "data-annotated", ...DRAW_ATTRIBUTES]),
     destroy: () => {
       destroyed = true;
+      viewer.destroy();
       playback.destroy();
-      viewer?.close();
       resize.disconnect();
       if (pending !== null) clearTimeout(pending);
       document.fonts.removeEventListener("loadingdone", fontsLoaded);

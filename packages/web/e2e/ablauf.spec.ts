@@ -60,11 +60,11 @@ function drawing(page: Page): Locator { return page.locator(".ub-ablauf-drawing"
 function source(page: Page): Locator { return page.locator(".ub-ablauf-source"); }
 function neighbor(page: Page): Locator { return editor(page).locator(":scope > p").first(); }
 function openSource(page: Page): Locator { return page.getByRole("button", { name: "Open ablauf source", exact: true }); }
-function viewer(page: Page): Locator { return page.getByRole("dialog", { name: "Ablauf diagram", exact: true }); }
+function viewer(page: Page): Locator { return page.locator(".ab-viewer"); }
 function expand(page: Page): Locator { return page.getByRole("button", { name: "Expand ablauf diagram", exact: true, includeHidden: true }); }
 
 async function zoomLevel(page: Page): Promise<number> {
-  return Number((await viewer(page).getByLabel("Zoom level", { exact: true }).textContent())?.replace("%", ""));
+  return Number((await viewer(page).locator(".abv-zoom").textContent())?.replace("%", ""));
 }
 
 async function sourceIsFramed(page: Page): Promise<void> {
@@ -81,12 +81,13 @@ async function sourceIsFramed(page: Page): Promise<void> {
 }
 
 async function viewerIsCentered(page: Page): Promise<void> {
-  await expect.poll(() => viewer(page).locator(".ub-ablauf-viewer-drawing").evaluate(element => {
-    const canvas = element.parentElement?.getBoundingClientRect();
+  await expect.poll(() => viewer(page).locator(".abv-canvas > svg").evaluate(element => {
+    const parent = element.parentElement;
+    const canvas = parent?.getBoundingClientRect();
     const diagram = element.getBoundingClientRect();
-    if (canvas === undefined) throw new Error("e2e: viewer canvas missing");
-    return Math.max(Math.abs(diagram.x + diagram.width / 2 - canvas.x - canvas.width / 2),
-      Math.abs(diagram.y + diagram.height / 2 - canvas.y - canvas.height / 2));
+    if (canvas === undefined || parent === null) throw new Error("e2e: viewer canvas missing");
+    return Math.max(Math.abs(diagram.x + diagram.width / 2 - canvas.x - parent.clientWidth / 2),
+      Math.abs(diagram.y + diagram.height / 2 - canvas.y - parent.clientHeight / 2));
   })).toBeLessThanOrEqual(1);
 }
 
@@ -101,9 +102,8 @@ async function toolbarShown(button: Locator): Promise<boolean> {
 }
 
 async function pinch(page: Page, start: number, end: number): Promise<void> {
-  await viewer(page).locator(".ub-ablauf-viewer-drawing").evaluate((element, distances) => {
-    const viewport = element.parentElement?.getBoundingClientRect();
-    if (viewport === undefined) throw new Error("e2e: pinch viewport missing");
+  await viewer(page).locator(".abv-canvas").evaluate((element, distances) => {
+    const viewport = element.getBoundingClientRect();
     const center = { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
     for (const [type, distance] of [["pointerdown", distances.start], ["pointermove", distances.end], ["pointerup", distances.end]] as const) {
       for (const pointerId of [1, 2]) element.dispatchEvent(new PointerEvent(type, {
@@ -263,7 +263,7 @@ test("the language picker draws Ablauf, Source returns its caret, and another la
   } else {
     await page.locator(".ub-ablauf-viewport").tap();
     await expect(viewer(page)).toBeVisible();
-    await viewer(page).getByRole("button", { name: "Open ablauf source", exact: true }).tap();
+    await viewer(page).getByRole("button", { name: "Source", exact: true }).tap();
     await expect(viewer(page)).toHaveCount(0);
   }
   await expect(source(page)).toBeVisible();
@@ -343,11 +343,11 @@ test("comments keep the source visible and read-only diagrams lose their authori
   await expand(page).focus();
   await page.keyboard.press("Enter");
   await expect(viewer(page)).toBeVisible();
-  await expect(viewer(page).getByRole("button", { name: "Open ablauf source", exact: true })).toBeVisible();
+  await expect(viewer(page).getByRole("button", { name: "Source", exact: true })).toBeVisible();
   await session.call("archive_doc", { uuid });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await expect(viewer(page).getByRole("button", { name: "Open ablauf source", exact: true })).toHaveCount(0);
-  await expect(viewer(page).getByRole("button", { name: "Copy ablauf source", exact: true })).toBeVisible();
+  await expect(viewer(page).getByRole("button", { name: "Source", exact: true })).toHaveCount(0);
+  await expect(viewer(page).getByRole("button", { name: "Copy source", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(viewer(page)).toHaveCount(0);
   await expect(source(page)).toBeVisible();
@@ -473,6 +473,10 @@ test("the viewer preserves history state, restores focus on every close path, an
   const uuid = await ablaufDoc(session, "Ablauf viewer history");
   const page = await openApp(browser, `/${harness().workspace}/${previous}`, {
     contextOptions: { viewport: { width: 1366, height: 900 }, hasTouch: false, isMobile: false },
+    beforeNavigate: async page => { await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true,
+        value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-source", text) } });
+    }); },
   });
   await waitForDocumentDraw(page, session, previous);
   await page.goto(new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href);
@@ -489,13 +493,26 @@ test("the viewer preserves history state, restores focus on every close path, an
     await expect.poll(() => zoomLevel(page)).toBe(100);
     await viewerIsCentered(page);
     if (close === "escape") await page.keyboard.press("Escape");
-    else if (close === "button") await viewer(page).getByRole("button", { name: "Close diagram viewer", exact: true }).click();
+    else if (close === "button") await viewer(page).getByRole("button", { name: "Close", exact: true }).click();
     else await page.goBack();
     await expect(viewer(page)).toHaveCount(0);
     await expect(preview).toBeFocused();
     await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
     await expect(page.locator(".ub-title")).toHaveValue("Ablauf viewer history");
   }
+  await expand(page).focus();
+  await page.keyboard.press("Enter");
+  await viewer(page).getByRole("button", { name: "Copy source", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-copied-source", FLOW);
+  const revised = FLOW.replace('"Draft"', '"Updated while expanded"');
+  await editSource(session, uuid, revised);
+  await expect(viewer(page).locator("svg")).toContainText("Updated while expanded");
+  await viewer(page).getByRole("button", { name: "Copy source", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-copied-source", revised);
+  await page.goBack();
+  await expect(viewer(page)).toHaveCount(0);
+  await expect(preview).toBeFocused();
+  await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
   await page.goBack();
   await expect(page.locator(".ub-title")).toHaveValue("Previous Ablauf document");
   await page.goForward();
@@ -504,7 +521,7 @@ test("the viewer preserves history state, restores focus on every close path, an
   await expand(page).focus();
   await page.keyboard.press("Enter");
   await expect(viewer(page)).toBeVisible();
-  await viewer(page).getByRole("button", { name: "Open ablauf source", exact: true }).click();
+  await viewer(page).getByRole("button", { name: "Source", exact: true }).click();
   await expect(viewer(page)).toHaveCount(0);
   await expect(source(page)).toBeVisible();
   await sourceIsFramed(page);
@@ -513,9 +530,46 @@ test("the viewer preserves history state, restores focus on every close path, an
   await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
 });
 
-test("Fit shows a tall flow below 25%, while manual zoom, wheel zoom and drag stay usable", { tag: "@webkit" }, async ({ browser }) => {
+test("Back dismisses the viewer while a source edit waits for its first playback load", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
-  const uuid = await ablaufDoc(session, "Ablauf sub-quarter Fit", TALL);
+  const uuid = await ablaufDoc(session, "Ablauf viewer playback-load dismissal");
+  let release: (() => void) | undefined;
+  let requested: (() => void) | undefined;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const firstRequest = new Promise<void>(resolve => { requested = resolve; });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async page => {
+      await page.route(/\/assets\/ablauf-playback-[^/]+\.js(?:\?.*)?$/, async route => {
+        requested?.();
+        await held;
+        await route.continue();
+      });
+    },
+  });
+  try {
+    await waitForDocumentDraw(page, session, uuid);
+    const before = await page.evaluate(() => history.state);
+    if (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) await page.locator(".ub-ablauf-viewport").tap();
+    else {
+      await expand(page).focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(viewer(page)).toBeVisible();
+    const played = `${FLOW}\n\nplay\n  step draft\n  step check`;
+    await editSource(session, uuid, played);
+    await firstRequest;
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
+    release?.();
+    await expect(page.locator(".ab-playback")).toBeVisible();
+    await expect(viewer(page)).toHaveCount(0);
+    await expect(page.locator(".ub-ablauf-viewport")).toBeFocused();
+  } finally { release?.(); }
+});
+
+test("Fit stops at 25% for a tall flow, while manual zoom, wheel zoom and drag stay usable", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const uuid = await ablaufDoc(session, "Ablauf quarter Fit", TALL);
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     contextOptions: { viewport: { width: 1024, height: 768 }, hasTouch: false, isMobile: false },
   });
@@ -523,17 +577,17 @@ test("Fit shows a tall flow below 25%, while manual zoom, wheel zoom and drag st
   await expand(page).focus();
   await page.keyboard.press("Enter");
   await expect(viewer(page)).toBeVisible();
-  await expect.poll(() => zoomLevel(page)).toBeLessThan(25);
+  await expect.poll(() => zoomLevel(page)).toBe(25);
   await viewerIsCentered(page);
   const fit = await zoomLevel(page);
-  const canvas = viewer(page).locator(".ub-ablauf-viewer-viewport");
-  const svg = viewer(page).locator(".ub-ablauf-viewer-drawing svg");
+  const canvas = viewer(page).locator(".abv-canvas");
+  const svg = canvas.locator(":scope > svg");
   await expect.poll(async () => {
     const window = await canvas.boundingBox(), diagram = await svg.boundingBox();
-    return window !== null && diagram !== null && diagram.x >= window.x - 1 && diagram.y >= window.y - 1
-      && diagram.x + diagram.width <= window.x + window.width + 1 && diagram.y + diagram.height <= window.y + window.height + 1;
+    return window !== null && diagram !== null && diagram.height > window.height
+      && diagram.y < window.y && diagram.y + diagram.height > window.y + window.height;
   }).toBe(true);
-  await viewer(page).getByRole("button", { name: "Zoom out", exact: true }).click();
+  await expect(viewer(page).getByRole("button", { name: "Zoom out", exact: true })).toBeDisabled();
   await expect.poll(() => zoomLevel(page)).toBe(fit);
   await canvas.hover();
   await page.keyboard.down("Control");
@@ -542,7 +596,9 @@ test("Fit shows a tall flow below 25%, while manual zoom, wheel zoom and drag st
   await expect.poll(() => zoomLevel(page)).toBe(fit);
   await viewer(page).getByRole("button", { name: "Zoom in", exact: true }).click();
   await expect.poll(() => zoomLevel(page)).toBeGreaterThanOrEqual(25);
-  for (let index = 0; index < 16; index += 1) await viewer(page).getByRole("button", { name: "Zoom in", exact: true }).click();
+  while (await viewer(page).getByRole("button", { name: "Zoom in", exact: true }).isEnabled()) {
+    await viewer(page).getByRole("button", { name: "Zoom in", exact: true }).click();
+  }
   await expect.poll(() => zoomLevel(page)).toBe(400);
   await canvas.hover();
   await page.keyboard.down("Control");
@@ -556,10 +612,12 @@ test("Fit shows a tall flow below 25%, while manual zoom, wheel zoom and drag st
   await page.mouse.down();
   await page.mouse.move(target.x + target.width / 2 + 70, target.y + target.height / 2 + 40, { steps: 4 });
   await page.mouse.up();
-  await expect.poll(async () => (await svg.boundingBox())?.x).not.toBe(beforePan.x);
-  for (let index = 0; index < 16; index += 1) await viewer(page).getByRole("button", { name: "Zoom out", exact: true }).click();
+  await expect.poll(async () => (await svg.boundingBox())?.y).not.toBe(beforePan.y);
+  while (await viewer(page).getByRole("button", { name: "Zoom out", exact: true }).isEnabled()) {
+    await viewer(page).getByRole("button", { name: "Zoom out", exact: true }).click();
+  }
   await expect.poll(() => zoomLevel(page)).toBe(25);
-  await viewer(page).getByRole("button", { name: "Fit", exact: true }).click();
+  await viewer(page).getByRole("button", { name: "Fit to window", exact: true }).click();
   await expect.poll(() => zoomLevel(page)).toBe(fit);
   await viewerIsCentered(page);
   await page.keyboard.press("Escape");
@@ -586,9 +644,9 @@ test("iPad taps open the viewer without an inline toolbar and read-only Copy ret
   const preview = page.locator(".ub-ablauf-viewport");
   await preview.tap();
   await expect(viewer(page)).toBeVisible();
-  await expect.poll(() => zoomLevel(page)).toBeLessThan(25);
-  const surface = await viewer(page).locator(".ub-ablauf-viewer-drawing > .ub-ablauf-drawing").evaluate(element => {
-    const svg = element.shadowRoot?.querySelector("svg");
+  await expect.poll(() => zoomLevel(page)).toBe(25);
+  const surface = await viewer(page).evaluate(element => {
+    const svg = element.querySelector("svg");
     if (svg === null || svg === undefined) throw new Error("e2e: viewer SVG is missing");
     return { drawing: getComputedStyle(element).backgroundColor, svg: getComputedStyle(svg).backgroundColor };
   });
@@ -598,35 +656,27 @@ test("iPad taps open the viewer without an inline toolbar and read-only Copy ret
   await pinch(page, 60, 30);
   await expect.poll(() => zoomLevel(page)).toBe(fit);
   await pinch(page, 30, 120);
-  await expect.poll(() => zoomLevel(page)).toBeGreaterThanOrEqual(25);
-  await expect(viewer(page).getByRole("button", { name: "Open ablauf source", exact: true })).toHaveCount(0);
+  await expect.poll(() => zoomLevel(page)).toBeGreaterThan(fit);
+  await expect(viewer(page).getByRole("button", { name: "Source", exact: true })).toHaveCount(0);
   for (const control of await viewer(page).getByRole("button").all()) {
     const bounds = await control.boundingBox();
     if (bounds === null) throw new Error("e2e: touch viewer control missing");
     expect(bounds.width).toBeGreaterThanOrEqual(44);
     expect(bounds.height).toBeGreaterThanOrEqual(44);
   }
-  await viewer(page).getByRole("button", { name: "Copy ablauf source", exact: true }).tap();
+  await viewer(page).getByRole("button", { name: "Copy source", exact: true }).tap();
   await expect(page.locator("html")).toHaveAttribute("data-copied-source", TALL);
   await expect(viewer(page)).toBeVisible();
   await page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
-    Object.defineProperty(document, "execCommand", { configurable: true, value: (command: string) => {
-      const focused = document.activeElement;
-      if (command !== "copy" || !(focused instanceof HTMLTextAreaElement)) return false;
-      document.documentElement.setAttribute("data-fallback-source", focused.value);
-      document.documentElement.setAttribute("data-fallback-in-dialog", String(focused.closest("[role='dialog']") !== null));
-      return focused.selectionStart === 0 && focused.selectionEnd === focused.value.length;
-    } });
   });
-  const copy = viewer(page).getByRole("button", { name: "Copy ablauf source", exact: true });
+  const copy = viewer(page).getByRole("button", { name: "Copy source", exact: true });
   await copy.focus();
   await page.keyboard.press("Enter");
-  await expect(page.locator("html")).toHaveAttribute("data-fallback-source", TALL);
-  await expect(page.locator("html")).toHaveAttribute("data-fallback-in-dialog", "true");
+  await expect(viewer(page).getByRole("status")).toHaveText("Copy failed");
   await expect(copy).toBeFocused();
   await expect(viewer(page)).toBeVisible();
-  await viewer(page).getByRole("button", { name: "Close diagram viewer", exact: true }).tap();
+  await viewer(page).getByRole("button", { name: "Close", exact: true }).tap();
   await expect(viewer(page)).toHaveCount(0);
   await expect(preview).toBeFocused();
   await expect.poll(() => toolbarShown(expand(page))).toBe(false);
