@@ -104,6 +104,7 @@ function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
   let version = 0;
   let closing = false;
   let pendingOpen: (() => void) | undefined;
+  let resume: () => void = () => {};
   const counterpart = () => {
     try { return options.comparison?.draw(); }
     catch { return undefined; }
@@ -168,6 +169,7 @@ function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
       },
     };
     viewer = (opposite ? otherMount : current.mount)?.expand(settings) ?? viewDrawing(shown, settings);
+    resume = () => {};
     history ??= figureHistory(() => {
       version += 1;
       history = undefined;
@@ -182,14 +184,15 @@ function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
   return {
     open: (): void => { version += 1; open(); },
     redraw: (): (() => void) => {
-      if (viewer === undefined) return () => {};
+      if (viewer === undefined) return resume;
       const side = other;
       const entry = history;
       const request = version;
       const focus = shadow.activeElement instanceof HTMLElement ? shadow.activeElement : undefined;
       // Copy captures source at open; replace the viewer together with the drawing.
       closeForReplacement();
-      return () => { if (version === request && history === entry) open(side, focus); };
+      resume = () => { if (version === request && history === entry) open(side, focus); };
+      return resume;
     },
     sync: (): void => {
       if (viewer === undefined || editable === options.editable()) return;

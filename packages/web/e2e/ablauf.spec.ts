@@ -567,6 +567,54 @@ test("Back dismisses the viewer while a source edit waits for its first playback
   } finally { release?.(); }
 });
 
+test("successive source edits keep the viewer open while its first playback code loads", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const uuid = await ablaufDoc(session, "Ablauf viewer pending playback redraws");
+  let release: (() => void) | undefined;
+  let requested: (() => void) | undefined;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const firstRequest = new Promise<void>(resolve => { requested = resolve; });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async page => {
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", { configurable: true,
+          value: { writeText: async (text: string) => document.documentElement.setAttribute("data-copied-source", text) } });
+      });
+      await page.route(/\/assets\/ablauf-playback-[^/]+\.js(?:\?.*)?$/, async route => {
+        requested?.();
+        await held;
+        await route.continue();
+      });
+    },
+  });
+  try {
+    await waitForDocumentDraw(page, session, uuid);
+    const before = await page.evaluate(() => history.state);
+    if (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) await page.locator(".ub-ablauf-viewport").tap();
+    else {
+      await expand(page).focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(viewer(page)).toBeVisible();
+    const played = `${FLOW}\n\nplay\n  step draft\n  step check`;
+    await editSource(session, uuid, played);
+    await firstRequest;
+    await waitForDocumentDraw(page, session, uuid, { source: played });
+    const latest = played.replace('"Draft"', '"Latest expanded draft"');
+    await editSource(session, uuid, latest);
+    await waitForDocumentDraw(page, session, uuid, { source: latest });
+    release?.();
+    await expect(viewer(page).locator(".ab-playback")).toBeVisible();
+    await expect(viewer(page).locator("svg")).toContainText("Latest expanded draft");
+    await viewer(page).getByRole("button", { name: "Copy source", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-copied-source", latest);
+    await page.goBack();
+    await expect(viewer(page)).toHaveCount(0);
+    await expect(page.locator(".ub-ablauf-viewport")).toBeFocused();
+    await expect.poll(() => page.evaluate(() => history.state)).toEqual(before);
+  } finally { release?.(); }
+});
+
 test("Fit stops at 25% for a tall flow, while manual zoom, wheel zoom and drag stay usable", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const uuid = await ablaufDoc(session, "Ablauf quarter Fit", TALL);
