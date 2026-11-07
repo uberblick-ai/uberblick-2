@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
@@ -129,6 +129,22 @@ it("prints the hub-connected switch-back form when forking a hub workspace", asy
   const restored = await runInProcess(["workspace", "use", binding.workspaceId.slice(0, 8)], box);
   expect(restored.status, restored.output).toBe(0);
   expect(selected(box)).toEqual(previous);
+});
+
+it("keeps a full switch-back UUID for an unrecorded source available only at a custom database path", async () => {
+  const { box, binding, config } = await localSource();
+  const sourcePath = join(box.cwd, "custom-source.sqlite");
+  renameSync(config.databasePath, sourcePath);
+  rmSync(workspaceRegistryPath(box.env));
+  const env = { UBERBLICK_DB: sourcePath };
+  const result = await runInProcess(["workspace", "fork"], box, env);
+  expect(result.status, result.output).toBe(0);
+  expect(readWorkspaceHub(binding.workspaceId, box.env)).toBeUndefined();
+  const target = result.stdout.match(/^switch to previous workspace with: ub workspace use (.+)$/m)?.[1];
+  expect(target).toBe(binding.workspaceId);
+  const restored = await runInProcess(["workspace", "use", target!], box, env);
+  expect(restored.status, restored.output).toBe(0);
+  expect(selected(box)).toEqual(binding);
 });
 
 it.each(["wss://source.example.test/ws", "ws://127.0.0.1:1", "wss://source.example.test/proxy/"])("names every missing document and preserves recovery endpoint %s before creating a database", async (hub) => {

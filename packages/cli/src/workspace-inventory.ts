@@ -31,6 +31,8 @@ export function shortWorkspaceId(id: string): string {
     for (const recorded of recordedWorkspaceIds()) ids.add(recorded);
     const selected = resolveProjectBinding().binding;
     if (selected !== null) ids.add(parseWorkspaceId(selected.workspaceId).uuid);
+    // A custom database can resolve by full UUID without appearing in prefix lookup.
+    if (!ids.has(uuid)) return uuid;
     let length = 8;
     while ([...ids].some(other => other !== uuid && other.startsWith(uuid.slice(0, length)))) length++;
     return uuid.slice(0, length);
