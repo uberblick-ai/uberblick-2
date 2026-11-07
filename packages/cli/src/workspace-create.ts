@@ -77,7 +77,7 @@ export async function createWorkspaceCommand({ positionals, values }: CommandArg
         await fillMainRepositoryFromOrigin(uuid, null, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });
-      output = `${useBindingLines(binding, previous, path, "created")}open it with: ub open\n`;
+      output = `${useBindingLines(binding, previous, path, "created")}open the new workspace with: ub open\n`;
     } finally { lock.release(); }
     io.out(output);
     reportEnvironmentBinding(io);

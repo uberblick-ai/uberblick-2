@@ -772,7 +772,7 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
       `wrote      ${join(box.cwd, ".uberblick.json")}\n`,
     );
     expect(run.stdout).not.toContain("previous");
-    expect(run.stdout).not.toContain("switch back with:");
+    expect(run.stdout).not.toContain("switch to previous workspace");
   });
 
   it("uses a recorded local workspace even without a database", async () => {
@@ -801,13 +801,13 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
       `using      Research notes (${OTHER}, local)\n` +
       `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
       `previous   Project notes (${WORKSPACE}, https://hub.example.test)\n` +
-      `switch back with: ub workspace use ${WORKSPACE}\n`,
+      `\nswitch to previous workspace with: ub workspace use ${WORKSPACE.slice(0, 8)}\n`,
     );
     expect(selected.stderr).toBe("");
     // Running exactly what it printed restores the entire recorded pair.
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
     const registryBeforeRecovery = readFileSync(workspaceRegistryPath(box.env));
-    const command = selected.stdout.split("switch back with: ub ")[1]?.trim();
+    const command = selected.stdout.split("switch to previous workspace with: ub ")[1]?.trim();
     expect(command).toBeDefined();
     const recovered = await runInProcess(command!.split(" "), box);
     expect(recovered.status, recovered.output).toBe(0);
@@ -828,9 +828,57 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
       `using      ${OTHER} (local)\n` +
       `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
       `previous   ${WORKSPACE} (local)\n` +
-      `switch back with: ub workspace use ${WORKSPACE}\n`,
+      `\nswitch to previous workspace with: ub workspace use ${WORKSPACE.slice(0, 8)}\n`,
     );
     expect(existsSync(join(nested, ".uberblick.json"))).toBe(false);
+  });
+
+  it.each(["database", "registry", "environment"])("lengthens a decorated previous UUID only enough to avoid a %s collision", async source => {
+    const box = sandbox();
+    bind(box, `notes-${WORKSPACE}`, null);
+    record(box, WORKSPACE, null);
+    record(box, OTHER, null);
+    const collision = "4d8e2f11-7a73-4c95-8b20-9e1f5c3a7d64";
+    if (source === "database") withDatabase(box, collision);
+    if (source === "registry") record(box, collision, null);
+    const selected = await runInProcess(["workspace", "use", OTHER], box,
+      source === "environment" ? { UB_WORKSPACE_ID: collision, UB_HUB_URL: "local" } : {});
+    expect(selected.status, selected.output).toBe(0);
+    const command = selected.stdout.match(/^switch to previous workspace with: ub (.+)$/m)?.[1];
+    expect(command).toBe(`workspace use ${WORKSPACE.slice(0, 10)}`);
+    const restored = await runInProcess(command!.split(" "), box);
+    expect(restored.status, restored.output).toBe(0);
+    expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: null });
+  });
+
+  it("keeps a successful selection and prints a full UUID if inventory reading fails after publication", () => {
+    const box = sandbox();
+    bind(box, `notes-${WORKSPACE}`, null);
+    record(box, WORKSPACE, null);
+    record(box, OTHER, null);
+    const preload = join(box.cwd, "refuse-output-inventory.mjs");
+    writeFileSync(preload, `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const rename = fs.renameSync;
+const readdir = fs.readdirSync;
+let published = false;
+fs.renameSync = (source, destination) => {
+  const result = rename(source, destination);
+  if (String(destination).endsWith(".uberblick.json")) published = true;
+  return result;
+};
+fs.readdirSync = (...args) => {
+  if (published) throw new Error("inventory became unreadable");
+  return readdir(...args);
+};
+syncBuiltinESMExports();
+`);
+    const result = runUb(["workspace", "use", OTHER], box, { NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` });
+    expect(result.status, result.output).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: null });
+    expect(result.stdout).toContain(`\n\nswitch to previous workspace with: ub workspace use ${WORKSPACE}\n`);
   });
 
   it.each(["unbound", "different", "unchanged"])(
@@ -989,8 +1037,8 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
       const selected = await runInProcess(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
       expect(selected.status, selected.output).toBe(0);
       expect(selected.stdout).toContain(`previous   ${WORKSPACE} (https://hub.example.test)\n`);
-      expect(selected.stdout).toContain(`switch back with: ub workspace use ${HUB}/${WORKSPACE}\n`);
-      expect(selected.stdout).not.toContain(`switch back with: ub workspace use ${WORKSPACE}\n`);
+      expect(selected.stdout).toContain(`\n\nswitch to previous workspace with: ub workspace use ${HUB}/${WORKSPACE}\n`);
+      expect(selected.stdout).not.toContain(`switch to previous workspace with: ub workspace use ${WORKSPACE}\n`);
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
       // An id selects what this machine recorded; it cannot replace that record
       // with the former project's hub. Recovery must fetch the printed link.
@@ -1011,9 +1059,9 @@ globalThis.fetch = () => { throw new Error("use by id must stay local"); };
       expect(selected.status, selected.output).toBe(0);
       expect(selected.stdout).toContain(`previous   ${WORKSPACE} (local)\n`);
       expect(selected.stdout).toContain(
-        `Switch back for this session: UB_WORKSPACE_ID=${WORKSPACE} UB_HUB_URL=local ub open\n`,
+        `\n\nswitch to previous workspace for this session with: UB_WORKSPACE_ID=${WORKSPACE} UB_HUB_URL=local ub open\n`,
       );
-      expect(selected.stdout).not.toContain("switch back with:");
+      expect(selected.stdout).not.toContain("switch to previous workspace with:");
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
     },
   );

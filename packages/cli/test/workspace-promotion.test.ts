@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
+import { parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 
 const hubs: Hub[] = [];
 afterEach(async () => {
@@ -33,7 +34,7 @@ async function localWorkspace(name = "Project notes") {
   expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   return box;
 }
-async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin", hubAdmin = true) {
+async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin", hubAdmin = true, endpointPath = "") {
   const hub = await createHub({ port: 0, address: "127.0.0.1", databasePath: join(sandbox().cwd, "hub.sqlite"),
     github: { clientId: "Iv1.0123456789abcdef", fetch: async () => { throw new Error("GitHub should not be called with a working login"); } },
     log: silentLogger, debounce: 10, maxDebounce: 20,
@@ -45,7 +46,7 @@ async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin", h
   if (role !== null) hub.memberships!.grant({ workspaceId: administered, principalId: identity.id, role });
   const credential = issueCredential(hub.credentials!, { principalId: identity.id, deviceId: randomUUID(), workspaces: role === null ? [] : [administered] });
   const login: StoredHubLogin = { identity, credential: { record: credential.record, key: Buffer.from(credential.keyBytes).toString("base64url") } };
-  const endpoint = `ws://127.0.0.1:${hub.port}`;
+  const endpoint = `ws://127.0.0.1:${hub.port}${endpointPath}`;
   await writeHubLogin(`http://127.0.0.1:${hub.port}`, login, box.env);
   return { hub, endpoint, login, administered };
 }
@@ -131,8 +132,8 @@ describe("workspace creation and promotion", () => {
       `created    Second (${selected(box).workspaceId}, local)\n` +
       `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
       `previous   ${previous.workspaceId} (https://old.example.test)\n` +
-      `switch back with: ub workspace use ${previous.workspaceId}\n` +
-      "open it with: ub open\n",
+      `\nswitch to previous workspace with: ub workspace use ${previous.workspaceId.slice(0, 8)}\n` +
+      "open the new workspace with: ub open\n",
     );
     const switched = await runInProcess(["workspace", "use", previous.workspaceId], box);
     expect(switched.status, switched.output).toBe(0);
@@ -231,7 +232,7 @@ describe("workspace creation and promotion", () => {
     }
   });
 
-  it.each(["admin", "member", null] as const)("uploads the same history for a hub administrator with prior workspace role %s and joins from a machine with no local workspace", async role => {
+  it.each([["admin", ""], ["member", "/ws"], [null, "/proxy/"]] as const)("uploads history for a hub administrator with prior workspace role %s through %s and joins the printed share link on another machine", async (role, endpointPath) => {
     const box = await localWorkspace();
     const local = createMcpServer(offline(box));
     try {
@@ -240,7 +241,7 @@ describe("workspace creation and promotion", () => {
       setWorkspaceMainRepository(local.replicas.settings().doc, "acme/main-repository");
     } finally { await local.close(); }
     const expected = await syncWorkspace(offline(box));
-    const { hub, endpoint, login, administered } = await hubFor(box, role);
+    const { hub, endpoint, login, administered } = await hubFor(box, role, true, endpointPath);
     const before = accessRows(hub);
     // An earlier no-access check must not suppress renewal after the grant.
     expect((await ensureDeviceLogin(endpoint, selected(box).workspaceId, { env: box.env })).status).toBe("no-access");
@@ -249,13 +250,27 @@ describe("workspace creation and promotion", () => {
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).toContain("environment binding still takes precedence");
     expect(result.stderr).not.toContain("ub mcp install");
-    expect(result.stdout).toContain(`ub workspace use ${endpoint}/${selected(box).workspaceId}`);
+    const displayHub = endpointPath === "" ? endpoint : endpointPath === "/ws" ? endpoint.replace("ws:", "http:").slice(0, -3) : endpoint.replace("ws:", "http:");
+    const workspaceId = selected(box).workspaceId;
+    const shareLink = result.stdout.match(/^share link: (.+)$/m)?.[1];
+    expect(result.stdout).toBe(
+      `uploading  Project notes (${workspaceId}) to ${displayHub}\n` +
+      `verified   ${expected.entries.length} documents, including archived ones\n` +
+      `promoted   Project notes (${workspaceId}, ${displayHub})\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n\n` +
+      `share link: ${displayHub}/${workspaceId}\n` +
+      "commit .uberblick.json so teammates only need `ub auth login` to access it\n",
+    );
+    expect(shareLink).toBe(`${displayHub}/${workspaceId}`);
+    expect(parseJoinTarget(shareLink!)).toEqual({ endpoint, workspace: workspaceId });
+    expect(result.stderr).not.toContain("Uploading workspace");
+    expect(result.stdout).not.toContain("switch");
     expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
-    expect(privateConfig.hubAdmissions).toEqual({ [`${endpoint}/`]: "device" });
+    expect(privateConfig.hubAdmissions).toEqual({ [new URL(endpoint).href]: "device" });
     const remote = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
     expect(remote.missing).toEqual([]);
     expect(remote.entries.filter(entry => entry.deleted)).toHaveLength(1);
@@ -272,7 +287,7 @@ describe("workspace creation and promotion", () => {
     const freshCredential = issueCredential(hub.credentials!, { principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
-    const joined = await runInProcess(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other,
+    const joined = await runInProcess(["workspace", "use", shareLink!], other,
       { UB_TEST_MAX_WAIT_MS: "5000" });
     expect(joined.status, joined.output).toBe(0);
     expect(selected(other).workspaceId).toBe(selected(box).workspaceId);

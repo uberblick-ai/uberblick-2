@@ -4,6 +4,7 @@ import type { ProjectBinding } from "@uberblick/mcp-server/project-binding";
 import type { Origin } from "@uberblick/mcp-server/project-config";
 import { readWorkspaceHub } from "@uberblick/mcp-server/workspace-registry";
 import { shellArgument } from "./io.js";
+import { shortWorkspaceId } from "./workspace-inventory.js";
 
 export function displayWorkspaceHub(hub: string | null): string {
   if (hub === null) return "local";
@@ -36,13 +37,13 @@ export function useBindingLines(binding: ProjectBinding, previous: ProjectBindin
   let text = useField(label, workspaceLabel(binding)) + useField("wrote", path);
   if (previous === null || (parseWorkspaceId(previous.workspaceId).uuid === parseWorkspaceId(binding.workspaceId).uuid &&
       previous.hubUrl === binding.hubUrl)) return text;
-  text += useField("previous", workspaceLabel(previous));
+  text += `${useField("previous", workspaceLabel(previous))}\n`;
   if (readWorkspaceHub(previous.workspaceId) === previous.hubUrl) {
-    text += `switch back with: ub workspace use ${shellArgument(previous.workspaceId)}\n`;
+    text += `switch to previous workspace with: ub workspace use ${shortWorkspaceId(previous.workspaceId)}\n`;
   } else if (previous.hubUrl !== null) {
-    text += `switch back with: ub workspace use ${shellArgument(`${previous.hubUrl}/${previous.workspaceId}`)}\n`;
+    text += `switch to previous workspace with: ub workspace use ${shellArgument(`${previous.hubUrl}/${previous.workspaceId}`)}\n`;
   } else {
-    text += `Switch back for this session: UB_WORKSPACE_ID=${previous.workspaceId} UB_HUB_URL=local ub open\n`;
+    text += `switch to previous workspace for this session with: UB_WORKSPACE_ID=${previous.workspaceId} UB_HUB_URL=local ub open\n`;
   }
   return text;
 }

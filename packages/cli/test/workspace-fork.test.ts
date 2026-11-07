@@ -76,19 +76,59 @@ syncBuiltinESMExports();
     expect(result.stdout).toContain(`forked     Source notes (${fork.workspaceId}, local)`);
     expect(result.stdout).toContain(`wrote      ${join(box.cwd, ".uberblick.json")}`);
     expect(result.stdout).toContain(`previous   Source notes (${binding.workspaceId}, local)`);
-    expect(result.stdout).toContain(`switch back with: ub workspace use ${binding.workspaceId}`);
+    expect(result.stdout).toContain(`\n\nswitch to previous workspace with: ub workspace use ${binding.workspaceId.slice(0, 8)}\n`);
     expect(stored(config.databasePath)).toEqual(before);
     expect(readFileSync(credentials)).toEqual(credentialBytes);
     const status = await runInProcess(["status", "--json"], box);
     expect(status.status, status.output).toBe(0);
     expect(status.stdout).toContain(fork.workspaceId);
     expect(JSON.parse(status.stdout).hub).toBeNull();
-    const switched = await runInProcess(["workspace", "use", binding.workspaceId], box);
+    const switched = await runInProcess(["workspace", "use", binding.workspaceId.slice(0, 8)], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(binding);
     appendBlock(source.replicas.replica(docId).doc, { type: "paragraph", text: "Source remains writable" });
     expect(stored(config.databasePath).updates.length).toBeGreaterThan(before.updates.length);
   } finally { await source.close(); }
+});
+
+it.each(["create", "fork"])("counts the newly created database when printing %s's switch-back prefix", async command => {
+  const { box, binding } = await localSource();
+  const nextUuid = `${binding.workspaceId.slice(0, 9)}${binding.workspaceId[9] === "0" ? "1" : "0"}${binding.workspaceId.slice(10)}`;
+  const preload = join(box.cwd, "colliding-workspace.mjs");
+  writeFileSync(preload, `
+import crypto from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
+crypto.randomUUID = () => ${JSON.stringify(nextUuid)};
+syncBuiltinESMExports();
+`);
+  const result = runUb(["workspace", command, ...(command === "create" ? ["Next", "--empty"] : [])], box,
+    { NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` });
+  expect(result.status, result.output).toBe(0);
+  expect(selected(box)).toEqual({ workspaceId: nextUuid, hubUrl: null });
+  const target = result.stdout.match(/^switch to previous workspace with: ub workspace use (.+)$/m)?.[1];
+  expect(target).toBe(binding.workspaceId.slice(0, 10));
+  const restored = await runInProcess(["workspace", "use", target!], box);
+  expect(restored.status, restored.output).toBe(0);
+  expect(selected(box)).toEqual(binding);
+});
+
+it("prints the hub-connected switch-back form when forking a hub workspace", async () => {
+  const { box, binding } = await localSource();
+  const hubUrl = "wss://source.example.test/ws";
+  const previous = { ...binding, hubUrl };
+  writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify(previous));
+  writeFileSync(workspaceRegistryPath(box.env), JSON.stringify({ [binding.workspaceId]: hubUrl }));
+  const result = await runInProcess(["workspace", "fork"], box);
+  expect(result.status, result.output).toBe(0);
+  expect(result.stdout).toBe(
+    `forked     Source notes (${selected(box).workspaceId}, local)\n` +
+    `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
+    `previous   Source notes (${binding.workspaceId}, https://source.example.test)\n\n` +
+    `switch back to the hub connected workspace with: ub workspace use ${binding.workspaceId.slice(0, 8)}\n`,
+  );
+  const restored = await runInProcess(["workspace", "use", binding.workspaceId.slice(0, 8)], box);
+  expect(restored.status, restored.output).toBe(0);
+  expect(selected(box)).toEqual(previous);
 });
 
 it.each(["wss://source.example.test/ws", "ws://127.0.0.1:1", "wss://source.example.test/proxy/"])("names every missing document and preserves recovery endpoint %s before creating a database", async (hub) => {
@@ -187,7 +227,7 @@ it("leaves an unrecorded source unrecorded and warns when environment selection 
   expect(readWorkspaceHub(binding.workspaceId, box.env)).toBeUndefined();
   expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   expect(result.stderr).toContain("environment binding still takes precedence");
-  expect(result.stdout).toContain(`switch back with: ub workspace use ${binding.workspaceId}`);
+  expect(result.stdout).toContain(`\n\nswitch to previous workspace with: ub workspace use ${binding.workspaceId.slice(0, 8)}\n`);
   const switched = await runInProcess(["workspace", "use", binding.workspaceId], box);
   expect(switched.status, switched.output).toBe(0);
   expect(selected(box)).toEqual(binding);

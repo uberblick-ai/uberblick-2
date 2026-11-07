@@ -49,7 +49,7 @@ it.each([
   expect(result.stdout).toBe(
     `created    Project notes (${selected(box)}, local)\n` +
     `wrote      ${join(box.cwd, ".uberblick.json")}\n` +
-    "open it with: ub open\n",
+    "open the new workspace with: ub open\n",
   );
   expect(result.stderr).toBe("");
   expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")))
