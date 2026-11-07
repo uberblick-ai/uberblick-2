@@ -219,8 +219,15 @@ test("The playback chunk loads only after the first play section, and a local so
     await block.getByRole("button", { name: "Open ablauf source", exact: true }).click();
   }
   await expect(source).toBeVisible();
-  const edited = `${PLAYED}\n# Local source edit`;
-  await source.fill(edited);
+  const addedCaption = ' actor="Local author" "Local source edit"';
+  const edited = `${PLAYED}${addedCaption}`;
+  await source.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await expect.poll(() => source.evaluate(element => {
+    const selection = element.ownerDocument.getSelection();
+    return selection?.isCollapsed === true && selection.focusNode !== null && element.contains(selection.focusNode);
+  })).toBe(true);
+  await page.keyboard.insertText(addedCaption);
   await waitForDocumentDraw(page, session, uuid, { source: edited });
   await expect(controls(block)).toBeVisible();
   await expect(toggle(block)).toHaveText("Play");
