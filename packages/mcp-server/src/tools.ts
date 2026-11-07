@@ -20,6 +20,7 @@ export function registerTools(
   replicas: Replicas,
   work: ServerWork,
   waitForWriteAcknowledgement = false,
+  assertWriteScope?: () => void,
 ): HelpCatalog {
   const help = new HelpCatalog();
   const context = createToolContext(replicas, work, help);
@@ -30,7 +31,7 @@ export function registerTools(
       inputSchema: tool.input,
       outputSchema: tool.output,
       annotations: tool.annotations,
-    }, guarded(tool, context, waitForWriteAcknowledgement));
+    }, guarded(tool, context, waitForWriteAcknowledgement, assertWriteScope));
     captureTool(help, tool, registered);
   }
   return help;

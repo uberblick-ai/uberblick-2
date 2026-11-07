@@ -18,6 +18,7 @@ import { SHUTDOWN_CLOSE_RESERVE_MS, SHUTDOWN_TIMEOUT_MS } from "./shutdown.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { startupInstructions } from "./startup-instructions.js";
 import { registerTools } from "./tools.js";
+import { tools } from "./tool-table.js";
 import { mcpVersion } from "./version.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
 import { startHistoryRefresher } from "./history-refresher.js";
@@ -59,6 +60,9 @@ export interface UberblickMcpServer extends Omit<UberblickMcpSession, "close"> {
 export interface McpSessionOptions {
   /** Notify the host after tool lookup, argument validation and execution finish. */
   onToolCallFinished?: (requestId: RequestId) => void;
+  /** Filter tools/list using the SDK's auth context for that request. */
+  hostedScope?: boolean;
+  assertWriteScope?: () => void;
 }
 
 export interface McpRuntimeOptions {
@@ -153,11 +157,10 @@ function openSession(
   config: McpConfig,
   replicas: Replicas,
   store: MirrorStore,
-  runtime: {
+  runtime: McpSessionOptions & {
     seed(): Promise<void>;
     initializedClientIdentity: boolean;
     waitForWriteAcknowledgement: boolean;
-    onToolCallFinished?: (requestId: RequestId) => void;
     released(session: UberblickMcpSession): void;
   },
 ): UberblickMcpSession {
@@ -177,25 +180,32 @@ function openSession(
       replicas.setWriteSurface({ kind: "mcp", name: mcpSurfaceName(server.server.getClientVersion()) });
     };
   }
-  if (runtime.onToolCallFinished !== undefined) {
+  if (runtime.onToolCallFinished !== undefined || runtime.hostedScope) {
     const onToolCallFinished = runtime.onToolCallFinished;
     const setRequestHandler = server.server.setRequestHandler.bind(server.server);
     server.server.setRequestHandler = (schema, handler) => {
-      if (getMethodLiteral(schema) !== "tools/call") {
+      const method = getMethodLiteral(schema);
+      if (method !== "tools/call" && !(runtime.hostedScope && method === "tools/list")) {
         setRequestHandler(schema, handler);
         return;
       }
       setRequestHandler(schema, async (request, extra) => {
         try {
-          return await handler(request, extra);
+          const result = await handler(request, extra);
+          if (method === "tools/list" && !extra.authInfo?.scopes.includes("docs:write") &&
+              "tools" in result && Array.isArray(result.tools)) {
+            return { ...result, tools: result.tools.filter((listed: { name: string }) =>
+              tools.some(tool => tool.name === listed.name && tool.writes === null)) };
+          }
+          return result;
         } finally {
           // Cancellation suppresses the SDK's reply without ending its handler.
-          onToolCallFinished(extra.requestId);
+          if (method === "tools/call") onToolCallFinished?.(extra.requestId);
         }
       });
     };
   }
-  const help = registerTools(server, replicas, work, runtime.waitForWriteAcknowledgement);
+  const help = registerTools(server, replicas, work, runtime.waitForWriteAcknowledgement, runtime.assertWriteScope);
   registerHelpResources(server, help, work);
   let closed = false;
   let closing: Promise<void> | null = null;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { MCP_SOCKET_TIMEOUT_MS } from "@uberblick/hub/mcp-channel";
 import { isUuid } from "@uberblick/schema";
@@ -9,12 +10,13 @@ import type { CredentialProvider } from "./credential-provider.js";
 import type { HostFreeSpace, McpHostLimits } from "./host-capacity.js";
 import { HostCalls } from "./host-calls.js";
 import { HostRuntimes, HostFullError, type HostRuntime } from "./host-runtimes.js";
-import { hostToolCallId, readHostPost } from "./host-request.js";
+import { hostCallsWrite, hostToolCallId, readHostPost } from "./host-request.js";
 import { hubTokenCheck, type McpHostGrant, type McpHostTokenCheck } from "./host-token-check.js";
 import { createHostCredentialManager } from "./host-credentials.js";
 import { startHostGrantCleanup } from "./host-grants.js";
 import { log } from "./log.js";
-import { handleProtectedResourceMetadata, replyMcpUnauthorized } from "./oauth-discovery.js";
+import { handleProtectedResourceMetadata, replyMcpInsufficientScope, replyMcpUnauthorized } from "./oauth-discovery.js";
+import { assertWriteScope } from "./tool-scope.js";
 import type { UberblickMcpRuntime, UberblickMcpSession } from "./server.js";
 import { SHUTDOWN_TIMEOUT_MS } from "./shutdown.js";
 
@@ -48,6 +50,7 @@ export interface HostSession {
   runtime: HostRuntime;
   lastActivity: number;
   requests: number;
+  scope: readonly string[];
 }
 
 // Leave room for the hub's absolute reply deadline inside the stream's 30-second bound.
@@ -115,6 +118,29 @@ function watchStream(record: HostSession, response: ServerResponse, token: strin
   schedule(checkedAt);
 }
 
+async function post(
+  record: HostSession, request: IncomingMessage, response: ServerResponse, scope: readonly string[],
+  admission: { calls: HostCalls; issuer: string | undefined; stopping(): boolean },
+): Promise<void> {
+  record.requests += 1;
+  let parsed: Awaited<ReturnType<typeof readHostPost>>;
+  try { parsed = await readHostPost(request); }
+  finally { record.requests -= 1; }
+  if ("status" in parsed) return reply(response, parsed.status);
+  if (record.closed) return reply(response, 404);
+  if (!scope.includes("docs:write") && hostCallsWrite(parsed.body)) {
+    return replyMcpInsufficientScope(response, admission.issuer, record.workspace);
+  }
+  if (admission.calls.hasDuplicate(record, parsed.calls)) return reply(response, 400);
+  if (admission.stopping() || !admission.calls.hasCapacity(parsed.calls.length)) return reply(response, 503);
+  const releaseUndispatched = admission.calls.reserve(record, parsed.calls);
+  try {
+    await record.transport.handleRequest(request, response, parsed.body);
+  } finally {
+    releaseUndispatched();
+  }
+}
+
 /** Compose HTTP admission with the same runtime and session tools as stdio. */
 export function createMcpHost(config: McpHostConfig, dependencies: McpHostDependencies = {}) {
   const checkToken = dependencies.checkToken ?? hubTokenCheck(config.hubMcpSocket);
@@ -177,13 +203,21 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
       return replyMcpUnauthorized(response, config.issuer, workspace);
     }
     if (stopping) return reply(response, 503);
+    const scope = answer.scope.split(" ");
+    Object.assign(request, { auth: { token, clientId: answer.grantId, scopes: scope } satisfies AuthInfo });
     const id = request.headers["mcp-session-id"];
     if (id !== undefined) {
       const record = typeof id === "string" ? sessions.get(id) : undefined;
       if (record === undefined || record.closed || record.grantId !== answer.grantId || record.workspace !== workspace) {
         return reply(response, 404);
       }
-      await handleSession(record, request, response, token, checkedAt);
+      const changed = record.scope.length !== scope.length || scope.some(value => !record.scope.includes(value));
+      record.scope = scope;
+      if (changed) {
+        // known limit: list changes reach clients only over an open stream; revisit when the transport supports replay.
+        record.session.server.sendToolListChanged();
+      }
+      await handleSession(record, request, response, token, checkedAt, scope);
       return;
     }
     if (request.method !== "POST") return reply(response, 400);
@@ -193,6 +227,9 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
   async function initializePost(grant: McpHostGrant, request: IncomingMessage, response: ServerResponse): Promise<void> {
     const parsed = await readHostPost(request);
     if ("status" in parsed) return reply(response, parsed.status);
+    if (!grant.scope.split(" ").includes("docs:write") && hostCallsWrite(parsed.body)) {
+      return replyMcpInsufficientScope(response, config.issuer, grant.workspace);
+    }
     await sweepIdle();
     if (stopping || !calls.hasCapacity(parsed.calls.length) || allSessions.size + openingSessions >= limits.maxSessions) {
       return reply(response, 503);
@@ -201,7 +238,7 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     await initializeSession(grant, request, response, parsed.body);
   }
 
-  async function handleSession(record: HostSession, request: IncomingMessage, response: ServerResponse, token: string, checkedAt: number): Promise<void> {
+  async function handleSession(record: HostSession, request: IncomingMessage, response: ServerResponse, token: string, checkedAt: number, scope: readonly string[]): Promise<void> {
     if (request.method === "GET") {
       watchStream(record, response, token, checkedAt, checkToken);
       await record.transport.handleRequest(request, response);
@@ -209,29 +246,12 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     }
     record.lastActivity = now();
     runtimes.touch(record.runtime);
-    if (request.method === "POST") return post(record, request, response);
+    if (request.method === "POST") return post(record, request, response, scope, { calls, issuer: config.issuer, stopping: () => stopping });
     record.requests += 1;
     try {
       await record.transport.handleRequest(request, response);
     } finally {
       record.requests -= 1;
-    }
-  }
-
-  async function post(record: HostSession, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    record.requests += 1;
-    let parsed: Awaited<ReturnType<typeof readHostPost>>;
-    try { parsed = await readHostPost(request); }
-    finally { record.requests -= 1; }
-    if ("status" in parsed) return reply(response, parsed.status);
-    if (record.closed) return reply(response, 404);
-    if (calls.hasDuplicate(record, parsed.calls)) return reply(response, 400);
-    if (stopping || !calls.hasCapacity(parsed.calls.length)) return reply(response, 503);
-    const releaseUndispatched = calls.reserve(record, parsed.calls);
-    try {
-      await record.transport.handleRequest(request, response, parsed.body);
-    } finally {
-      releaseUndispatched();
     }
   }
 
@@ -249,10 +269,14 @@ export function createMcpHost(config: McpHostConfig, dependencies: McpHostDepend
     }
     if (stopping || grantCleanup?.hasEnded(grant.grantId)) return reply(response, 503);
     runtimes.touch(owner);
-    const session = runtime.openSession({ onToolCallFinished: id => calls.finished(record, id) });
+    const session = runtime.openSession({
+      onToolCallFinished: id => calls.finished(record, id),
+      hostedScope: true,
+      assertWriteScope: () => assertWriteScope(record.scope),
+    });
     const record: HostSession = {
       grantId: grant.grantId, workspace: grant.workspace, session, closed: false, streams: new Set(),
-      runtime: owner, lastActivity: now(), requests: 1,
+      runtime: owner, lastActivity: now(), requests: 1, scope: grant.scope.split(" "),
       transport: new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         onsessioninitialized(id) { if (!record.closed) sessions.set(id, record); },

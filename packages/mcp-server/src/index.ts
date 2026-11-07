@@ -34,7 +34,7 @@ export { readWorkspaceFork, writeWorkspaceFork } from "./workspace-fork.js";
 export type { WorkspaceForkSnapshot } from "./workspace-fork.js";
 export { readDocumentHistory, readDocumentRevision, requireDocumentHistory, mutateDocumentRevision, restoreDocumentRevision, documentRevisionChecksum, RevisionClientError } from "./revision-client.js";
 export type { HistoryReadStatus } from "./revision-client.js";
-export type { RevisionClientFailure, RevisionReadOptions } from "./revision-client.js";
+export type { RevisionClientFailure, RevisionReadOptions, RevisionMutationOptions } from "./revision-client.js";
 export { detachWorkspaceCopy, inspectExistingStore, readStoredSyncStatus, readWorkspaceName, WorkspaceDetachedError, WorkspaceRemovedError } from "./store.js";
 export { captureWorkspaceDetachGeneration } from "./workspace-generation.js";
 export { parseHistoryRetention } from "./local-settings.js";

@@ -1435,12 +1435,13 @@ export class HubSync {
     room: string,
     operation: Omit<RevisionRequest, "requestId">,
     timeoutMs = 5_000,
-    options: { background?: boolean } = {},
+    options: { background?: boolean; assertWriteScope?: (() => void) | undefined } = {},
   ): Promise<RevisionResponse> {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
       return Promise.reject(new RangeError("Revision timeout must be between 1 and 2147483647 milliseconds."));
     }
     if (this.config.localWorkspace === true) return Promise.reject(new RevisionClientError("local-only"));
+    const mutation = operation.operation !== "list" && operation.operation !== "get";
     const requestId = randomUUID();
     const readResponse = createRevisionResponseReader(requestId);
     return new Promise<RevisionResponse>((resolve, reject) => {
@@ -1457,7 +1458,7 @@ export class HubSync {
       };
       const fail = (code: ConstructorParameters<typeof RevisionClientError>[0]) => {
         cleanup();
-        if (sent && operation.operation !== "list" && operation.operation !== "get") {
+        if (sent && mutation) {
           reject(new RevisionClientError(operation.operation === "restore" ? "restore-outcome-unknown" : "naming-outcome-unknown",
             { applied: null, reason: code }));
           return;
@@ -1477,10 +1478,12 @@ export class HubSync {
         // Admission is sufficient for a read-only client; update acknowledgements
         // and queued writes are unrelated to whether it may request history.
         if (provider?.hasCurrentSync() !== true) return;
-        if (options.background === true && (operation.operation === "list" || operation.operation === "get") && !this.isQuiet()) return;
-        if (operation.operation !== "list" && operation.operation !== "get") {
+        if (options.background === true && !mutation && !this.isQuiet()) return;
+        if (mutation) {
           if (!this.isRoomQuiet(room)) { fail("stale-state"); return; }
           if (!this.canWriteRoom(room)) { fail("forbidden"); return; }
+          try { options.assertWriteScope?.(); }
+          catch (error) { cleanup(); reject(error); return; }
         }
         sent = true;
         generation = this.socketGeneration;

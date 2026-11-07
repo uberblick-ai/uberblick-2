@@ -2,6 +2,16 @@ import { Readable } from "node:stream";
 import type { IncomingMessage } from "node:http";
 import { readRequestBody } from "@modelcontextprotocol/sdk/server/requestBody.js";
 import { CallToolRequestSchema, isJSONRPCRequest, JSONRPCMessageSchema, type RequestId } from "@modelcontextprotocol/sdk/types.js";
+import { tools } from "./tool-table.js";
+
+/** A whole POST is refused if any message attempts a writing tool. */
+export function hostCallsWrite(body: unknown): boolean {
+  const messages = Array.isArray(body) ? body : [body];
+  return messages.some(message => {
+    const call = CallToolRequestSchema.safeParse(message);
+    return call.success && tools.some(tool => tool.name === call.data.params.name && tool.writes !== null);
+  });
+}
 
 /** Only executable tool requests consume call slots; the SDK refuses other shapes. */
 export function hostToolCallId(message: unknown): RequestId | undefined {
