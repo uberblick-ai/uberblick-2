@@ -557,7 +557,7 @@ export const tools: readonly Tool[] = [
       "topic: true or refuses with decision_delete_unsupported. A record that joined after archiving also refuses " +
       "until the topic is restored and archived again, or use topic: true. Live topics/documents refuse with doc_not_archived; " +
       "deleted UUIDs with doc_deleted. Deletes content, comments, data and history; " +
-      "evidence keeps UUIDs plus a deleted record's topic/predecessor references. Offline restores cannot undo deletion. " +
+      "evidence keeps UUIDs plus a deleted record's topic/predecessor references and own archive flag when present. Offline restores cannot undo deletion. " +
       "Other documents keep stored links. Directory/sidebar writes report independent durability. MCP archive_doc " +
       "always archives whole topics.",
     input: deleteDocInput,

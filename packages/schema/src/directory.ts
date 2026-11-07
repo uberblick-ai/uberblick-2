@@ -227,10 +227,8 @@ export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
       if (entry?.kind === "decision" && entry.topic !== undefined && entry.topic !== uuid &&
         deleted.has(entry.topic) && topics.get(uuid) !== entry.topic) topics.set(uuid, entry.topic);
       if (marks.get(uuid) !== true) marks.set(uuid, true);
-      const record = deletedDecisionRecord(dirDoc, uuid);
-      docs.delete(uuid);
+      if (docs.has(uuid)) docs.delete(uuid);
       dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).delete(uuid);
-      if (record !== null) dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).delete(uuid);
     }
     const stamps = getUpdatedAtMap(dirDoc);
     for (const key of stamps.keys()) {

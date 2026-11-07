@@ -239,7 +239,7 @@ describe("permanent decision record deletion", () => {
     } finally { directory.destroy(); }
   });
 
-  it("keeps only the UUID mark and graph edges, never a metadata witness", () => {
+  it("keeps only the UUID mark, graph edges and own archive flag, never a metadata witness", () => {
     const directory = new Y.Doc();
     const compacted = new Y.Doc();
     try {
@@ -249,10 +249,12 @@ describe("permanent decision record deletion", () => {
         supersedes: CURRENT, status: "open", description: "private deleted description", answerPreview: "private deleted answer",
         related: [RELATED], updatedAt: 123, commentCount: 2,
       });
+      expect(tombstoneDecisionRecord(directory, LATE)).toBe(true);
       tombstoneDirectoryEntry(directory, TOPIC);
       expect(deleteDecisionRecord(directory, LATE)).toBe(true);
       expect(directory.getMap("deleted-docs").get(LATE)).toBe(true);
       expect(getDirectoryMap(directory).has(LATE)).toBe(false);
+      expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(LATE)).toBe(true);
       expect(directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).get(LATE)).toEqual({ topic: TOPIC, supersedes: CURRENT });
       expect(directory.getMap("decision-related-pages").has(LATE)).toBe(false);
       expect([...directory.getMap("updatedAt").keys()].some((key) => key.startsWith(LATE))).toBe(false);
@@ -266,16 +268,17 @@ describe("permanent decision record deletion", () => {
     } finally { directory.destroy(); compacted.destroy(); }
   });
 
-  it("removes a separately archived record's archive mark and keeps whole-topic deletion intact", () => {
+  it("retains a separately archived record's archive mark through record and whole-topic deletion", () => {
     const directory = new Y.Doc();
     try {
       seed(directory);
       expect(tombstoneDecisionRecord(directory, FORMER)).toBe(true);
       tombstoneDirectoryEntry(directory, TOPIC);
       expect(deleteDecisionRecord(directory, FORMER)).toBe(true);
-      expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).has(FORMER)).toBe(false);
+      expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(FORMER)).toBe(true);
       deleteDecisionTopic(directory, TOPIC);
       expect(getDirectoryMap(directory).has(FORMER)).toBe(false);
+      expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(FORMER)).toBe(true);
       expect(resolveDecisionTopics(directory)).toEqual([]);
     } finally { directory.destroy(); }
   });

@@ -4,16 +4,22 @@ import {
   deleteDecisionTopic,
   deleteDecisionRecord,
   deleteDirectoryEntry,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
   DIRECTORY_DELETED_DECISION_RECORDS_KEY,
+  DIRECTORY_RELATED_PAGES_KEY,
   directoryRoom,
   enforceDeletedDirectoryEntries,
   getDirectoryEntry,
   initDoc,
   isDirectoryEntryDeleted,
   parseRoom,
+  repairDirectoryStub,
   roomForDoc,
   resolveDecisionTopics,
+  restoreDirectoryEntry,
   setKind,
+  setStatus,
+  tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -41,20 +47,20 @@ async function load(database: HubDatabase, room: string): Promise<Document> {
   return document;
 }
 
-function initialize(document: Y.Doc, uuid: string, topic?: string): void {
+function initialize(document: Y.Doc, uuid: string, topic?: string, options: { related?: string[]; supersedes?: string } = {}): void {
   document.transact(() => {
     initDoc(document, { uuid, title: "Original content", ...(topic === undefined ? {} : {
-      topic, ...(uuid === topic ? {} : { supersedes: topic }),
+      topic, ...(uuid === topic ? {} : { supersedes: topic }), ...options,
     }) });
     if (topic !== undefined) setKind(document, "decision");
     document.getText("body").insert(0, "Retained room content");
   }, { attribution: { author } });
 }
 
-async function create(database: HubDatabase, topic?: string): Promise<Document> {
+async function create(database: HubDatabase, topic?: string, options: { related?: string[]; supersedes?: string } = {}): Promise<Document> {
   const room = testRoom();
   const document = await load(database, room);
-  initialize(document, parseRoom(room).uuid, topic === "self" ? parseRoom(room).uuid : topic);
+  initialize(document, parseRoom(room).uuid, topic === "self" ? parseRoom(room).uuid : topic, options);
   await database.onStoreDocument({ document, documentName: room });
   return document;
 }
@@ -227,6 +233,57 @@ describe("hub-owned deletion classification", () => {
     documents.push(replica);
     Y.applyUpdate(replica, Y.encodeStateAsUpdate(directory));
     expect(resolveDecisionTopics(replica)).toEqual(before);
+  });
+
+  it("preserves a separately archived record and repairs its related pages when a topic restore makes its deletion refuse", async () => {
+    const database = open();
+    const related = [parseRoom(testRoom()).uuid, parseRoom(testRoom()).uuid];
+    const topic = await create(database, "self");
+    const topicUuid = parseRoom(topic.name).uuid;
+    const record = await create(database, topicUuid, { related });
+    const uuid = parseRoom(record.name).uuid;
+    const successor = await create(database, topicUuid, { supersedes: uuid });
+    const successorUuid = parseRoom(successor.name).uuid;
+    const directory = await load(database, directoryRoom(WORKSPACE));
+    for (const document of [topic, record, successor]) {
+      setStatus(document, "decided");
+      await database.onStoreDocument({ document, documentName: document.name });
+      repairDirectoryStub(document, directory, parseRoom(document.name).uuid, { now: 0, changedAt: null, coarsenessMs: 0 });
+    }
+    expect(resolveDecisionTopics(directory)[0]?.inForce?.uuid).toBe(successorUuid);
+    expect(tombstoneDecisionRecord(directory, uuid)).toBe(true);
+    tombstoneDirectoryEntry(directory, topicUuid);
+    const offline = new Y.Doc();
+    documents.push(offline);
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory));
+
+    restoreDirectoryEntry(directory, topicUuid);
+    const before = resolveDecisionTopics(directory);
+    const assertRetained = retained(database, record);
+    expect(deleteDecisionRecord(offline, uuid)).toBe(true);
+    expect(offline.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid)).toBe(true);
+    expect(offline.getMap(DIRECTORY_RELATED_PAGES_KEY).has(uuid)).toBe(false);
+    Y.applyUpdate(directory, Y.encodeStateAsUpdate(offline, Y.encodeStateVector(directory)));
+
+    assertRetained();
+    converged(directory, uuid);
+    expect(directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).has(uuid)).toBe(true);
+    expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid)).toBe(true);
+    expect(directory.getMap(DIRECTORY_RELATED_PAGES_KEY).has(uuid)).toBe(false);
+    repairDirectoryStub(record, directory, uuid, { now: 0, changedAt: null, coarsenessMs: 0 });
+    expect(getDirectoryEntry(directory, uuid)?.related).toEqual(related);
+    expect(resolveDecisionTopics(directory)).toEqual(before);
+    expect(resolveDecisionTopics(directory)[0]?.archived).toBe(false);
+    expect(resolveDecisionTopics(directory)[0]?.archivedRecords.map(entry => entry.uuid)).toEqual([uuid]);
+    expect(resolveDecisionTopics(directory)[0]?.inForce?.uuid).toBe(successorUuid);
+
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory));
+    expect(resolveDecisionTopics(offline)).toEqual(before);
+    const fresh = new Y.Doc();
+    documents.push(fresh);
+    Y.applyUpdate(fresh, Y.encodeStateAsUpdate(directory));
+    expect(resolveDecisionTopics(fresh)).toEqual(before);
+    assertRetained();
   });
 
   it("refuses a stale pre-archive metadata winner before accepting a record mark, retaining state and history", async () => {

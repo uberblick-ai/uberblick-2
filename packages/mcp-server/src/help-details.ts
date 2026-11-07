@@ -739,7 +739,7 @@ export const toolHelpDetails = {
     "MCP archive_doc always archives the whole topic; it never archives one record. After one record is deleted, " +
     "the topic resolves from its remaining records, and its successors supersede its predecessors. " +
     "Only permanent UUID deletion evidence remains in the directory, plus a deleted record's topic and " +
-    "predecessor references. The mark wins over concurrent or offline restores, " +
+    "predecessor references and its own archive flag when present. The mark wins over concurrent or offline restores, " +
     "renames, retags and stub repair. A missing directory entry never authorizes removing a copy. Hubs purge " +
     "the room and refuse all later connections and updates; replicas remove stored and in-memory copies when " +
     "they learn the mark or receive the deleted-room refusal, without an authentication error.\n\n" +
