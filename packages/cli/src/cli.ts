@@ -16,7 +16,7 @@ import {
   WORKSPACE_HELP, WORKSPACE_LIST_HELP, WORKSPACE_LIST_OPTIONS,
   WORKSPACE_REMOVE_HELP, WORKSPACE_REMOVE_OPTIONS, WORKSPACE_USE_HELP, WORKSPACE_USE_OPTIONS,
 } from "./workspace.js";
-import { createWorkspaceCommand, WORKSPACE_CREATE_HELP } from "./workspace-create.js";
+import { createWorkspaceCommand, WORKSPACE_CREATE_HELP, WORKSPACE_CREATE_OPTIONS } from "./workspace-create.js";
 import { forkWorkspaceCommand, WORKSPACE_FORK_HELP } from "./workspace-fork.js";
 import { detachWorkspaceCommand, WORKSPACE_DETACH_HELP } from "./workspace-detach.js";
 import { promoteWorkspaceCommand, WORKSPACE_PROMOTE_HELP } from "./workspace-promote.js";
@@ -84,7 +84,7 @@ export const COMMAND_TREE: CommandGroup = {
         positionals: { min: 1, max: 1, error: "expected one document and --file <path|->" }, run: updateDataCommand }),
     ] },
     { path: ["workspace"], help: WORKSPACE_HELP, children: [
-      command({ path: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {},
+      command({ path: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: WORKSPACE_CREATE_OPTIONS,
         positionals: { min: 1, max: 1, error: "expected exactly one workspace name" }, run: createWorkspaceCommand }),
       command({ path: ["workspace", "fork"], help: WORKSPACE_FORK_HELP, options: {}, positionals: false,
         run: (_args, io) => forkWorkspaceCommand(io) }),

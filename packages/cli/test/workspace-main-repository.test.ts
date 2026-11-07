@@ -36,13 +36,14 @@ async function repository(box: Sandbox, value?: string): Promise<string | null> 
 }
 
 it.each([
-  "https://github.com/Acme/notes.git",
-  "git@github.com:Acme/notes.git",
-  "ssh://git@github.com/Acme/notes.git",
-])("fills create from the checkout's origin %s", async origin => {
+  { origin: "https://github.com/Acme/notes.git", args: [] },
+  { origin: "git@github.com:Acme/notes.git", args: [] },
+  { origin: "ssh://git@github.com/Acme/notes.git", args: [] },
+  { origin: "https://github.com/Acme/notes.git", args: ["--empty"] },
+])("fills create from the checkout's origin $origin ($args)", async ({ origin, args }) => {
   const box = unboundSandbox();
   gitOrigin(box, origin);
-  const result = await runInProcess(["workspace", "create", "Project notes"], box);
+  const result = await runInProcess(["workspace", "create", "Project notes", ...args], box);
   expect(result.status, result.output).toBe(0);
   expect(await repository(box)).toBe("Acme/notes");
   expect(result.stdout).toBe(

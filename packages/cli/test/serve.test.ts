@@ -257,16 +257,29 @@ describe("ub mcp serve", () => {
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it("opens a newly created local workspace without a hub or login", async () => {
+  it.each([false, true])("opens a newly created local workspace without a hub or login: empty %s", async empty => {
     const box = unboundSandbox();
-    const created = await runUbAsync(["workspace", "create", "Local MCP"], box);
+    const created = await runUbAsync(["workspace", "create", "Local MCP", ...(empty ? ["--empty"] : [])], box);
     expect(created.status, created.output).toBe(0);
     const session = await connect(box);
     try {
       const result = await session.client.callTool({ name: "list_docs", arguments: {} });
       expect(result.isError).not.toBe(true);
       const content = result.content as { text: string }[];
-      expect(content[0]!.text).toContain("Welcome");
+      if (empty) {
+        expect(JSON.parse(content[0]!.text).docs).toEqual([]);
+        for (const [name, args, field] of [
+          ["list_docs", { include_deleted: true }, "docs"],
+          ["get_sidebar", {}, "groups"],
+        ] as const) {
+          const read = await session.client.callTool({ name, arguments: args });
+          expect(read.isError).not.toBe(true);
+          const content = read.content as { text: string }[];
+          expect(JSON.parse(content[0]!.text)[field]).toEqual([]);
+        }
+      } else {
+        expect(content[0]!.text).toContain("Welcome");
+      }
       expect(session.stderr()).not.toMatch(/sign.in required|HUB_AUTH_TOKEN missing/i);
     } finally { await session.close(); }
   });

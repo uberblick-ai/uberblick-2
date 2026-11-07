@@ -67,6 +67,13 @@ it("refuses an invalid explicit web port", async () => {
   expect(refused.stderr).toContain("--port must be an integer in 1..65535");
 });
 
+it("advertises empty workspace creation and what it skips", async () => {
+  const group = await dispatch(["workspace"]);
+  expect(group.stdout).toContain("create <name> [--empty]");
+  const create = await dispatch(["workspace", "create", "--help"]);
+  expect(create.stdout).toContain("--empty           skip the starter documents and their sidebar group");
+});
+
 /** As much of a `parseArgs` option map as this suite reads. */
 type Options = Readonly<
   Record<string, { readonly type: string; readonly short?: string | undefined }>
@@ -264,6 +271,7 @@ describe("help before the work", () => {
   }
 
   it.each([
+    ["workspace", "create", "--empty", "--help"],
     ["workspace", "use", "-h", "ws://example.invalid:1234"],
     ["mcp", "install", "claude", "--help"],
   ])("answers help before validation and leaves files untouched: %j", (...argv) => {
