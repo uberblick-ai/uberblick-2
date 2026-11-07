@@ -137,6 +137,9 @@ it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains record and topic d
   for (const prose of [text, description]) {
     expect(prose).toContain("topic: true");
     expect(prose).toContain("first record");
+    expect(prose).toContain("joined after archiving");
+    expect(prose).toMatch(/restore/);
+    expect(prose).toMatch(/archiv[\w ]+again/);
     expect(prose).toMatch(/one (?:archived )?(?:decision )?record/);
     expect(prose).not.toContain("cannot be deleted on its own yet");
   }

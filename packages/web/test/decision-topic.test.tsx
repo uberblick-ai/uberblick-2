@@ -1260,6 +1260,25 @@ describe("decision topic navigation and history", () => {
     expect(resolveDecisionTopics(directory())[0]?.inForce?.uuid).toBe(FIRST);
   });
 
+  it("keeps a late record until its topic is restored and archived again", async () => {
+    story();
+    tombstoneDirectoryEntry(directory(), CURRENT);
+    record(NEXT, "Original title", "open", "An answer written offline.", { supersedes: CURRENT });
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, NEXT))).container;
+    expect(getDirectoryEntry(directory(), NEXT)?.deleted).not.toBe(true);
+    expect(within(host).queryByRole("button", { name: "Delete decision record…" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Delete topic…" })).not.toBeNull();
+    await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
+    await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
+    expect(getDirectoryEntry(directory(), NEXT)?.deleted).toBe(true);
+    await act(async () => within(host).getByRole("button", { name: "Delete decision record…" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete decision record" }).click());
+    expect(isDirectoryEntryDeleted(directory(), NEXT)).toBe(true);
+    expect(isDirectoryEntryDeleted(directory(), CURRENT)).toBe(false);
+    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
+    expect(selection(host)).toBe(CURRENT);
+  });
+
   it("offers record deletion only on a whole archived topic and refuses a stale confirmation after restore", async () => {
     story();
     const host = (await open(decisionRecordPath(WORKSPACE, FIRST, REJECTED))).container;

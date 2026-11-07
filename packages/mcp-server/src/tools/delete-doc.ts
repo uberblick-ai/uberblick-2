@@ -8,7 +8,7 @@ import { uuidArg } from "./schemas.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
-  topic: z.boolean().optional().describe("True deletes the whole archived decision topic via any record UUID. Omit or false deletes one record; the first record requires topic: true."),
+  topic: z.boolean().optional().describe("True deletes the whole archived decision topic via any record UUID. Omit or false deletes one record except the first. A record that joined after archiving needs restore_doc then archive_doc first, or topic: true."),
 });
 
 export const deleteDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, { uuid, topic }) => {
@@ -20,6 +20,9 @@ export const deleteDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
   }
   if (stub.kind === "decision" ? !decisionTopicArchived(directory.doc, uuid) : stub.deleted !== true) {
     throw new ToolError("doc_not_archived", "Archive the document or whole decision topic before deleting it permanently.", { uuid });
+  }
+  if (stub.kind === "decision" && topic !== true && stub.deleted !== true) {
+    throw new ToolError("decision_delete_unsupported", "This record joined after its topic was archived. Restore the topic with restore_doc and archive it again with archive_doc, then delete the record; or delete the whole topic with topic: true.", { uuid });
   }
   const title = titleFor(uuid, stub);
   const sidebar = replicas.sidebar();

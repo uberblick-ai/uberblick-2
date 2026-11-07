@@ -705,7 +705,9 @@ export const toolHelpDetails = {
     "`deleted`. For a decision UUID it always archives the whole topic, including records previously " +
     "archived individually in the web. No MCP argument archives one record. delete_doc permanently removes " +
     "an archived regular document or one record of an archived topic. The first record goes only with the whole " +
-    "topic: pass `topic: true` with its topic UUID or any record UUID to delete every record.\n\n" +
+    "topic: pass `topic: true` with its topic UUID or any record UUID to delete every record. A record that joined " +
+    "after archiving cannot be deleted alone until you restore the topic with restore_doc and archive it again; " +
+    "or delete the whole topic with `topic: true`.\n\n" +
     "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not " +
     "an entry point. The unpin is unconditional — it does not first look for a pin, and it hides every pin " +
     "this replica can see — so `unpinned` says what the call asserted, not that a pin was found: it is true " +
@@ -727,6 +729,9 @@ export const toolHelpDetails = {
     "For an archived decision topic, omit topic or pass false to delete only the addressed record; its other " +
     "records keep their content, comments and history. The first record can go only with the whole topic: " +
     "without `topic: true` it refuses with decision_delete_unsupported, even when it is the only record left. " +
+    "A record that joined after archiving has a live own entry and also refuses with decision_delete_unsupported. " +
+    "Restore the topic with restore_doc and archive it again with archive_doc, then delete the record; or delete " +
+    "the whole topic with `topic: true`. " +
     "Pass `topic: true` with the topic UUID or any record UUID to delete every record, including records " +
     "archived on their own before the topic. " +
     "Archive the whole topic first: a live document or topic refuses with doc_not_archived, even when the " +

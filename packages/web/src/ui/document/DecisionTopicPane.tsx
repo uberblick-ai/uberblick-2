@@ -296,7 +296,9 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     isDecisionTopic
     topicArchived={topic.archived}
     actionTitle={decisionTopicTitle(topic)}
-    deleteRecordSummary={selected === topic.topic ? null : <RecordSummary topic={topic} record={record} />}
+    deleteRecordSummary={selected === topic.topic || directoryConnection === null ||
+      getDirectoryEntry(directoryConnection.ydoc, selected)?.deleted !== true
+      ? null : <RecordSummary topic={topic} record={record} />}
     decisionView
     displayTitle={decisionTopicTitle(topic)}
     copyPath={explicit || (linkedRecord === selected && record.recordArchived === true)

@@ -183,6 +183,34 @@ describe("delete_doc", () => {
     expect(Y.encodeStateAsUpdate(replicas.directory().doc)).toEqual(before);
   });
 
+  it("refuses deleting a record that joined after archiving until the topic is restored and archived again", async () => {
+    const rig = await local();
+    const first = await rig.ok("create_doc", { title: "Late answer", description: "Topic archived before an offline successor arrived.", kind: "decision" });
+    await rig.ok("archive_doc", { uuid: first.uuid });
+    const { replicas, store } = rig.instance;
+    const directory = replicas.directory().doc;
+    const uuid = "ba30ced0-e3c1-4ae7-a624-72d498803a74";
+    upsertDirectoryEntry(directory, { uuid, title: "Late answer", kind: "decision", topic: first.uuid, supersedes: first.uuid, status: "open" });
+    const before = Y.encodeStateAsUpdate(directory);
+    const sidebarBefore = Y.encodeStateAsUpdate(replicas.sidebar().doc);
+    const logSize = store.logSize();
+    for (const topic of [undefined, false]) {
+      const result = await rig.call("delete_doc", { uuid, ...(topic === undefined ? {} : { topic }) });
+      expect(result).toMatchObject({ isError: true, payload: { error: "decision_delete_unsupported", applied: false, partial: false, synced: false } });
+      expect(result.payload.recovery).toContain("restore_doc");
+      expect(result.payload.recovery).toContain("archive_doc");
+      expect(result.payload.recovery).toContain("topic: true");
+      expect(store.logSize()).toBe(logSize);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+      expect(Y.encodeStateAsUpdate(replicas.sidebar().doc)).toEqual(sidebarBefore);
+    }
+    await rig.ok("restore_doc", { uuid: first.uuid });
+    await rig.ok("archive_doc", { uuid: first.uuid });
+    expect((await rig.ok("delete_doc", { uuid })).records).toEqual([uuid]);
+    expect(isDirectoryEntryDeleted(directory, first.uuid)).toBe(false);
+    expect((await rig.ok("list_docs", { kind: "decision", include_deleted: true, include_superseded: true })).docs.map((record: { uuid: string }) => record.uuid)).toEqual([first.uuid]);
+  });
+
   it.each(["topic", "record"])("deletes every archived topic record via its %s UUID and removes every entry point", async (address) => {
     const rig = await local();
     const source = await rig.ok("create_doc", { title: "Deletion references", description: "An owning page whose links survive.", blocks: [{ type: "paragraph", text: "Keep these references." }] });

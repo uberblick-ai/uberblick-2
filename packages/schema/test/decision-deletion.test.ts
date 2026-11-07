@@ -220,21 +220,39 @@ describe("permanent decision record deletion", () => {
     } finally { directory.destroy(); }
   });
 
-  it("keeps only the UUID mark and graph edges, including for a live stub that joined an archived topic", () => {
+  it("refuses a record that joined after archiving until the topic is restored and archived again", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      upsertDirectoryEntry(directory, { uuid: LATE, title: "Late proposal", kind: "decision", topic: TOPIC, supersedes: CURRENT, status: "open" });
+      expect(decisionTopicArchived(directory, LATE)).toBe(true);
+      expect(getDirectoryEntry(directory, LATE)?.deleted).toBeUndefined();
+      const before = Y.encodeStateAsUpdate(directory);
+      expect(deleteDecisionRecord(directory, LATE)).toBe(false);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+      restoreDirectoryEntry(directory, TOPIC);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(getDirectoryEntry(directory, LATE)?.deleted).toBe(true);
+      expect(deleteDecisionRecord(directory, LATE)).toBe(true);
+      expect(resolveDecisionTopics(directory)[0]!.allRecords.map((record) => record.uuid)).toEqual([TOPIC, FORMER, CURRENT]);
+    } finally { directory.destroy(); }
+  });
+
+  it("keeps only the UUID mark and graph edges, never a metadata witness", () => {
     const directory = new Y.Doc();
     const compacted = new Y.Doc();
     try {
       seed(directory);
-      tombstoneDirectoryEntry(directory, TOPIC);
       upsertDirectoryEntry(directory, {
         uuid: LATE, title: "private deleted title", tags: ["private deleted tag"], kind: "decision", topic: TOPIC,
         supersedes: CURRENT, status: "open", description: "private deleted description", answerPreview: "private deleted answer",
         related: [RELATED], updatedAt: 123, commentCount: 2,
       });
-      expect(getDirectoryEntry(directory, LATE)?.deleted).toBeUndefined();
+      tombstoneDirectoryEntry(directory, TOPIC);
       expect(deleteDecisionRecord(directory, LATE)).toBe(true);
       expect(directory.getMap("deleted-docs").get(LATE)).toBe(true);
-      expect(getDirectoryMap(directory).get(LATE)).toEqual({ deleted: true });
+      expect(getDirectoryMap(directory).has(LATE)).toBe(false);
       expect(directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).get(LATE)).toEqual({ topic: TOPIC, supersedes: CURRENT });
       expect(directory.getMap("decision-related-pages").has(LATE)).toBe(false);
       expect([...directory.getMap("updatedAt").keys()].some((key) => key.startsWith(LATE))).toBe(false);
@@ -244,14 +262,11 @@ describe("permanent decision record deletion", () => {
       expect(Buffer.from(Y.encodeStateAsUpdate(compacted)).toString("utf8")).not.toContain("private deleted");
       getDirectoryMap(directory).set(LATE, { title: "stale private title", tags: [], kind: "decision", topic: TOPIC });
       enforceDeletedDirectoryEntries(directory);
-      expect(getDirectoryMap(directory).get(LATE)).toEqual({ deleted: true });
-      getDirectoryMap(directory).delete(LATE);
-      enforceDeletedDirectoryEntries(directory);
       expect(getDirectoryMap(directory).has(LATE)).toBe(false);
     } finally { directory.destroy(); compacted.destroy(); }
   });
 
-  it("removes a separately archived record's archive mark and removes witnesses when deleting the topic", () => {
+  it("removes a separately archived record's archive mark and keeps whole-topic deletion intact", () => {
     const directory = new Y.Doc();
     try {
       seed(directory);
@@ -263,6 +278,31 @@ describe("permanent decision record deletion", () => {
       expect(getDirectoryMap(directory).has(FORMER)).toBe(false);
       expect(resolveDecisionTopics(directory)).toEqual([]);
     } finally { directory.destroy(); }
+  });
+
+  it.each([FORMER, CURRENT])("ignores retained graph references after the hub reverses %s's mark", (selected) => {
+    const directory = new Y.Doc();
+    const replica = new Y.Doc();
+    try {
+      seed(directory);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      const original = getDirectoryMap(directory).get(selected);
+      const before = resolveDecisionTopics(directory);
+      const beforeRelations = [TOPIC, FORMER, CURRENT].map((uuid) => decisionRelations(directory, uuid));
+      expect(deleteDecisionRecord(directory, selected)).toBe(true);
+      syncDocs(directory, replica);
+      directory.transact(() => {
+        directory.getMap("deleted-docs").delete(selected);
+        getDirectoryMap(directory).set(selected, original);
+      });
+      syncDocs(directory, replica);
+      for (const peer of [directory, replica]) {
+        expect(peer.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).has(selected)).toBe(true);
+        expect(isDirectoryEntryDeleted(peer, selected)).toBe(false);
+        expect(resolveDecisionTopics(peer)).toEqual(before);
+        expect([TOPIC, FORMER, CURRENT].map((uuid) => decisionRelations(peer, uuid))).toEqual(beforeRelations);
+      }
+    } finally { directory.destroy(); replica.destroy(); }
   });
 
   it("never treats graph references as a deletion mark or crosses a foreign topic", () => {

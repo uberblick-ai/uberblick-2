@@ -228,14 +228,7 @@ export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
         deleted.has(entry.topic) && topics.get(uuid) !== entry.topic) topics.set(uuid, entry.topic);
       if (marks.get(uuid) !== true) marks.set(uuid, true);
       const record = deletedDecisionRecord(dirDoc, uuid);
-      if (docs.has(uuid)) {
-        if (record !== null && !deleted.has(record.topic)) {
-          const value = docs.get(uuid);
-          // Released hubs accept a late record's mark only with its own archive.
-          if (typeof value !== "object" || value === null || Object.keys(value).length !== 1 ||
-            (value as { deleted?: unknown }).deleted !== true) docs.set(uuid, { deleted: true });
-        } else docs.delete(uuid);
-      }
+      docs.delete(uuid);
       dirDoc.getMap<unknown>(DIRECTORY_RELATED_PAGES_KEY).delete(uuid);
       if (record !== null) dirDoc.getMap<unknown>(DIRECTORY_ARCHIVED_RECORDS_KEY).delete(uuid);
     }
@@ -261,13 +254,13 @@ export function deleteDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
 export function deleteDecisionRecord(dirDoc: Y.Doc, uuid: string): boolean {
   const entry = readStored(getDirectoryMap(dirDoc).get(uuid));
   if (entry?.kind !== "decision" || isDirectoryEntryDeleted(dirDoc, uuid) ||
-    (entry.topic ?? uuid) === uuid || !decisionTopicArchived(dirDoc, uuid)) return false;
+    (entry.topic ?? uuid) === uuid || entry.deleted !== true ||
+    !decisionTopicArchived(dirDoc, uuid)) return false;
   const topic = entry.topic ?? uuid;
   dirDoc.transact(() => {
     dirDoc.getMap<unknown>(DIRECTORY_DELETED_DECISION_RECORDS_KEY).set(uuid, {
       topic, ...(entry.supersedes === undefined ? {} : { supersedes: entry.supersedes }),
     });
-    getDirectoryMap(dirDoc).set(uuid, { deleted: true });
     dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).set(uuid, true);
     enforceDeletedDirectoryEntries(dirDoc);
   });

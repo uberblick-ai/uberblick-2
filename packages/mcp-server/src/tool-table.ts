@@ -535,7 +535,9 @@ export const tools: readonly Tool[] = [
       "directory/search entries and unpinning. unpinned asserts the unpin, not whether a pin was found. " +
       "An unseen concurrent pin may survive; get_sidebar shows it archived and unpin_doc removes it. " +
       "restore_doc never re-pins. delete_doc removes one archived decision record; " +
-      "the first record requires whole-topic deletion using topic: true. Directory/sidebar rooms persist independently without " +
+      "the first record requires whole-topic deletion using topic: true. A record that joined after archiving needs " +
+      "the topic restored and archived again before record deletion, or topic: true. MCP archiving always covers " +
+      "the whole topic. Directory/sidebar rooms persist independently without " +
       "rollback. Results name rooms and indexed; persistence_failed names completed/failed rooms and recovery. " +
       "Follow recovery before retrying.",
     input: archiveDocInput,
@@ -552,7 +554,8 @@ export const tools: readonly Tool[] = [
     description:
       "Permanently delete an archived document or one record of an archived decision topic. topic: true deletes " +
       "every topic record via any record UUID, including individually archived records. The first record requires " +
-      "topic: true or refuses with decision_delete_unsupported. Live topics/documents refuse with doc_not_archived; " +
+      "topic: true or refuses with decision_delete_unsupported. A record that joined after archiving also refuses " +
+      "until the topic is restored and archived again, or use topic: true. Live topics/documents refuse with doc_not_archived; " +
       "deleted UUIDs with doc_deleted. Deletes content, comments, data and history; " +
       "evidence keeps UUIDs plus a deleted record's topic/predecessor references. Offline restores cannot undo deletion. " +
       "Other documents keep stored links. Directory/sidebar writes report independent durability. MCP archive_doc " +
@@ -702,7 +705,8 @@ export const tools: readonly Tool[] = [
     description:
       "Unpin without changing the document. archive_doc hides documents or whole topics; delete_doc permanently deletes " +
       "archived documents, one record of an archived topic, or a whole topic with topic: true. The first record " +
-      "can go only with its topic. Unpin " +
+      "can go only with its topic; a record that joined after archiving needs the topic restored and archived again " +
+      "before record deletion, or topic: true. MCP archive_doc covers the whole topic. Unpin " +
       "beats concurrent moves; no group is needed because each document has at most one pin. unpinned:false " +
       "means none existed. Empty groups remain; groupHint names sidebar_group to delete them.",
     input: unpinDocInput,
