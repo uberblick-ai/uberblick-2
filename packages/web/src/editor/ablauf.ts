@@ -190,6 +190,7 @@ function ablaufViewer(viewport: HTMLElement, shadow: ShadowRoot, options: {
       const request = version;
       const focus = shadow.activeElement instanceof HTMLElement ? shadow.activeElement : undefined;
       // Copy captures source at open; replace the viewer together with the drawing.
+      // known limit: source edits reset viewer zoom and pan; revisit when ablauf can update the Copy source in place.
       closeForReplacement();
       resume = () => { if (version === request && history === entry) open(side, focus); };
       return resume;
@@ -268,7 +269,10 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
   // optional shape rules. A shadow tree isolates them while inheriting tokens.
   const shadow = drawing.attachShadow({ mode: "open" });
   const hostStyle = document.createElement("style");
-  hostStyle.textContent = '.ab { display: block; width: 100%; height: auto; max-width: var(--ub-ablauf-natural); margin-inline: auto; background: var(--ab-bg); }';
+  hostStyle.textContent = `
+    .ab { display: block; width: 100%; height: auto; max-width: var(--ub-ablauf-natural); margin-inline: auto; background: var(--ab-bg); }
+    :host > .ab, .ab-playback:not(.abp-expanded) > .abp-figure > .ab { cursor: var(--ub-ablauf-cursor, auto); }
+  `;
   shadow.append(hostStyle);
   viewport.append(drawing);
   const showSource = (): void => openSource(editor, getPos, true)(new Event("source"));
@@ -286,12 +290,10 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
       || matchMedia("(pointer: coarse)").matches || viewport.dataset.zoomable === "true")) viewer.open();
   });
   const resized = (): void => {
-    panel.style.setProperty("--ub-ablauf-column", `${dom.getBoundingClientRect().width}px`);
     viewport.dataset.zoomable = String(naturalWidth > 0 && viewport.getBoundingClientRect().width / naturalWidth < 0.75);
   };
   const resize = new ResizeObserver(resized);
   resize.observe(viewport);
-  resize.observe(dom);
   const stale = document.createElement("p");
   stale.className = "ub-ablauf-stale";
   stale.textContent = "Preview is stale";
@@ -355,8 +357,7 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
       playback.redraw(svg, result.timelines, reopen, viewer.redraw);
       naturalWidth = width;
       panel.style.setProperty("--ub-ablauf-natural", `${width}px`);
-      panel.style.width = result.timelines.length > 0
-        ? `min(100%, max(${width}px, min(22rem, var(--ub-ablauf-column, 100%))))` : `min(100%, ${width}px)`;
+      panel.style.width = result.timelines.length > 0 ? "100%" : `min(100%, ${width}px)`;
       hasDrawing = true;
       viewport.hidden = false;
       expand.disabled = false;

@@ -70,6 +70,67 @@ async function waitForInView(block: Locator): Promise<void> {
   }));
 }
 
+test("Tall playable drawings use side captions when the column permits and below captions when narrowed", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Ablauf caption layout", description: "Native captions adapt to the reading column.",
+    blocks: [{ type: "code", language: "ablauf", text: PLAYED }],
+  });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { viewport: { width: 1440, height: 1000 }, hasTouch: false, isMobile: false },
+  });
+  await waitForDocumentDraw(page, session, uuid, { source: PLAYED });
+  await page.evaluate(() => document.fonts.ready);
+  const block = blocks(page).first();
+  await expect(controls(block)).toHaveClass(/\babp-side\b/);
+  await expect(controls(block).locator(".abp-list .abp-remark").first()).toHaveText("Writes a draft");
+  const beside = await controls(block).evaluate(root => {
+    const figure = root.querySelector("svg");
+    const caption = root.querySelector(".abp-list .abp-remark");
+    if (figure === null || caption === null) throw new Error("e2e: side caption probes missing");
+    return { gap: caption.getBoundingClientRect().left - figure.getBoundingClientRect().right,
+      width: figure.getBoundingClientRect().width, natural: Number(figure.getAttribute("width")) };
+  });
+  expect(beside.gap).toBeGreaterThan(0);
+  expect(beside.width).toBeCloseTo(beside.natural, 0);
+  await page.addStyleTag({ content: ".ub-column { max-width: 480px; }" });
+  await expect(controls(block)).toHaveClass(/\babp-below\b/);
+  await expect(controls(block).locator(".abp-step")).toBeVisible();
+  await expect.poll(() => controls(block).evaluate(root => {
+    const figure = root.querySelector("svg");
+    const caption = root.querySelector(".abp-step");
+    if (figure === null || caption === null) throw new Error("e2e: below caption probes missing");
+    return caption.getBoundingClientRect().top - figure.getBoundingClientRect().bottom;
+  })).toBeGreaterThanOrEqual(0);
+  await expectStatic(block);
+});
+
+test("A shrunken playable drawing shows the zoom cursor only where clicking opens the viewer", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const source = PLAYED.replace('"Draft"', `"${"Wide draft ".repeat(14)}"`);
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Ablauf playback cursor", description: "Captions do not offer to expand the drawing.",
+    blocks: [{ type: "code", language: "ablauf", text: source }],
+  });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { viewport: { width: 1440, height: 1000 }, hasTouch: false, isMobile: false },
+  });
+  await waitForDocumentDraw(page, session, uuid, { source });
+  const block = blocks(page).first();
+  await expect(controls(block)).toBeVisible();
+  await controls(block).getByRole("button", { name: "Next", exact: true }).click();
+  await expect(svg(block)).toHaveCSS("cursor", "zoom-in");
+  for (const selector of [".abp-caption", ".abp-actor", ".abp-counter", ".abp-panel"]) {
+    await expect(controls(block).locator(selector)).not.toHaveCSS("cursor", "zoom-in");
+  }
+  await controls(block).locator(".abp-caption").click();
+  await expect(block.locator(".ab-viewer")).toHaveCount(0);
+  await svg(block).click();
+  await expect(block.locator(".ab-viewer")).toBeVisible();
+  await expect(block.locator(".abv-canvas")).toHaveCSS("cursor", "grab");
+  await expect(block.locator(".abv-canvas svg")).not.toHaveCSS("cursor", "zoom-in");
+});
+
 test("Playable drawings show idle controls, play independently and rebind without losing focus after source edits", async ({ browser }) => {
   const session = writer();
   const { uuid } = await session.call<{ uuid: string }>("create_doc", {

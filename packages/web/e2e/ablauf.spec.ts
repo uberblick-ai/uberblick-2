@@ -453,12 +453,12 @@ test("frameless diagrams fit every column, center at natural size, and open by p
   if (blockId === null) throw new Error("e2e: Ablauf block identity missing");
   const sheet = await page.addStyleTag({ content: `[id='${blockId}'] { max-width: ${natural * 0.76}px; }` });
   const preview = first.locator(".ub-ablauf-viewport");
-  await expect(preview).not.toHaveCSS("cursor", "zoom-in");
+  await expect(first.locator(".ub-ablauf-drawing svg")).not.toHaveCSS("cursor", "zoom-in");
   await preview.click();
   await expect(preview).toBeFocused();
   await expect(viewer(page)).toHaveCount(0);
   await sheet.evaluate((element, css) => { element.textContent = css; }, `[id='${blockId}'] { max-width: ${natural * 0.74}px; }`);
-  await expect(preview).toHaveCSS("cursor", "zoom-in");
+  await expect(first.locator(".ub-ablauf-drawing svg")).toHaveCSS("cursor", "zoom-in");
   await preview.click();
   await expect(viewer(page)).toBeVisible();
   await expect.poll(() => zoomLevel(page)).toBe(100);

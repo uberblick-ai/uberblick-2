@@ -10,7 +10,7 @@
   border-radius: var(--radius);
   background: var(--ab-bg);
 }
-.ub-ablauf-viewport[data-zoomable="true"] { cursor: zoom-in; }
+.ub-ablauf-viewport[data-zoomable="true"] { --ub-ablauf-cursor: zoom-in; }
 .ub-ablauf.ProseMirror-selectednode .ub-ablauf-viewport,
 .ub-ablauf:focus-within .ub-ablauf-viewport { box-shadow: 0 0 0 2px var(--ring); }
 .ub-ablauf:where(:hover, :focus-within, .ub-ablauf-editing, [data-annotated="true"]) .ub-figure-toolbar { opacity: 1; pointer-events: auto; }
@@ -34,7 +34,7 @@
 .ub-ablauf-stale { font-weight: 500; }
 @media (pointer: coarse) {
   .ub-ablauf .ub-figure-toolbar { display: none; }
-  .ub-ablauf-viewport { cursor: zoom-in; }
+  .ub-ablauf-viewport { --ub-ablauf-cursor: zoom-in; }
   /* Without a drawing to tap, authors still need a route to source recovery. */
   .ub-ablauf-panel:has(> .ub-ablauf-viewport[hidden]) > .ub-figure-toolbar:has(> button:not([hidden], :disabled)) {
     position: static;

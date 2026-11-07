@@ -42,7 +42,6 @@
 }
 a.ub-figure-viewer-action { cursor: pointer; }
 .ub-figure-viewer-action:hover { background: var(--accent); }
-.ub-figure-viewer-zoom { min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 @media (any-pointer: coarse) {
   .ub-figure-viewer-bar :is(button, a) { min-width: 44px; min-height: 44px; }
 }
