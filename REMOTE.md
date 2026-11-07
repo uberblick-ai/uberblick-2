@@ -1885,12 +1885,13 @@ fetched    Uberblick from https://hub.uberblick.ai: 10 documents, 1 archived
 using      Uberblick (722007fa-8921-45ee-a580-e20311030fef, https://hub.uberblick.ai)
 wrote      ~/Projects/project/.uberblick.json
 previous   My Workspace (b3eea2f9-a8dc-40f2-a3d9-b27742620b1f, local)
-switch back with: ub workspace use b3eea2f9
-open it with: ub open
+
+switch to previous workspace with: ub workspace use b3eea2f9
+open the new workspace with: ub open
 ```
 
 The previous selection and recovery line appear only when the binding changed.
-The id form starts with `using` and omits the `open it with: ub open` hint.
+The id form starts with `using` and omits the `open the new workspace with: ub open` hint.
 Fetching shows at most one progress line on stderr, replaced by the result on a
 terminal. Library messages do not reach the terminal. `--verbose` adds the document
 list, verification details and configuration paths. `--json` prints only an object

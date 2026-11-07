@@ -74,7 +74,7 @@ export async function detachWorkspaceCommand({ positionals }: CommandArgs<Record
         output = useField("detached", workspaceLabel(binding, databasePath));
         if (path !== undefined) output += useField("wrote", path);
         const displayHub = displayWorkspaceHub(hub);
-        output += `${displayHub} keeps the workspace; this computer no longer syncs with it.\n` +
+        output += `${displayHub} keeps the workspace; this computer no longer syncs with it.\n\n` +
           `reconnect with: ub workspace use ${shellArgument(`${displayHub.replace(/\/$/, "")}/${id}`)}\n`;
       } finally { role.close(); }
     } finally { lock.release(); }

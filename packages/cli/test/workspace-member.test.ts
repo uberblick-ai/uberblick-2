@@ -296,8 +296,10 @@ describe("current member matching and mutations", () => {
     const listed = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(listed.status, listed.output).toBe(0);
     for (const value of [LOGIN, ACCOUNT, "member", USERNAME, "1234", "admin"]) expect(listed.stdout).toContain(value);
+    expect(await runInProcess(["workspace", "member", "ls"], remote.box)).toEqual(listed);
     const json = await runInProcess(["workspace", "member", "list", "--json"], remote.box);
     expect(json.status, json.output).toBe(0);
+    expect(await runInProcess(["workspace", "member", "ls", "--json"], remote.box)).toEqual(json);
     const result = JSON.parse(json.stdout);
     expect(Object.keys(result).sort()).toEqual(["hub", "members", "workspaceId"]);
     expect(result).toMatchObject({ hub: remote.origin, workspaceId: WORKSPACE });
@@ -321,7 +323,7 @@ describe("current member matching and mutations", () => {
     expect(changed.stdout).toContain(ACCOUNT);
     expect(actions(remote, "change-role")).toEqual([{ operation: "change-role", workspaceId: WORKSPACE, principalId: target.id, role: "admin" }]);
     expect(remote.hub.memberships!.roleFor(WORKSPACE, target.id)).toBe("admin");
-    const removed = await runInProcess(["workspace", "member", "remove", ACCOUNT], remote.box);
+    const removed = await runInProcess(["workspace", "member", "rm", ACCOUNT], remote.box);
     expect(removed.status, removed.output).toBe(0);
     for (const value of [LOGIN, ACCOUNT]) expect(removed.stdout).toContain(value);
     expect(removed.stdout).toMatch(/every device|all devices/i);

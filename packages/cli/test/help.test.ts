@@ -21,7 +21,6 @@ import { COMMAND_TREE, MCP_HELP, runCli } from "../src/cli.js";
 import type { Command } from "../src/command.js";
 import { OPEN_HELP } from "../src/open.js";
 import { WORKSPACE_HELP, WORKSPACE_REMOVE_HELP } from "../src/workspace.js";
-import { WORKSPACE_MEMBER_HELP } from "../src/workspace-member.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox } from "./helpers.js";
 
@@ -135,11 +134,63 @@ it.each([[], ["--yes"], ["--bogus"], ["one", "two"]].map(args => ({ args })))(
   },
 );
 
-it("keeps workspace member rm unknown", async () => {
-  const run = await dispatch(["workspace", "member", "rm", "someone"]);
-  expect(run.status).toBe(2);
-  expect(run.stdout).toBe("");
-  expect(run.stderr).toBe(`ub workspace member: unknown command "rm"\n\n${WORKSPACE_MEMBER_HELP}`);
+it.each([
+  { path: ["workspace"], canonical: "list", alias: "ls", args: [["--bogus"], ["extra"], ["--json", "extra"]] },
+  { path: ["workspace", "member"], canonical: "list", alias: "ls", args: [["--bogus"], ["extra"], ["--json", "extra"]] },
+  { path: ["workspace", "member"], canonical: "remove", alias: "rm", args: [[], ["--yes"], ["--bogus"], ["one", "two"]] },
+])("keeps canonical usage errors for $path $alias", async ({ path, canonical, alias, args }) => {
+  for (const argv of args) {
+    const expected = await dispatch([...path, canonical, ...argv]);
+    expect(expected.status).toBe(2);
+    expect(expected.stdout).toBe("");
+    expect(expected.stderr).toMatch(new RegExp(`^ub ${[...path, canonical].join(" ")}:`));
+    expect(await dispatch([...path, alias, ...argv])).toEqual(expected);
+  }
+});
+
+it("keeps workspace ls output and JSON identical to list", () => {
+  const box = sandbox();
+  for (const args of [[], ["--json"]]) {
+    const canonical = runUb(["workspace", "list", ...args], box);
+    expect(canonical.status, canonical.output).toBe(0);
+    expect(runUb(["workspace", "ls", ...args], box)).toEqual(canonical);
+  }
+});
+
+it.each([
+  {
+    path: ["workspace"],
+    help: `usage: ub workspace [command]
+
+commands:
+  create <name> [--empty]     # create and select a separate local-only workspace
+  fork                        # copy this workspace independently and select the local copy
+  promote <hub>               # upload, verify and connect this local workspace
+  detach <id|prefix>          # make this computer's hub workspace copy local
+  member <command>            # grant workspace access and manage members
+  list [--json]               # workspaces this machine has a database for (alias: ls)
+  use <link|id>               # fetch a shared workspace or select a local replica
+  remove <id|prefix> [--yes]  # delete this computer's copy of a workspace (alias: rm)
+
+options:
+  -h, --help             show this help; after a command, that command's help
+`,
+  },
+  {
+    path: ["workspace", "member"],
+    help: `usage: ub workspace member <command>
+
+commands:
+  add <github-handle> [--role admin|member] [--yes]  # Confirm the GitHub account, then grant access
+  list [--json]                                      # Members, their account IDs and roles (alias: ls)
+  role <member> <admin|member>                       # Change a member's role
+  remove <member>                                    # End a member's access on every device (alias: rm)
+`,
+  },
+])("prints the corpus command catalog for $path", async ({ path, help }) => {
+  for (const args of [[], ["--help"]]) {
+    expect(await dispatch([...path, ...args])).toEqual({ status: 0, stdout: help, stderr: "", output: help });
+  }
 });
 
 /** Command names and description columns from one contextual catalog. */
@@ -199,6 +250,8 @@ describe("every human-facing command path", () => {
     const name = ["ub", ...path.argv].join(" ");
     const isAuthGroup = path.argv.length === 1 && path.argv[0] === "auth";
     const isMcpGroup = path.argv.length === 1 && path.argv[0] === "mcp";
+    const isMemberGroup = path.argv.length === 2 && path.argv[0] === "workspace" && path.argv[1] === "member";
+    const catalogOnly = isAuthGroup || isMemberGroup;
 
     it(`documents the structure of \`${name}\``, () => {
       // Against the parser, not against a list kept by hand: an option added to
@@ -216,11 +269,11 @@ describe("every human-facing command path", () => {
           );
         }
       }
-      if (!isAuthGroup && !isMcpGroup) {
+      if (!catalogOnly && !isMcpGroup) {
         expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
       }
       if (path.children !== undefined) {
-        const rows = commandRows(path.help, isAuthGroup);
+        const rows = commandRows(path.help, catalogOnly);
         expect(
           rows.map(({ command }) => command).filter((command) => command !== "(none)"),
           `${name} help lists each immediate command once`,
