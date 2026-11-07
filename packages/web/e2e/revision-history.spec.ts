@@ -3577,7 +3577,7 @@ test.describe("document history through ub open", () => {
     const preview = side.getByRole("region", { name: "Ablauf preview", exact: true });
     await expect(preview.locator("svg")).toBeVisible();
     const address = page.url();
-    const state = await page.evaluate(() => history.state);
+    const state = await page.evaluate(() => window.history.state);
     await side.getByRole("button", { name: "Expand ablauf diagram", exact: true }).focus();
     await page.keyboard.press("Enter");
     const dialog = ablaufViewer(page);
@@ -3595,7 +3595,7 @@ test.describe("document history through ub open", () => {
     await expect(dialog).toHaveCount(0);
     await expect(preview).toBeFocused();
     await expect(page).toHaveURL(address);
-    await expect.poll(() => page.evaluate(() => history.state)).toEqual(state);
+    await expect.poll(() => page.evaluate(() => window.history.state)).toEqual(state);
   });
 
   test("iPad taps open either fan-out state and the switch restarts zoom", { tag: "@webkit-touch" }, async ({ browser }) => {
