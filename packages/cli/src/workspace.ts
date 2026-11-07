@@ -22,7 +22,7 @@ import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  create <name>               create and select a separate local-only workspace
+  create <name> [--empty]     create and select a separate local-only workspace
   fork                        copy this workspace independently and select the local copy
   promote <hub>               upload, verify and connect this local workspace
   detach <id|prefix>          make this computer's hub workspace copy local

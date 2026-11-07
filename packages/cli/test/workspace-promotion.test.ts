@@ -73,7 +73,7 @@ describe("workspace creation and promotion", () => {
     expect(result.stdout).not.toContain("ask for GitHub approval");
   });
 
-  it("creates a new named workspace with starters without touching parent bindings, old data, credentials or MCP pins", async () => {
+  it.each([false, true])("creates a new named workspace without touching parent bindings, old data, credentials or MCP pins (empty: %s)", async empty => {
     const box = await localWorkspace("Original");
     const old = selected(box);
     const before = await syncWorkspace(offline(box));
@@ -92,7 +92,7 @@ describe("workspace creation and promotion", () => {
     const pins = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" } } } });
     writeFileSync(join(child, ".mcp.json"), pins);
     const childBox = { ...box, cwd: child };
-    const result = await runInProcess(["workspace", "create", " New project "], childBox,
+    const result = await runInProcess(["workspace", "create", " New project ", ...(empty ? ["--empty"] : [])], childBox,
       { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).toContain("environment binding still takes precedence");
@@ -109,17 +109,19 @@ describe("workspace creation and promotion", () => {
     const fresh = createMcpServer(offline(childBox));
     try {
       expect(getWorkspaceName(fresh.replicas.settings().doc)).toBe("New project");
-      expect(listDirectory(fresh.replicas.directory().doc)).toHaveLength(2);
-      expect(readSidebar(fresh.replicas.sidebar().doc)[0]?.name).toBe("Uberblick");
+      expect(listDirectory(fresh.replicas.directory().doc, { includeDeleted: true })).toHaveLength(empty ? 0 : 2);
+      const groups = readSidebar(fresh.replicas.sidebar().doc);
+      expect(groups).toHaveLength(empty ? 0 : 1);
+      if (!empty) expect(groups[0]?.name).toBe("Uberblick");
     } finally { await fresh.close(); }
   });
 
-  it("identifies a replaced binding and provides a working switch-back command", async () => {
+  it.each([false, true])("identifies a replaced binding and provides a working switch-back command (empty: %s)", async empty => {
     // A complete old binding can exist before this machine has its replica.
     const previous = { workspaceId: randomUUID(), hubUrl: "wss://old.example.test/ws" };
     const box = sandbox({ projectBinding: previous });
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBeUndefined();
-    const result = await runInProcess(["workspace", "create", "Second"], box);
+    const result = await runInProcess(["workspace", "create", "Second", ...(empty ? ["--empty"] : [])], box);
     expect(result.status, result.output).toBe(0);
     expect(selected(box).workspaceId).not.toBe(previous.workspaceId);
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBe(previous.hubUrl);
@@ -135,6 +137,35 @@ describe("workspace creation and promotion", () => {
     const switched = await runInProcess(["workspace", "use", previous.workspaceId], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(previous);
+  });
+
+  it("promotes a workspace created with --empty with only its project document and no starter sidebar group", async () => {
+    const box = unboundSandbox();
+    const created = await runInProcess(["workspace", "create", "Project corpus", "--empty"], box);
+    expect(created.status, created.output).toBe(0);
+    const documentId = randomUUID();
+    const local = createMcpServer(offline(box));
+    try {
+      expect(listDirectory(local.replicas.directory().doc, { includeDeleted: true })).toEqual([]);
+      expect(readSidebar(local.replicas.sidebar().doc)).toEqual([]);
+      expect(getWorkspaceName(local.replicas.settings().doc)).toBe("Project corpus");
+      const doc = local.replicas.replica(documentId).doc;
+      initDoc(doc, { uuid: documentId, title: "Project architecture" });
+      appendBlock(doc, { type: "paragraph", text: "The project's real corpus content." });
+      upsertDirectoryEntry(local.replicas.directory().doc, { uuid: documentId, title: "Project architecture" });
+    } finally { await local.close(); }
+    const expected = await syncWorkspace(offline(box));
+    const { endpoint } = await hubFor(box);
+    const promoted = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
+    expect(promoted.status, promoted.output).toBe(0);
+    const remote = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId,
+      HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
+    expect(remote.complete).toBe(true);
+    expect(remote.missing).toEqual([]);
+    expect(remote.unsettled).toEqual([]);
+    expect(remote.entries).toEqual([expect.objectContaining({ uuid: documentId, title: "Project architecture", deleted: false })]);
+    expect(isIdentical(compareCorpus(expected.entries, remote.entries))).toBe(true);
+    expect(isIdentical(compareCorpus(expected.workspace!, remote.workspace!))).toBe(true);
   });
 
   it("does not select the hub when private admission persistence fails after upload", async () => {

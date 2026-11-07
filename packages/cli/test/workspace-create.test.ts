@@ -19,23 +19,23 @@ function binding(box: Sandbox): { workspaceId: string; hubUrl: null } {
   return JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"));
 }
 
-async function checkSeed(box: Sandbox, name: string): Promise<void> {
+async function checkWorkspace(box: Sandbox, name: string, empty = false): Promise<void> {
   const selected = binding(box);
   expect(selected.hubUrl).toBeNull();
   const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected.workspaceId });
   expect(readWorkspaceName(config.databasePath, config.workspaceId)).toBe(name);
   const { entries } = await syncWorkspace({ ...config, authSecret: null });
-  expect(entries.map(doc => doc.title).sort()).toEqual(["How to Use It", "Welcome to Uberblick"]);
+  expect(entries.map(doc => doc.title).sort()).toEqual(empty ? [] : ["How to Use It", "Welcome to Uberblick"]);
 }
 
-it("creates a private secret that the next MCP process resolves, without dialing a hub", async () => {
+it.each([false, true])("creates a private secret that the next MCP process resolves, without dialing a hub: empty %s", async empty => {
   const box = unboundSandbox();
   const preload = join(box.cwd, "refuse-network.mjs");
   writeFileSync(preload, `
 import { Socket } from "node:net";
 Socket.prototype.connect = () => { throw new Error("workspace create tried to dial a hub"); };
 `);
-  const created = runUb(["workspace", "create", "Project notes"], box, {
+  const created = runUb(["workspace", "create", "Project notes", ...(empty ? ["--empty"] : [])], box, {
     NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
   });
   expect(created.status, created.output).toBe(0);
@@ -46,7 +46,7 @@ Socket.prototype.connect = () => { throw new Error("workspace create tried to di
   expect(created.output).not.toContain(credential.signingSecret);
   const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
   expect(resolveMcpConfig(resolved.env).authSecret).toBe(credential.signingSecret);
-  await checkSeed(box, "Project notes");
+  await checkWorkspace(box, "Project notes", empty);
 });
 
 it.each([false, true])("uses an environment secret without writing credentials: existing file %s", async (onFile) => {
@@ -65,7 +65,7 @@ it.each([false, true])("uses an environment secret without writing credentials: 
   } else {
     expect(existsSync(path)).toBe(false);
   }
-  await checkSeed(box, "Environment notes");
+  await checkWorkspace(box, "Environment notes");
 });
 
 it("uses the existing secret and leaves name and colour settings untouched", async () => {
@@ -84,7 +84,7 @@ it("uses the existing secret and leaves name and colour settings untouched", asy
   expect(statSync(path).mtimeMs).toBe(modified);
   expect(readFileSync(config)).toEqual(settings);
   expect(created.output).not.toContain(SECRET);
-  await checkSeed(box, "Another workspace");
+  await checkWorkspace(box, "Another workspace");
 });
 
 it("serializes two creates, preserving hub logins and one secret for both projects", async () => {
@@ -108,15 +108,15 @@ it("serializes two creates, preserving hub logins and one secret for both projec
   }
   for (const run of runs) expect(run.output).not.toContain(credential.signingSecret);
   expect(binding(first).workspaceId).not.toBe(binding(otherProject).workspaceId);
-  await checkSeed(first, "First project");
-  await checkSeed(otherProject, "Second project");
+  await checkWorkspace(first, "First project");
+  await checkWorkspace(otherProject, "Second project");
 });
 
-it("still creates and seeds a workspace when an exposed credential file must be deleted", async () => {
+it.each([false, true])("still creates a workspace when an exposed credential file must be deleted: empty %s", async empty => {
   const box = unboundSandbox({ credentials: { signingSecret: SECRET, hubLogins: {} }, credentialsMode: 0o644 });
   const path = credentialsPath(box.env);
   const before = readFileSync(path);
-  const created = await runInProcess(["workspace", "create", "Offline notes"], box);
+  const created = await runInProcess(["workspace", "create", "Offline notes", ...(empty ? ["--empty"] : [])], box);
   expect(created.status, created.output).toBe(0);
   expect(created.stderr).toContain("secret may have leaked");
   expect(created.stderr).toContain(`delete ${path}`);
@@ -127,7 +127,7 @@ it("still creates and seeds a workspace when an exposed credential file must be 
   expect(created.output).not.toContain(SECRET);
   expect(readFileSync(path)).toEqual(before);
   expect(statSync(path).mode & 0o777).toBe(0o644);
-  await checkSeed(box, "Offline notes");
+  await checkWorkspace(box, "Offline notes", empty);
 });
 
 it.each(["failure", "interruption"] as const)(
@@ -168,6 +168,35 @@ syncBuiltinESMExports();
     expect(completed.status, completed.output).toBe(0);
     expect(defaultWorkspaceDatabasePath(binding(box).workspaceId, box.env)).not.toBe(partial);
     expect(readFileSync(partial)).toEqual(partialBefore);
-    await checkSeed(box, "Complete notes");
+    await checkWorkspace(box, "Complete notes");
   },
 );
+
+it.each(["failure", "interruption"] as const)("keeps the prior binding after an empty create %s before publication", async kind => {
+  const box = sandbox({ projectBinding: { workspaceId: PREVIOUS, hubUrl: null } });
+  const previous = readFileSync(join(box.cwd, ".uberblick.json"));
+  const preload = join(box.cwd, "stop-binding.mjs");
+  writeFileSync(preload, `
+import { createRequire, syncBuiltinESMExports } from "node:module";
+const fs = createRequire(import.meta.url)("node:fs");
+const rename = fs.renameSync;
+fs.renameSync = (from, to, ...args) => {
+  if (String(to).endsWith("/.uberblick.json")) {
+    ${kind === "failure" ? 'throw new Error("binding publication refused");' : 'process.kill(process.pid, "SIGKILL");'}
+  }
+  return rename(from, to, ...args);
+};
+syncBuiltinESMExports();
+`);
+  const failed = runUb(["workspace", "create", "Interrupted notes", "--empty"], box, {
+    NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+  });
+  expect(failed.status).not.toBe(0);
+  expect(failed.stdout).toBe("");
+  if (kind === "failure") expect(failed.stderr).toContain("Project binding unchanged");
+  expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(previous);
+  if (kind === "interruption") rmSync(initLockPath(box.env));
+  const completed = await runInProcess(["workspace", "create", "Complete notes", "--empty"], box);
+  expect(completed.status, completed.output).toBe(0);
+  await checkWorkspace(box, "Complete notes", true);
+});
