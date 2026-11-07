@@ -10,6 +10,7 @@ import {
   createAnnotation,
   createGroup,
   decisionDirectoryFields,
+  deleteDecisionRecord,
   deleteDirectoryEntry,
   directoryRoom,
   getBlocks,
@@ -1225,6 +1226,88 @@ describe("decision topic navigation and history", () => {
     expect(within(host).queryByRole("button", { name: /^Delete(?: topic)?…$/ })).toBeNull();
     expect(getDirectoryEntry(directory(), REJECTED)?.recordArchived).toBe(true);
     expect(isDirectoryEntryDeleted(directory(), REJECTED)).toBe(false);
+  });
+
+  it("deletes just the selected answer, identifies it like History and returns to the topic", async () => {
+    story();
+    tombstoneDirectoryEntry(directory(), CURRENT);
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, CURRENT))).container;
+    const selectedDate = item(host, CURRENT).querySelector("time")?.dateTime;
+    await act(async () => within(host).getByRole("button", { name: "Delete decision record…" }).click());
+    const dialog = screen.getByRole("alertdialog", { name: 'Delete decision record from “Original title”?' });
+    expect(dialog.textContent).toContain("In force · Ben · Support the growing team.");
+    expect(dialog.querySelector("time")?.dateTime).toBe(selectedDate);
+    expect(dialog.textContent).toContain("The topic and its other records stay.");
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    await act(async () => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    expect(isDirectoryEntryDeleted(directory(), CURRENT)).toBe(false);
+    const otherAnswers = [FIRST, REJECTED, WITHDRAWN, OPEN].map((uuid) => Y.encodeStateAsUpdate(room(roomForDoc(WORKSPACE, uuid)).ydoc));
+    await act(async () => within(host).getByRole("button", { name: "Delete decision record…" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete decision record" }).click());
+    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
+    expect(selection(host)).toBe(FIRST);
+    expect(answer(host).textContent).toContain("Keep the original answer.");
+    expect(isDirectoryEntryDeleted(directory(), CURRENT)).toBe(true);
+    expect(timeline(host).querySelector(`li[data-record="${CURRENT}"]`)).toBeNull();
+    for (const [index, uuid] of [FIRST, REJECTED, WITHDRAWN, OPEN].entries()) {
+      expect(isDirectoryEntryDeleted(directory(), uuid)).toBe(false);
+      expect(Y.encodeStateAsUpdate(room(roomForDoc(WORKSPACE, uuid)).ydoc)).toEqual(otherAnswers[index]);
+    }
+    expect(within(host).queryByRole("button", { name: "Delete decision record…" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Delete topic…" })).not.toBeNull();
+    await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
+    expect(timeline(host).querySelector(`li[data-record="${CURRENT}"]`)).toBeNull();
+    expect(resolveDecisionTopics(directory())[0]?.inForce?.uuid).toBe(FIRST);
+  });
+
+  it("keeps a late record until its topic is restored and archived again", async () => {
+    story();
+    tombstoneDirectoryEntry(directory(), CURRENT);
+    record(NEXT, "Original title", "open", "An answer written offline.", { supersedes: CURRENT });
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, NEXT))).container;
+    expect(getDirectoryEntry(directory(), NEXT)?.deleted).not.toBe(true);
+    expect(within(host).queryByRole("button", { name: "Delete decision record…" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Delete topic…" })).not.toBeNull();
+    await act(async () => within(host).getByRole("button", { name: "Restore" }).click());
+    await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
+    expect(getDirectoryEntry(directory(), NEXT)?.deleted).toBe(true);
+    await act(async () => within(host).getByRole("button", { name: "Delete decision record…" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete decision record" }).click());
+    expect(isDirectoryEntryDeleted(directory(), NEXT)).toBe(true);
+    expect(isDirectoryEntryDeleted(directory(), CURRENT)).toBe(false);
+    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
+    expect(selection(host)).toBe(CURRENT);
+  });
+
+  it("offers record deletion only on a whole archived topic and refuses a stale confirmation after restore", async () => {
+    story();
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, REJECTED))).container;
+    expect(within(host).queryByRole("button", { name: "Delete decision record…" })).toBeNull();
+    await act(async () => archiveDecisionRecord(directory(), room(sidebarRoom(WORKSPACE)).ydoc, REJECTED));
+    expect(within(host).queryByRole("button", { name: "Delete decision record…" })).toBeNull();
+    await act(async () => tombstoneDirectoryEntry(directory(), CURRENT));
+    await act(async () => within(host).getByRole("button", { name: "Delete decision record…" }).click());
+    const confirm = screen.getByRole("button", { name: "Delete decision record" });
+    act(() => {
+      restoreDirectoryEntry(directory(), CURRENT);
+      const before = Y.encodeStateAsUpdate(directory());
+      confirm.click();
+      expect(Y.encodeStateAsUpdate(directory())).toEqual(before);
+    });
+    expect(isDirectoryEntryDeleted(directory(), REJECTED)).toBe(false);
+    expect(within(host).queryByRole("button", { name: "Delete decision record…" })).toBeNull();
+  });
+
+  it("retires a remotely deleted history selection without leaving its answer or a stale confirmation", async () => {
+    story();
+    tombstoneDirectoryEntry(directory(), CURRENT);
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, CURRENT))).container;
+    await act(async () => within(host).getByRole("button", { name: "Delete decision record…" }).click());
+    await act(async () => { deleteDecisionRecord(directory(), CURRENT); });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(host.querySelector(".ub-document-pane")?.textContent).toBe("This document was deleted.");
+    expect(isDirectoryEntryDeleted(directory(), FIRST)).toBe(false);
+    expect(resolveDecisionTopics(directory())[0]?.inForce?.uuid).toBe(FIRST);
   });
 
   it("shows only the selected record's RFC directly between its answer and History", async () => {

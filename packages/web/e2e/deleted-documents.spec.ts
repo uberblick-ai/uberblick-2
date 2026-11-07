@@ -159,6 +159,88 @@ for (const touch of [false, true]) {
 }
 
 for (const touch of [false, true]) {
+  test(`archived record deletion preserves its topic on ${touch ? "iPad touch @webkit-touch" : "desktop"} in both appearances`, async ({ browser }) => {
+    const writer = session();
+    const title = `Delete record acceptance ${touch ? "touch" : "desktop"}`;
+    const first = await create(writer, title, { kind: "decision", status: "decided" });
+    const middle = await create(writer, undefined, {
+      kind: "decision", status: "decided", supersedes: first.uuid, description: "A middle answer to remove.",
+      answer: { who: "Browser acceptance", when: "2026-10-22T12:00:00Z", where: "https://example.org/decision" },
+    });
+    const current = await create(writer, undefined, {
+      kind: "decision", status: "decided", supersedes: middle.uuid,
+      blocks: [{ type: "paragraph", text: "The remaining current answer." }],
+      answer: { who: "Browser acceptance", when: "2026-10-23T12:00:00Z", where: "https://example.org/decision" },
+    });
+    const source = await create(writer, "Single-record deletion links", { blocks: [{ type: "paragraph", inline: [
+      { text: "topic reference", marks: { docLink: first.uuid } },
+      { text: " middle reference", marks: { docLink: middle.uuid } },
+      { text: " remaining reference", marks: { docLink: current.uuid } },
+    ] }] });
+    const page = await openApp(browser, `/${harness().workspace}/${first.uuid}/record/${middle.uuid}`, {
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: "light" },
+    });
+    await expect(editor(page)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete decision record…", exact: true })).toHaveCount(0);
+    await writer.call("archive_doc", { uuid: first.uuid });
+    const trigger = page.getByRole("button", { name: "Delete decision record…", exact: true });
+    const dialog = page.getByRole("alertdialog", { name: `Delete decision record from “${title}”?`, exact: true });
+    await expect(trigger).toBeVisible();
+    const selected = page.locator(`.ub-decision-timeline li[data-record="${middle.uuid}"]`);
+    const selectedDate = await selected.locator("time").getAttribute("datetime");
+    if (selectedDate === null) throw new Error("e2e: selected history record has no timestamp");
+    for (const appearance of ["light", "dark"] as const) {
+      await test.step(`${appearance} record banner and confirmation`, async () => {
+        await page.emulateMedia({ colorScheme: appearance });
+        await calmBanner(page, touch);
+        if (!touch && appearance === "light") {
+          await trigger.focus();
+          await page.keyboard.press("Enter");
+        } else await activateControl(trigger, { touch });
+        await expect(dialog).toContainText("Superseded · Browser acceptance · A middle answer to remove.");
+        await expect(dialog.locator("time")).toHaveAttribute("datetime", selectedDate);
+        await expect(dialog).toContainText("The topic and its other records stay.");
+        await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
+        if (!touch && appearance === "light") await page.keyboard.press("Enter");
+        else await activateControl(dialog.getByRole("button", { name: "Cancel", exact: true }), { touch });
+        await expect(dialog).toHaveCount(0);
+        await expect(selected).toBeVisible();
+      });
+    }
+    const references = await openApp(browser, `/${harness().workspace}/${source.uuid}`);
+    await expect(editor(references).locator(".ub-doclink")).toHaveCount(3);
+    await activateControl(trigger, { touch });
+    await activateControl(dialog.getByRole("button", { name: "Delete decision record", exact: true }), { touch });
+    await expect(page).toHaveURL(new URL(`/${harness().workspace}/${first.uuid}`, page.url()).href);
+    await expect(editor(page)).toContainText("The remaining current answer.");
+    await expect(page.locator(".ub-decision-timeline li")).toHaveCount(2);
+    await expect(selected).toHaveCount(0);
+    await expect(page.locator(".ub-decision-notice[data-state=conflict]")).toHaveCount(0);
+    await expectMcp(async () => {
+      await expect(writer.call("get_doc", { uuid: middle.uuid })).rejects.toThrow(/doc_deleted/);
+    });
+    const deletedLink = editor(references).getByText("middle reference", { exact: false });
+    await expect(deletedLink).toHaveAttribute("data-doc-link-state", "deleted");
+    await expect(deletedLink).not.toHaveAttribute("href");
+    for (const label of ["topic reference", "remaining reference"]) {
+      await expect(editor(references).getByText(label, { exact: false })).toHaveAttribute("data-doc-link-state", "archived");
+    }
+    await activateControl(page.getByRole("button", { name: "Restore", exact: true }), { touch });
+    await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
+    await page.reload();
+    await expect(editor(page)).toContainText("The remaining current answer.");
+    await expect(page.locator(".ub-decision-timeline li")).toHaveCount(2);
+    await expect(selected).toHaveCount(0);
+    await expect(page.locator(".ub-decision-notice[data-state=conflict]")).toHaveCount(0);
+    await page.goto(new URL(`/${harness().workspace}/${first.uuid}/record/${first.uuid}`, page.url()).href);
+    await expect(editor(page)).toBeVisible();
+    await writer.call("archive_doc", { uuid: first.uuid });
+    await expect(page.getByRole("button", { name: "Delete topic…", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Delete decision record…", exact: true })).toHaveCount(0);
+  });
+}
+
+for (const touch of [false, true]) {
   test(`archived topic deletion includes every record on ${touch ? "iPad touch @webkit-touch" : "desktop"} in both appearances`, async ({ browser }) => {
     const writer = session();
     const title = `Delete topic acceptance ${touch ? "touch" : "desktop"}`;

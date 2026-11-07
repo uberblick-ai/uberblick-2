@@ -2,14 +2,24 @@ import { DatabaseSync } from "node:sqlite";
 import { Document } from "@hocuspocus/server";
 import {
   deleteDecisionTopic,
+  deleteDecisionRecord,
   deleteDirectoryEntry,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
+  DIRECTORY_DELETED_DECISION_RECORDS_KEY,
+  DIRECTORY_RELATED_PAGES_KEY,
   directoryRoom,
   enforceDeletedDirectoryEntries,
+  getDirectoryEntry,
   initDoc,
   isDirectoryEntryDeleted,
   parseRoom,
+  repairDirectoryStub,
   roomForDoc,
+  resolveDecisionTopics,
+  restoreDirectoryEntry,
   setKind,
+  setStatus,
+  tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -37,20 +47,20 @@ async function load(database: HubDatabase, room: string): Promise<Document> {
   return document;
 }
 
-function initialize(document: Y.Doc, uuid: string, topic?: string): void {
+function initialize(document: Y.Doc, uuid: string, topic?: string, options: { related?: string[]; supersedes?: string } = {}): void {
   document.transact(() => {
     initDoc(document, { uuid, title: "Original content", ...(topic === undefined ? {} : {
-      topic, ...(uuid === topic ? {} : { supersedes: topic }),
+      topic, ...(uuid === topic ? {} : { supersedes: topic }), ...options,
     }) });
     if (topic !== undefined) setKind(document, "decision");
     document.getText("body").insert(0, "Retained room content");
   }, { attribution: { author } });
 }
 
-async function create(database: HubDatabase, topic?: string): Promise<Document> {
+async function create(database: HubDatabase, topic?: string, options: { related?: string[]; supersedes?: string } = {}): Promise<Document> {
   const room = testRoom();
   const document = await load(database, room);
-  initialize(document, parseRoom(room).uuid, topic === "self" ? parseRoom(room).uuid : topic);
+  initialize(document, parseRoom(room).uuid, topic === "self" ? parseRoom(room).uuid : topic, options);
   await database.onStoreDocument({ document, documentName: room });
   return document;
 }
@@ -67,7 +77,7 @@ function persisted(database: HubDatabase, room: string): Uint8Array | undefined 
   return database.connection.prepare("SELECT data FROM documents WHERE name = ?").get(room)?.data as Uint8Array | undefined;
 }
 
-function retained(database: HubDatabase, document: Document): () => void {
+function retained(database: HubDatabase, document: Document, archiveClosesRevision = false): () => void {
   const state = persisted(database, document.name);
   const history = database.revisions.list(document.name);
   expect(history.length).toBeGreaterThan(0);
@@ -76,7 +86,11 @@ function retained(database: HubDatabase, document: Document): () => void {
     expect(database.isDeletedRoom(document.name)).toBe(false);
     expect(() => database.requireRoom(document.name)).not.toThrow();
     expect(persisted(database, document.name)).toEqual(state);
-    expect(database.revisions.list(document.name)).toEqual(history);
+    const current = database.revisions.list(document.name);
+    if (archiveClosesRevision) {
+      const stable = (revisions: typeof history) => revisions.map(({ final: _final, endedAt: _endedAt, deadlineAt: _deadlineAt, ...revision }) => revision);
+      expect(stable(current)).toEqual(stable(history));
+    } else expect(current).toEqual(history);
     expect(history.map(revision => database.revisions.getSnapshot(document.name, revision.id))).toEqual(snapshots);
   };
 }
@@ -112,6 +126,10 @@ describe("hub-owned deletion classification", () => {
       publish(directory, topic, topicUuid);
       publish(directory, record, topicUuid);
       const foreign = parseRoom(testRoom()).uuid;
+      if (shape === "another topic") {
+        upsertDirectoryEntry(directory, { uuid: foreign, title: "Archived unrelated topic", kind: "decision", topic: foreign, status: "open" });
+        tombstoneDirectoryEntry(directory, foreign);
+      }
       record.transact(() => {
         record.getMap("meta").set("kind", shape === "page" ? "" : "decision");
         record.getMap("meta").set("topic", foreign);
@@ -136,7 +154,139 @@ describe("hub-owned deletion classification", () => {
     },
   );
 
-  it("refuses deleting an archived record alone even when its topic is archived", async () => {
+  it.each(["before", "after"])("purges only a record archived %s its mark and fences it across restart while retaining the topic and its other record", async when => {
+    const path = tempDatabasePath();
+    const database = open(path);
+    const topic = await create(database, "self");
+    const topicUuid = parseRoom(topic.name).uuid;
+    const record = await create(database, topicUuid);
+    const uuid = parseRoom(record.name).uuid;
+    const other = await create(database, topicUuid);
+    const directory = await load(database, directoryRoom(WORKSPACE));
+    publish(directory, topic, topicUuid);
+    publish(directory, record, topicUuid);
+    publish(directory, other, topicUuid);
+    if (when === "before") tombstoneDirectoryEntry(directory, topicUuid);
+    const topicRetained = retained(database, topic, when === "after");
+    const otherRetained = retained(database, other, when === "after");
+    expect(database.revisions.list(record.name).length).toBeGreaterThan(0);
+
+    if (when === "before") expect(deleteDecisionRecord(directory, uuid)).toBe(true);
+    else directory.transact(() => {
+      tombstoneDirectoryEntry(directory, topicUuid);
+      directory.getMap("deleted-docs").set(uuid, true);
+    });
+
+    expect(database.isDeletedRoom(record.name)).toBe(true);
+    expect(() => database.requireRoom(record.name)).toThrow();
+    expect(persisted(database, record.name)).toBeUndefined();
+    expect(database.revisions.list(record.name)).toEqual([]);
+    expect(isDirectoryEntryDeleted(directory, uuid)).toBe(true);
+    expect(directory.getMap("docs").has(uuid)).toBe(false);
+    topicRetained();
+    otherRetained();
+    database.close();
+
+    const restarted = open(path);
+    expect(restarted.isDeletedRoom(record.name)).toBe(true);
+    expect(() => restarted.requireRoom(record.name)).toThrow();
+    expect(persisted(restarted, record.name)).toBeUndefined();
+    expect(restarted.revisions.list(record.name)).toEqual([]);
+    const reloadedDirectory = await load(restarted, directory.name);
+    expect(isDirectoryEntryDeleted(reloadedDirectory, uuid)).toBe(true);
+    expect(restarted.isDeletedRoom(topic.name)).toBe(false);
+    expect(restarted.isDeletedRoom(other.name)).toBe(false);
+    expect(persisted(restarted, topic.name)).toBeDefined();
+    expect(persisted(restarted, other.name)).toBeDefined();
+    expect(restarted.revisions.list(topic.name).length).toBeGreaterThan(0);
+    expect(restarted.revisions.list(other.name).length).toBeGreaterThan(0);
+  });
+
+  it.each(["live topic", "late record"])("reverses a record mark on a %s and ignores its remaining deletion references", async kind => {
+    const database = open();
+    const topic = await create(database, "self");
+    const topicUuid = parseRoom(topic.name).uuid;
+    const record = await create(database, topicUuid);
+    const uuid = parseRoom(record.name).uuid;
+    const successor = await create(database, topicUuid);
+    const successorUuid = parseRoom(successor.name).uuid;
+    const directory = await load(database, directoryRoom(WORKSPACE));
+    upsertDirectoryEntry(directory, { uuid: topicUuid, title: "Question", kind: "decision", topic: topicUuid, status: "decided" });
+    if (kind === "late record") tombstoneDirectoryEntry(directory, topicUuid);
+    upsertDirectoryEntry(directory, { uuid, title: "Middle answer", kind: "decision", topic: topicUuid, supersedes: topicUuid, status: "decided" });
+    upsertDirectoryEntry(directory, { uuid: successorUuid, title: "Final answer", kind: "decision", topic: topicUuid, supersedes: uuid, status: "decided" });
+    const before = resolveDecisionTopics(directory);
+    const assertRetained = retained(database, record);
+
+    directory.transact(() => {
+      directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).set(uuid, { topic: topicUuid, supersedes: successorUuid });
+      directory.getMap("deleted-docs").set(uuid, true);
+      directory.getMap("docs").delete(uuid);
+    });
+
+    assertRetained();
+    converged(directory, uuid);
+    expect(getDirectoryEntry(directory, uuid)?.title).toBe("Middle answer");
+    expect(directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).has(uuid)).toBe(true);
+    expect(resolveDecisionTopics(directory)).toEqual(before);
+    const replica = new Y.Doc();
+    documents.push(replica);
+    Y.applyUpdate(replica, Y.encodeStateAsUpdate(directory));
+    expect(resolveDecisionTopics(replica)).toEqual(before);
+  });
+
+  it("preserves a separately archived record and repairs its related pages when a topic restore makes its deletion refuse", async () => {
+    const database = open();
+    const related = [parseRoom(testRoom()).uuid, parseRoom(testRoom()).uuid];
+    const topic = await create(database, "self");
+    const topicUuid = parseRoom(topic.name).uuid;
+    const record = await create(database, topicUuid, { related });
+    const uuid = parseRoom(record.name).uuid;
+    const successor = await create(database, topicUuid, { supersedes: uuid });
+    const successorUuid = parseRoom(successor.name).uuid;
+    const directory = await load(database, directoryRoom(WORKSPACE));
+    for (const document of [topic, record, successor]) {
+      setStatus(document, "decided");
+      await database.onStoreDocument({ document, documentName: document.name });
+      repairDirectoryStub(document, directory, parseRoom(document.name).uuid, { now: 0, changedAt: null, coarsenessMs: 0 });
+    }
+    expect(resolveDecisionTopics(directory)[0]?.inForce?.uuid).toBe(successorUuid);
+    expect(tombstoneDecisionRecord(directory, uuid)).toBe(true);
+    tombstoneDirectoryEntry(directory, topicUuid);
+    const offline = new Y.Doc();
+    documents.push(offline);
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory));
+
+    restoreDirectoryEntry(directory, topicUuid);
+    const before = resolveDecisionTopics(directory);
+    const assertRetained = retained(database, record);
+    expect(deleteDecisionRecord(offline, uuid)).toBe(true);
+    expect(offline.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid)).toBe(true);
+    expect(offline.getMap(DIRECTORY_RELATED_PAGES_KEY).has(uuid)).toBe(false);
+    Y.applyUpdate(directory, Y.encodeStateAsUpdate(offline, Y.encodeStateVector(directory)));
+
+    assertRetained();
+    converged(directory, uuid);
+    expect(directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).has(uuid)).toBe(true);
+    expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).get(uuid)).toBe(true);
+    expect(directory.getMap(DIRECTORY_RELATED_PAGES_KEY).has(uuid)).toBe(false);
+    repairDirectoryStub(record, directory, uuid, { now: 0, changedAt: null, coarsenessMs: 0 });
+    expect(getDirectoryEntry(directory, uuid)?.related).toEqual(related);
+    expect(resolveDecisionTopics(directory)).toEqual(before);
+    expect(resolveDecisionTopics(directory)[0]?.archived).toBe(false);
+    expect(resolveDecisionTopics(directory)[0]?.archivedRecords.map(entry => entry.uuid)).toEqual([uuid]);
+    expect(resolveDecisionTopics(directory)[0]?.inForce?.uuid).toBe(successorUuid);
+
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory));
+    expect(resolveDecisionTopics(offline)).toEqual(before);
+    const fresh = new Y.Doc();
+    documents.push(fresh);
+    Y.applyUpdate(fresh, Y.encodeStateAsUpdate(directory));
+    expect(resolveDecisionTopics(fresh)).toEqual(before);
+    assertRetained();
+  });
+
+  it("refuses a stale pre-archive metadata winner before accepting a record mark, retaining state and history", async () => {
     const database = open();
     const topic = await create(database, "self");
     const topicUuid = parseRoom(topic.name).uuid;
@@ -145,11 +295,32 @@ describe("hub-owned deletion classification", () => {
     const directory = await load(database, directoryRoom(WORKSPACE));
     publish(directory, topic, topicUuid);
     publish(directory, record, topicUuid);
-    tombstoneDirectoryEntry(directory, topicUuid);
+    const archiver = new Y.Doc();
+    const stale = new Y.Doc();
+    const deleter = new Y.Doc();
+    documents.push(archiver, stale, deleter);
+    Y.applyUpdate(archiver, Y.encodeStateAsUpdate(directory));
+    Y.applyUpdate(stale, Y.encodeStateAsUpdate(directory));
+    archiver.clientID = 1;
+    stale.clientID = 2;
+    tombstoneDirectoryEntry(archiver, topicUuid);
+    Y.applyUpdate(directory, Y.encodeStateAsUpdate(archiver, Y.encodeStateVector(directory)));
+    Y.applyUpdate(deleter, Y.encodeStateAsUpdate(directory));
+    expect(getDirectoryEntry(directory, uuid)?.deleted).toBe(true);
+    upsertDirectoryEntry(stale, { uuid, title: "Stale metadata winner" });
+    Y.applyUpdate(directory, Y.encodeStateAsUpdate(stale, Y.encodeStateVector(directory)));
+    expect(getDirectoryEntry(directory, topicUuid)?.deleted).toBe(true);
+    expect(getDirectoryEntry(directory, uuid)?.deleted).toBeUndefined();
+    const before = resolveDecisionTopics(directory);
     const assertRetained = retained(database, record);
-    deleteDirectoryEntry(directory, uuid);
+
+    expect(deleteDecisionRecord(deleter, uuid)).toBe(true);
+    Y.applyUpdate(directory, Y.encodeStateAsUpdate(deleter, Y.encodeStateVector(directory)));
+
     assertRetained();
     converged(directory, uuid);
+    expect(getDirectoryEntry(directory, uuid)?.title).toBe("Stale metadata winner");
+    expect(resolveDecisionTopics(directory)).toEqual(before);
   });
 
   it("retains classification first learned from a directory before the room arrives", async () => {
@@ -439,8 +610,7 @@ describe("hub-owned deletion classification", () => {
       const liveUuid = parseRoom(liveRecord.name).uuid;
       publish(directory, liveTopic, liveTopicUuid);
       publish(directory, liveRecord, liveTopicUuid);
-      tombstoneDirectoryEntry(directory, liveTopicUuid);
-      tombstoneDirectoryEntry(directory, liveUuid);
+      directory.getMap("docs").set(liveUuid, { title: "Archived record of a live topic", tags: [], kind: "decision", topic: liveTopicUuid, deleted: true });
       const assertRetained = retained(first, liveRecord);
       deleteDirectoryEntry(directory, liveUuid);
       assertRetained();

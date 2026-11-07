@@ -408,6 +408,7 @@ export class HubDatabase implements Extension {
     const referencedTopics = new Set([...workspaceClassifications]
       .flatMap(([, classification]) => classification.topic === null ? [] : [classification.topic]));
     const refused: Array<{ uuid: string; before: unknown }> = [];
+    // known limit: a stale pre-archive upsert can make deletion refuse; revisit when archive authorization no longer uses replaceable entries.
     const archivedBeforeOrNow = (uuid: string): boolean => {
       const change = entryChanges?.get(uuid);
       return isArchivedEntry(change === undefined ? docs.get(uuid) : change.oldValue) || isArchivedEntry(docs.get(uuid));
@@ -420,6 +421,8 @@ export class HubDatabase implements Extension {
       return classification.topic === topic &&
         (classification.deleted || this.deletedRooms.has(topicRoom) || archivedBeforeOrNow(topic));
     };
+    const authorizedRecordMark = (uuid: string, topic: string): boolean => uuid !== topic &&
+      marks.get(uuid) === true && archivedBeforeOrNow(topic) && archivedBeforeOrNow(uuid);
     for (const [uuid, classification] of workspaceClassifications) {
       const name = roomForDoc(workspaceId, uuid);
       if (classification.topic === null) continue;
@@ -447,7 +450,7 @@ export class HubDatabase implements Extension {
       const before = change === undefined ? docs.get(uuid) : change.oldValue;
       const classification = classifications.rooms.get(target);
       if (classification?.topic !== undefined && classification.topic !== null) {
-        if (authorizedTopicMark(classification.topic)) continue;
+        if (authorizedTopicMark(classification.topic) || authorizedRecordMark(uuid, classification.topic)) continue;
       } else {
         const inherited = [entryDecisionTopic(before, uuid), entryDecisionTopic(docs.get(uuid), uuid), topics.get(uuid)]
           .some(topic => typeof topic === "string" && topic !== uuid && marks.get(topic) === true);

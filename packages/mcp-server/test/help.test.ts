@@ -130,13 +130,18 @@ it("teaches deliberate catalog creation, explicit guidance editing and sparse do
   expect(workspaces).not.toContain("MCP cannot curate");
 });
 
-it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains explicit topic deletion in %s help and description", async (topic) => {
+it.each(["delete_doc", "archive_doc", "unpin_doc"])("explains record and topic deletion in %s help and description", async (topic) => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic });
   const description = (await rig.client.listTools()).tools.find(({ name }) => name === topic)?.description;
   for (const prose of [text, description]) {
     expect(prose).toContain("topic: true");
-    expect(prose).toContain("record cannot be deleted on its own yet");
+    expect(prose).toContain("first record");
+    expect(prose).toContain("joined after archiving");
+    expect(prose).toMatch(/restore/);
+    expect(prose).toMatch(/archiv[\w ]+again/);
+    expect(prose).toMatch(/one (?:archived )?(?:decision )?record/);
+    expect(prose).not.toContain("cannot be deleted on its own yet");
   }
 });
 
