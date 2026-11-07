@@ -290,7 +290,11 @@ function ablaufNodeView({ node, editor, getPos }: NodeViewRendererProps,
       || matchMedia("(pointer: coarse)").matches || viewport.dataset.zoomable === "true")) viewer.open();
   });
   const resized = (): void => {
-    viewport.dataset.zoomable = String(naturalWidth > 0 && viewport.getBoundingClientRect().width / naturalWidth < 0.75);
+    const bounds = viewport.getBoundingClientRect();
+    viewport.dataset.zoomable = String(naturalWidth > 0 && bounds.width / naturalWidth < 0.75);
+    if (svg !== null && svg.closest(".ab-viewer") === null) {
+      toolbar.style.marginRight = `${Math.max(0, bounds.right - svg.getBoundingClientRect().right)}px`;
+    }
   };
   const resize = new ResizeObserver(resized);
   resize.observe(viewport);

@@ -93,6 +93,14 @@ test("Tall playable drawings use side captions when the column permits and below
   });
   expect(beside.gap).toBeGreaterThan(0);
   expect(beside.width).toBeCloseTo(beside.natural, 0);
+  const toolbarInset = () => block.evaluate(element => {
+    const tools = element.querySelector(".ub-figure-toolbar");
+    const figure = element.querySelector(".ub-ablauf-drawing")?.shadowRoot?.querySelector("svg");
+    if (!tools || !figure) throw new Error("e2e: diagram toolbar probes missing");
+    return Math.abs(figure.getBoundingClientRect().right - tools.getBoundingClientRect().right);
+  });
+  await block.hover();
+  await expect.poll(toolbarInset).toBeLessThan(10);
   await page.addStyleTag({ content: ".ub-column { max-width: 480px; }" });
   await expect(controls(block)).toHaveClass(/\babp-below\b/);
   await expect(controls(block).locator(".abp-step")).toBeVisible();
@@ -102,6 +110,7 @@ test("Tall playable drawings use side captions when the column permits and below
     if (figure === null || caption === null) throw new Error("e2e: below caption probes missing");
     return caption.getBoundingClientRect().top - figure.getBoundingClientRect().bottom;
   })).toBeGreaterThanOrEqual(0);
+  await expect.poll(toolbarInset).toBeLessThan(10);
   await expectStatic(block);
 });
 
