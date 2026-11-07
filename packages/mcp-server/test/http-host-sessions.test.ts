@@ -79,8 +79,8 @@ async function fixture() {
     const instance = createRuntime(config, options);
     runtimes.push(instance);
     const openSession = instance.openSession;
-    vi.spyOn(instance, "openSession").mockImplementation(() => {
-      const session = openSession();
+    vi.spyOn(instance, "openSession").mockImplementation((...args) => {
+      const session = openSession(...args);
       sessions.push(session);
       return session;
     });

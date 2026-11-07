@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
   encodeRevisionResponseFrames, getMeta, readRevisionRequest, readRevisionResponse, roomForDoc,
   snapshotRevision, upsertDirectoryEntry,
@@ -15,8 +16,12 @@ import { HistoryCache } from "../src/history-cache.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { tryAcquireHistoryRefresherRole } from "../src/history-refresher-role.js";
 import { MirrorStore } from "../src/store.js";
+import { ServerWork } from "../src/server-work.js";
+import { guarded } from "../src/tool-adapter.js";
+import { assertWriteScope } from "../src/tool-scope.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import { tools } from "../src/tool-table.js";
+import { createToolContext } from "../src/tools/context.js";
 import {
   cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startServer,
   tempDir, testConfig, WAIT_TIMEOUT_MS, waitUntil,
@@ -122,6 +127,58 @@ function refusal(result: ToolCall, code: string) {
 }
 
 describe("historical reads through the MCP boundary", () => {
+  it.each(["name_revision", "restore_revision"] as const)("refuses %s if its session loses write scope while the hub request waits", async name => {
+    const { rig, uuid } = await admitted();
+    const replicas = rig.instance.replicas;
+    const sync = replicas.sync;
+    const room = roomForDoc(rig.config.workspaceId, uuid);
+    const providers: Map<string, { hasCurrentSync(): boolean }> = Reflect.get(sync, "providers");
+    const provider = providers.get(room);
+    if (provider === undefined) throw new Error("The document has no room provider.");
+    const ready = vi.spyOn(provider, "hasCurrentSync");
+    const send = vi.spyOn(HocuspocusProvider.prototype, "sendStateless");
+    const write = vi.spyOn(rig.instance.store, "appendUpdate");
+    const before = Y.encodeStateAsUpdate(replicas.replica(uuid).doc);
+    let wake: () => void = () => { throw new Error("The revision request did not subscribe to state changes."); };
+    const subscribe = sync.onStateChange.bind(sync);
+    vi.spyOn(sync, "onStateChange").mockImplementation(listener => {
+      wake = listener;
+      return subscribe(listener);
+    });
+    const request = sync.requestRevisions.bind(sync);
+    vi.spyOn(sync, "requestRevisions").mockImplementation((...args) => {
+      ready.mockReturnValue(false);
+      return request(...args);
+    });
+    let scope = ["docs:read", "docs:write"];
+    const check = () => assertWriteScope(scope);
+    const tool = tools.find(candidate => candidate.name === name);
+    if (tool === undefined) throw new Error(`Missing tool ${name}.`);
+    const work = new ServerWork();
+    const call = guarded(tool, createToolContext(replicas, work), false, check);
+    const pending = call(name === "name_revision" ? { uuid, name: "Reviewed" } : { uuid, revision },
+      { signal: new AbortController().signal });
+    try {
+      await waitUntil("the revision request waiting for room admission", () => ready.mock.results.some(result => result.value === false));
+      scope = ["docs:read"];
+      ready.mockReturnValue(true);
+      wake();
+      const response = await pending;
+      expect(response.isError).toBe(true);
+      const content = response.content[0];
+      if (content?.type !== "text") throw new Error("The failure has no text payload.");
+      expect(JSON.parse(content.text)).toMatchObject({ error: "insufficient_scope", applied: false,
+        partial: false, synced: false, recoveryClass: "manual" });
+      expect(send.mock.calls.filter(([payload]) => readRevisionRequest(payload) !== null)).toEqual([]);
+      expect(write).not.toHaveBeenCalled();
+      expect(Y.encodeStateAsUpdate(replicas.replica(uuid).doc)).toEqual(before);
+    } finally {
+      ready.mockRestore();
+      await pending;
+      await work.drain();
+    }
+  });
+
   it("restores through the hub as a closed revision, synchronizes peers and leaves later edits writable", async () => {
     const hub = await createTeamHub({ address: "127.0.0.1", port: 0, databasePath: ":memory:",
       github: { clientId: "Iv1.0123456789abcdef" }, log() {} }, { deviceCredentials: true });

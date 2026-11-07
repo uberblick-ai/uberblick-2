@@ -41,6 +41,7 @@ export function guarded(
   tool: Pick<Tool, "name" | "output" | "operation" | "writes">,
   context: ToolContext,
   waitForWriteAcknowledgement = false,
+  assertWriteScope?: () => void,
 ): (args: Record<string, unknown>, extra: Pick<OperationRequest, "signal" | "_meta">) => Promise<CallToolResult> {
   return async (args, extra) => {
     try {
@@ -53,6 +54,7 @@ export function guarded(
         try {
           const result = await tool.operation(acknowledgement?.context ?? context, args, {
             signal: extra.signal,
+            ...(assertWriteScope === undefined ? {} : { assertWriteScope }),
             ...(extra._meta === undefined ? {} : { _meta: extra._meta }),
             ...(extra._meta?.progressToken === undefined ? {} : { progressToken: extra._meta.progressToken }),
           });

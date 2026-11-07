@@ -13,6 +13,7 @@ import { writeHubLogin } from "../src/auth-store.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { documentRevisionChecksum, mutateDocumentRevision, readDocumentHistory, readDocumentRevision, restoreDocumentRevision } from "../src/revision-client.js";
 import { HubSync } from "../src/sync.js";
+import { assertWriteScope } from "../src/tool-scope.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, tempDir, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
@@ -286,13 +287,15 @@ it("preserves independent names and titles options at the revision transport bou
   await expect(list({ includeTitles: true })).resolves.toMatchObject({ revisions: [entry] });
 });
 
-it("does not claim a sent naming request made no change when its reply is lost or unavailable", async () => {
+it("keeps a sent naming outcome unknown when its scope narrows and the reply is lost", async () => {
   const fixture = await admitted();
   const mutation = { operation: "name" as const, name: "Reviewed", checksum: documentRevisionChecksum(fixture.replica.doc),
     surface: { kind: "mcp", name: "Claude Code" } };
   const committed: string[] = [];
-  fixture.reply(request => { committed.push(request.name!); });
-  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+  let scope = ["docs:read", "docs:write"];
+  const check = () => assertWriteScope(scope);
+  fixture.reply(request => { committed.push(request.name!); scope = ["docs:read"]; });
+  await expect(mutateDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100, assertWriteScope: check }))
     .rejects.toMatchObject({ code: "naming-outcome-unknown", details: { applied: null, reason: "unsupported" } });
   expect(committed).toEqual(["Reviewed"]);
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));
@@ -312,8 +315,10 @@ it("preserves restore no-op results and treats missing restore acknowledgements 
   await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation))
     .resolves.toEqual({ revision: entry, applied: false });
   const requests: RevisionRequest[] = [];
-  fixture.reply(request => { requests.push(request); });
-  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100 }))
+  let scope = ["docs:read", "docs:write"];
+  const check = () => assertWriteScope(scope);
+  fixture.reply(request => { requests.push(request); scope = ["docs:read"]; });
+  await expect(restoreDocumentRevision(fixture.opened.replicas, fixture.uuid, mutation, { timeoutMs: 100, assertWriteScope: check }))
     .rejects.toMatchObject({ code: "restore-outcome-unknown", details: { applied: null, reason: "unsupported" } });
   expect(requests).toMatchObject([mutation]);
   fixture.reply((request, send) => send({ requestId: request.requestId, ok: false, error: "unavailable" }));

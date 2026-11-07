@@ -26,6 +26,7 @@ import {
 } from "../src/failures.js";
 import { RevisionClientError } from "../src/revision-client.js";
 import { ServerShuttingDownError } from "../src/server-work.js";
+import { assertWriteScope } from "../src/tool-scope.js";
 import { MirrorStore, WorkspaceDetachedError, WorkspaceRemovedError } from "../src/store.js";
 import type { SearchHit } from "../src/store.js";
 import {
@@ -114,6 +115,7 @@ const EXPECTED: Record<
   render_too_large: { recoveryClass: "manual", detail: ["uuid", "block_id", "maxPixels"] },
   render_failed: { recoveryClass: "manual", detail: ["uuid", "block_id"] },
   server_shutting_down: { recoveryClass: "manual", detail: [] },
+  insufficient_scope: { recoveryClass: "manual", detail: [] },
   data_invalid_input: { recoveryClass: "manual", detail: ["collection", "recordId"] },
   data_collection_not_found: { recoveryClass: "reread", detail: ["uuid", "collection"] },
   data_schema_invalid: { recoveryClass: "manual", detail: ["collection", "path"] },
@@ -668,6 +670,8 @@ describe("the failure contract", () => {
     record(toFailure(toolNamed("set_metadata"), new ServerShuttingDownError()).payload);
     record(toFailure(toolNamed("create_doc"), new WorkspaceRemovedError()).payload);
     record(toFailure(toolNamed("create_doc"), new WorkspaceDetachedError()).payload);
+    try { assertWriteScope(["docs:read"]); }
+    catch (error) { record(toFailure(toolNamed("set_metadata"), error).payload); }
 
     // Valid MCP inputs cannot cross decision kinds; retain the defensive
     // mapper for shared-model lifecycle errors from an internal caller.

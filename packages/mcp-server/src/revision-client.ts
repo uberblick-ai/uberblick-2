@@ -60,6 +60,11 @@ export interface RevisionReadOptions {
   refresh?: true;
 }
 
+export interface RevisionMutationOptions extends RevisionReadOptions {
+  /** Recheck the calling session immediately before the hub request is sent. */
+  assertWriteScope?: (() => void) | undefined;
+}
+
 const readers = new WeakMap<Replicas, { reader: HistoryReader; clock: HubHistoryClock }>();
 
 function historyReader(replicas: Replicas): HistoryReader {
@@ -125,10 +130,11 @@ async function requestRevisions(
   replicas: Replicas,
   uuid: string,
   operation: Omit<RevisionRequest, "requestId">,
-  options: RevisionReadOptions,
+  options: RevisionMutationOptions,
 ) {
   try {
-    return await replicas.sync.requestRevisions(room(replicas, uuid), operation, options.timeoutMs);
+    return await replicas.sync.requestRevisions(room(replicas, uuid), operation, options.timeoutMs,
+      { assertWriteScope: options.assertWriteScope });
   } catch (error) {
     if (error instanceof RevisionClientError && error.code === "deleted") {
       throw new RevisionClientError("deleted", { ...error.details, uuid });
@@ -154,7 +160,7 @@ export async function mutateDocumentRevision(
   replicas: Replicas,
   uuid: string,
   mutation: Omit<RevisionRequest, "requestId">,
-  options: RevisionReadOptions = {},
+  options: RevisionMutationOptions = {},
 ): Promise<RevisionEntry> {
   const response = await requestRevisions(replicas, uuid, mutation, options);
   if (!response.ok) {
@@ -177,7 +183,7 @@ export async function restoreDocumentRevision(
   replicas: Replicas,
   uuid: string,
   mutation: { operation: "restore"; revisionId: string; checksum: string; surface: { kind: string; name: string } },
-  options: RevisionReadOptions = {},
+  options: RevisionMutationOptions = {},
 ): Promise<{ revision: RevisionEntry; applied: boolean }> {
   const response = await requestRevisions(replicas, uuid, mutation, options);
   if (!response.ok) {

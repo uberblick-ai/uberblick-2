@@ -58,6 +58,10 @@ interface Recovery {
  * when the unchanged call cannot succeed after a transient condition passes.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  insufficient_scope: {
+    recoveryClass: "manual",
+    guidance: "Authorize this connection with docs:read docs:write before repeating the call. Nothing was written.",
+  },
   invalid_render_options: {
     recoveryClass: "manual",
     guidance: "Use format png or svg and an integer width from 100 to 2000, or omit both for a 1000-pixel-wide PNG.",
