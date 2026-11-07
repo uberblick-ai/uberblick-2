@@ -18,6 +18,18 @@ it("preserves the ordered tools/list catalog and input contract", async () => {
       expect(field.description).toContain("Regular pages: agent-only discovery text; a keyword list is fine.");
       expect(field.description).toContain("Decisions: short line on why this answer was chosen or what changed, shown in the topic's history.");
     }
+    const formats = new Set<string>();
+    const checkFormats = (node: unknown): void => {
+      if (node === null || typeof node !== "object") return;
+      const schema = node as Record<string, unknown>;
+      if (schema.format === "uuid" || schema.format === "date-time") {
+        formats.add(schema.format);
+        expect(schema).not.toHaveProperty("pattern");
+      }
+      for (const child of Object.values(schema)) checkFormats(child);
+    };
+    for (const { inputSchema } of tools) checkFormats(inputSchema);
+    expect(formats).toEqual(new Set(["uuid", "date-time"]));
     expect(
       tools.map(({ name, title, inputSchema, description, annotations }) => ({
         name,
