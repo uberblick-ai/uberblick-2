@@ -286,7 +286,7 @@ const RECOVERIES: Record<string, Recovery> = {
   doc_archived: {
     recoveryClass: "manual",
     guidance:
-      "Archived documents are read-only. Call restore_doc for this uuid before editing. To permanently delete, call delete_doc for an archived regular document, or delete_doc with topic: true for an archived decision topic. One decision record cannot be deleted on its own yet.",
+      "Archived documents are read-only. Call restore_doc for this uuid before editing. To permanently delete, call delete_doc for an archived regular document or one record of an archived decision topic. Its first record goes only with the whole topic, using topic: true. A record that joined after archiving needs the topic restored and archived again before record deletion, or topic: true. MCP archive_doc always archives the whole topic.",
   },
   doc_deleted: {
     recoveryClass: "manual",
@@ -346,11 +346,11 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   doc_not_archived: {
     recoveryClass: "manual",
-    guidance: "Call archive_doc for this UUID before deliberately calling delete_doc; decision topics require topic: true. One decision record cannot be deleted on its own yet. Nothing was written.",
+    guidance: "Call archive_doc for this UUID before deliberately calling delete_doc; MCP archiving always covers the whole decision topic. Then delete one record with delete_doc, or every record with topic: true. The first record can go only with its whole topic. A record that joined after archiving needs the topic restored and archived again before record deletion, or topic: true. Nothing was written.",
   },
   decision_delete_unsupported: {
     recoveryClass: "manual",
-    guidance: "One decision record cannot be deleted on its own yet. To permanently delete every record, archive the whole topic with archive_doc, then call delete_doc with this UUID and topic: true. Nothing was written.",
+    guidance: "The first record can be deleted only with its whole topic: archive the topic with archive_doc, then call delete_doc with this UUID and topic: true. Other records of an archived topic can be deleted one at a time without topic: true if their own entry is archived. A record that joined after archiving needs the topic restored with restore_doc and archived again with archive_doc before record deletion, or topic: true. MCP archiving always covers the whole topic. Nothing was written.",
   },
   group_not_found: {
     recoveryClass: "reread",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { archiveDocument, archiveDecisionRecord, deleteDecisionTopic, deleteDirectoryEntry, getDirectoryEntry, decisionTopicArchived, decisionTopicTitle, getMeta, isDirectoryEntryArchived, resolveDecisionTopics, restoreDirectoryEntry, unpinDoc } from "@uberblick/schema";
+import { archiveDocument, archiveDecisionRecord, deleteDecisionRecord, deleteDecisionTopic, deleteDirectoryEntry, getDirectoryEntry, decisionTopicArchived, decisionTopicTitle, getMeta, isDirectoryEntryArchived, resolveDecisionTopics, restoreDirectoryEntry, unpinDoc } from "@uberblick/schema";
 import { toast } from "sonner";
 import { acquireRoom } from "../../collab/rooms.js";
 import type { ShellEnvironment } from "./environment.js";
@@ -37,14 +37,20 @@ export function useArchive({ directory, doc, sidebar, selected, defaultIdentity,
     archiveConfirmationFocusRoom.current = null;
   }, []);
 
-  const onDelete = useCallback((topic: boolean) => {
+  const onDelete = useCallback((scope: "document" | "record" | "topic") => {
     if (directory === null || selected === null || !directory.status.writable) return;
     const entry = getDirectoryEntry(directory.ydoc, selected);
-    if (entry === null || (entry.kind === "decision") !== topic) return;
+    if (entry === null || (entry.kind === "decision") !== (scope !== "document")) return;
     let records: string[];
     if (entry.kind === "decision") {
       if (!decisionTopicArchived(directory.ydoc, selected)) return;
-      records = deleteDecisionTopic(directory.ydoc, selected);
+      if (scope === "topic") {
+        records = deleteDecisionTopic(directory.ydoc, selected);
+      } else {
+        if (!deleteDecisionRecord(directory.ydoc, selected)) return;
+        records = [selected];
+        if (workspace !== null) navigate(docPath(workspace.segment, entry.topic ?? entry.uuid));
+      }
     } else {
       if (entry.deleted !== true || (doc !== null && getMeta(doc.ydoc).kind === "decision")) return;
       deleteDirectoryEntry(directory.ydoc, selected);
@@ -55,7 +61,7 @@ export function useArchive({ directory, doc, sidebar, selected, defaultIdentity,
     if (sidebar?.status.writable) {
       for (const uuid of records) unpinDoc(sidebar.ydoc, uuid);
     }
-  }, [directory, selected, doc, sidebar]);
+  }, [directory, selected, doc, sidebar, workspace, navigate]);
 
   /**
    * Remember focus inside archive confirmation so a remote tombstone can

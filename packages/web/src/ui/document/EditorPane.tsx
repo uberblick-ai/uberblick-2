@@ -153,11 +153,13 @@ function ArchivedBanner({
   title,
   decision,
   topicArchived,
+  recordSummary,
 }: {
   actions: DocumentActionProps;
   title: string;
   decision: boolean;
   topicArchived: boolean;
+  recordSummary: ReactNode;
 }): ReactElement {
   const restore = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
@@ -165,6 +167,22 @@ function ArchivedBanner({
     restore.current?.focus();
     onRestoreFocused?.();
   }, [focusRestore, onRestoreFocused]);
+  const deleteActions = !decision ? [{
+    label: "Delete…", action: "Delete", title: `Delete “${title}”?`, scope: "document" as const,
+    description: "It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone.",
+    summary: null,
+  }] : !topicArchived ? [] : [
+    ...(recordSummary == null ? [] : [{
+      label: "Delete decision record…", action: "Delete decision record", title: `Delete decision record from “${title}”?`, scope: "record" as const,
+      description: "Only this record will be deleted for everyone, with its comments and history. The topic and its other records stay. Links to this record will show it was deleted. This can't be undone.",
+      summary: recordSummary,
+    }]),
+    {
+      label: "Delete topic…", action: "Delete topic", title: `Delete topic “${title}”?`, scope: "topic" as const,
+      description: "The topic and all its records will be deleted for everyone, with their comments and history. Links to them will show they were deleted. This can't be undone.",
+      summary: null,
+    },
+  ];
   return (
     <div className="ub-archived-banner mb-3 flex flex-wrap items-center gap-2 rounded-(--radius) border border-(--border) bg-(--archived-background) px-3 py-[0.6rem] text-(--foreground)">
       <svg aria-hidden="true" className="size-4 shrink-0 text-(--archived-icon)" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -182,24 +200,23 @@ function ArchivedBanner({
       >
         {onRestore === null ? "Restore unavailable" : "Restore"}
       </Button>
-      {(!decision || topicArchived) && (
-        <AlertDialog>
+      {deleteActions.map((deletion) => (
+        <AlertDialog key={deletion.label}>
           <AlertDialogTrigger asChild>
             <Button variant="plain" size="custom"
               type="button"
               className="min-h-6 min-w-6 rounded-(--radius-sm) bg-transparent px-2 py-1 ub-type-ui text-(--destructive-ink) disabled:opacity-50"
               disabled={onDelete === null}
               aria-describedby={onDelete === null ? "ub-delete-unavailable" : undefined}
-            >{decision ? "Delete topic…" : "Delete…"}</Button>
+            >{deletion.label}</Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
-            <AlertDialogTitle>{decision ? `Delete topic “${title}”?` : `Delete “${title}”?`}</AlertDialogTitle>
+            <AlertDialogTitle>{deletion.title}</AlertDialogTitle>
             <AlertDialogDescription>
+              {deletion.summary != null && <span className="mb-2 block">{deletion.summary}</span>}
               {onDelete === null
                 ? "Delete is unavailable while the directory is not ready to write. Nothing has been deleted."
-                : decision
-                  ? "The topic and all its records will be deleted for everyone, with their comments and history. Links to them will show they were deleted. This can't be undone."
-                  : "It will be gone for everyone, with its comments and history. Links to it will show it was deleted. This can't be undone."}
+                : deletion.description}
             </AlertDialogDescription>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -211,19 +228,19 @@ function ArchivedBanner({
                     event.preventDefault();
                     return;
                   }
-                  onDelete(decision);
+                  onDelete(deletion.scope);
                 }}
-              >{decision ? "Delete topic" : "Delete"}</AlertDialogAction>
+              >{deletion.action}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      )}
+      ))}
       {onRestore === null && (
         <span className="ub-restore-unavailable basis-full ub-type-small">
           Restore is unavailable while the directory is not ready to write.
         </span>
       )}
-      {(!decision || topicArchived) && onDelete === null && (
+      {deleteActions.length > 0 && onDelete === null && (
         <span id="ub-delete-unavailable" className="basis-full ub-type-small">
           Delete is unavailable while the directory is not ready to write.
         </span>
@@ -948,6 +965,7 @@ export function EditorPane({
   isDecisionTopic = false,
   topicArchived = false,
   actionTitle,
+  deleteRecordSummary,
   docLinks,
   onSelectThread,
   syncReading = {},
@@ -990,6 +1008,7 @@ export function EditorPane({
   isDecisionTopic?: boolean;
   topicArchived?: boolean;
   actionTitle?: string | undefined;
+  deleteRecordSummary?: ReactNode;
   /**
    * References use the current workspace address, directory titles and
    * navigation callback; null means no workspace. Keep the object stable
@@ -1085,7 +1104,7 @@ export function EditorPane({
       )}
       <div className="ub-column">
         {archived && (
-          <ArchivedBanner actions={actions} title={actionTitle || meta?.title || "Untitled"} decision={decision} topicArchived={topicArchived} />
+          <ArchivedBanner actions={actions} title={actionTitle || meta?.title || "Untitled"} decision={decision} topicArchived={topicArchived} recordSummary={deleteRecordSummary} />
         )}
         {/* Keep document kind, tags and revision above the title. */}
         <DocMetaLine

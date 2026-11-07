@@ -2,17 +2,25 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   deleteDecisionTopic,
+  deleteDecisionRecord,
+  decisionRelations,
+  decisionTopicState,
+  DIRECTORY_ARCHIVED_RECORDS_KEY,
+  DIRECTORY_DELETED_DECISION_RECORDS_KEY,
   DIRECTORY_DELETED_DECISION_TOPICS_KEY,
   decisionTopicArchived,
   enforceDeletedDirectoryEntries,
   getDirectoryEntry,
   getDirectoryMap,
+  initDoc,
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   listDirectory,
   relatedDecisionTopics,
+  repairDirectoryStub,
   resolveDecisionTopics,
   restoreDirectoryEntry,
+  setKind,
   tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
@@ -99,5 +107,216 @@ describe("permanent decision topic deletion", () => {
       expect(listDirectory(offline, { includeDeleted: true })).toEqual([]);
       expect(resolveDecisionTopics(offline)).toEqual([]);
     } finally { directory.destroy(); offline.destroy(); }
+  });
+});
+
+describe("permanent decision record deletion", () => {
+  it("deletes a middle record without changing its successors or creating a conflict", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      const current = getDirectoryMap(directory).get(CURRENT);
+      expect(deleteDecisionRecord(directory, FORMER)).toBe(true);
+      const topic = resolveDecisionTopics(directory)[0]!;
+      expect(topic.allRecords.map((record) => record.uuid)).toEqual([TOPIC, CURRENT]);
+      expect(topic.inForce?.uuid).toBe(CURRENT);
+      expect(topic.conflicts).toEqual([]);
+      expect(topic.archived).toBe(true);
+      expect(getDirectoryMap(directory).get(CURRENT)).toEqual(current);
+      expect(getDirectoryEntry(directory, CURRENT)?.supersedes).toBe(TOPIC);
+      expect(decisionRelations(directory, CURRENT).predecessors.map((record) => record.uuid)).toEqual([TOPIC]);
+      expect(decisionRelations(directory, TOPIC).successors.map((record) => record.uuid)).toEqual([CURRENT]);
+      expect(decisionRelations(directory, FORMER)).toEqual({ predecessors: [], successors: [], resolution: null });
+      expect(resolveDecisionTopics(listDirectory(directory, { includeDeleted: true }))).toEqual([topic]);
+      restoreDirectoryEntry(directory, TOPIC);
+      const restored = resolveDecisionTopics(directory)[0]!;
+      expect(restored.archived).toBe(false);
+      expect(restored.allRecords.map((record) => record.uuid)).toEqual([TOPIC, CURRENT]);
+      expect(restored.inForce?.uuid).toBe(CURRENT);
+      expect(isDirectoryEntryDeleted(directory, FORMER)).toBe(true);
+    } finally { directory.destroy(); }
+  });
+
+  it("walks several deleted predecessors and brings back the last remaining decided answer", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      upsertDirectoryEntry(directory, { uuid: LATE, title: "Latest", kind: "decision", topic: TOPIC, supersedes: CURRENT, status: "decided" });
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(deleteDecisionRecord(directory, FORMER)).toBe(true);
+      expect(deleteDecisionRecord(directory, CURRENT)).toBe(true);
+      expect(resolveDecisionTopics(directory)[0]!.inForce?.uuid).toBe(LATE);
+      expect(decisionRelations(directory, LATE).predecessors.map((record) => record.uuid)).toEqual([TOPIC]);
+      expect(deleteDecisionRecord(directory, LATE)).toBe(true);
+      expect(resolveDecisionTopics(directory)[0]!.inForce?.uuid).toBe(TOPIC);
+      expect(resolveDecisionTopics(directory)[0]!.records.map((record) => record.uuid)).toEqual([TOPIC]);
+      const before = Y.encodeStateAsUpdate(directory);
+      expect(deleteDecisionRecord(directory, TOPIC)).toBe(false);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    } finally { directory.destroy(); }
+  });
+
+  it("repairs surviving raw metadata without repeatedly writing its projected predecessor", () => {
+    const directory = new Y.Doc();
+    const document = new Y.Doc();
+    try {
+      seed(directory);
+      initDoc(document, { uuid: CURRENT, title: "Current", topic: TOPIC, supersedes: FORMER });
+      setKind(document, "decision");
+      repairDirectoryStub(document, directory, CURRENT, { now: 123, changedAt: null, coarsenessMs: 100 });
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(deleteDecisionRecord(directory, FORMER)).toBe(true);
+      expect(getDirectoryEntry(directory, CURRENT)?.supersedes).toBe(TOPIC);
+      const before = Y.encodeStateAsUpdate(directory);
+      repairDirectoryStub(document, directory, CURRENT, { now: 124, changedAt: null, coarsenessMs: 100 });
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    } finally { directory.destroy(); document.destroy(); }
+  });
+
+  it.each(["open", "rejected", "withdrawn"] as const)("leaves an undecided topic when only %s records remain", (status) => {
+    const directory = new Y.Doc();
+    try {
+      upsertDirectoryEntry(directory, { uuid: TOPIC, title: "Question", kind: "decision", topic: TOPIC, status });
+      upsertDirectoryEntry(directory, { uuid: CURRENT, title: "Answer", kind: "decision", topic: TOPIC, supersedes: TOPIC, status: "decided" });
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(deleteDecisionRecord(directory, CURRENT)).toBe(true);
+      const topic = resolveDecisionTopics(directory)[0]!;
+      expect(topic.inForce).toBeNull();
+      expect(topic.conflicts).toEqual([]);
+      expect(decisionTopicState(topic)).toBe("not-yet-decided");
+      expect(topic.pending.map((record) => record.uuid)).toEqual(status === "open" ? [TOPIC] : []);
+    } finally { directory.destroy(); }
+  });
+
+  it("preserves independent conflicting answers and removes a deleted pending record", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      upsertDirectoryEntry(directory, { uuid: LATE, title: "Competing answer", kind: "decision", topic: TOPIC, supersedes: TOPIC, status: "decided" });
+      upsertDirectoryEntry(directory, { uuid: RELATED, title: "Proposal", kind: "decision", topic: TOPIC, supersedes: CURRENT, status: "open" });
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(deleteDecisionRecord(directory, FORMER)).toBe(true);
+      expect(deleteDecisionRecord(directory, RELATED)).toBe(true);
+      const topic = resolveDecisionTopics(directory)[0]!;
+      expect(topic.conflicts.map((record) => record.uuid)).toEqual([CURRENT, LATE]);
+      expect(topic.pending).toEqual([]);
+      expect(topic.inForce).toBeNull();
+    } finally { directory.destroy(); }
+  });
+
+  it("refuses a live topic and its first record without writing", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      let before = Y.encodeStateAsUpdate(directory);
+      expect(deleteDecisionRecord(directory, FORMER)).toBe(false);
+      expect(deleteDecisionRecord(directory, TOPIC)).toBe(false);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      before = Y.encodeStateAsUpdate(directory);
+      expect(deleteDecisionRecord(directory, TOPIC)).toBe(false);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    } finally { directory.destroy(); }
+  });
+
+  it("refuses a record that joined after archiving until the topic is restored and archived again", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      upsertDirectoryEntry(directory, { uuid: LATE, title: "Late proposal", kind: "decision", topic: TOPIC, supersedes: CURRENT, status: "open" });
+      expect(decisionTopicArchived(directory, LATE)).toBe(true);
+      expect(getDirectoryEntry(directory, LATE)?.deleted).toBeUndefined();
+      const before = Y.encodeStateAsUpdate(directory);
+      expect(deleteDecisionRecord(directory, LATE)).toBe(false);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+      restoreDirectoryEntry(directory, TOPIC);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(getDirectoryEntry(directory, LATE)?.deleted).toBe(true);
+      expect(deleteDecisionRecord(directory, LATE)).toBe(true);
+      expect(resolveDecisionTopics(directory)[0]!.allRecords.map((record) => record.uuid)).toEqual([TOPIC, FORMER, CURRENT]);
+    } finally { directory.destroy(); }
+  });
+
+  it("keeps only the UUID mark and graph edges, never a metadata witness", () => {
+    const directory = new Y.Doc();
+    const compacted = new Y.Doc();
+    try {
+      seed(directory);
+      upsertDirectoryEntry(directory, {
+        uuid: LATE, title: "private deleted title", tags: ["private deleted tag"], kind: "decision", topic: TOPIC,
+        supersedes: CURRENT, status: "open", description: "private deleted description", answerPreview: "private deleted answer",
+        related: [RELATED], updatedAt: 123, commentCount: 2,
+      });
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(deleteDecisionRecord(directory, LATE)).toBe(true);
+      expect(directory.getMap("deleted-docs").get(LATE)).toBe(true);
+      expect(getDirectoryMap(directory).has(LATE)).toBe(false);
+      expect(directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).get(LATE)).toEqual({ topic: TOPIC, supersedes: CURRENT });
+      expect(directory.getMap("decision-related-pages").has(LATE)).toBe(false);
+      expect([...directory.getMap("updatedAt").keys()].some((key) => key.startsWith(LATE))).toBe(false);
+      expect(getDirectoryEntry(directory, LATE)).toBeNull();
+      expect(listDeletedDirectoryUuids(directory)).toEqual([LATE]);
+      Y.applyUpdate(compacted, Y.encodeStateAsUpdate(directory));
+      expect(Buffer.from(Y.encodeStateAsUpdate(compacted)).toString("utf8")).not.toContain("private deleted");
+      getDirectoryMap(directory).set(LATE, { title: "stale private title", tags: [], kind: "decision", topic: TOPIC });
+      enforceDeletedDirectoryEntries(directory);
+      expect(getDirectoryMap(directory).has(LATE)).toBe(false);
+    } finally { directory.destroy(); compacted.destroy(); }
+  });
+
+  it("removes a separately archived record's archive mark and keeps whole-topic deletion intact", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      expect(tombstoneDecisionRecord(directory, FORMER)).toBe(true);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      expect(deleteDecisionRecord(directory, FORMER)).toBe(true);
+      expect(directory.getMap(DIRECTORY_ARCHIVED_RECORDS_KEY).has(FORMER)).toBe(false);
+      deleteDecisionTopic(directory, TOPIC);
+      expect(getDirectoryMap(directory).has(FORMER)).toBe(false);
+      expect(resolveDecisionTopics(directory)).toEqual([]);
+    } finally { directory.destroy(); }
+  });
+
+  it.each([FORMER, CURRENT])("ignores retained graph references after the hub reverses %s's mark", (selected) => {
+    const directory = new Y.Doc();
+    const replica = new Y.Doc();
+    try {
+      seed(directory);
+      tombstoneDirectoryEntry(directory, TOPIC);
+      const original = getDirectoryMap(directory).get(selected);
+      const before = resolveDecisionTopics(directory);
+      const beforeRelations = [TOPIC, FORMER, CURRENT].map((uuid) => decisionRelations(directory, uuid));
+      expect(deleteDecisionRecord(directory, selected)).toBe(true);
+      syncDocs(directory, replica);
+      directory.transact(() => {
+        directory.getMap("deleted-docs").delete(selected);
+        getDirectoryMap(directory).set(selected, original);
+      });
+      syncDocs(directory, replica);
+      for (const peer of [directory, replica]) {
+        expect(peer.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).has(selected)).toBe(true);
+        expect(isDirectoryEntryDeleted(peer, selected)).toBe(false);
+        expect(resolveDecisionTopics(peer)).toEqual(before);
+        expect([TOPIC, FORMER, CURRENT].map((uuid) => decisionRelations(peer, uuid))).toEqual(beforeRelations);
+      }
+    } finally { directory.destroy(); replica.destroy(); }
+  });
+
+  it("never treats graph references as a deletion mark or crosses a foreign topic", () => {
+    const directory = new Y.Doc();
+    try {
+      seed(directory);
+      directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).set(FORMER, { topic: TOPIC, supersedes: TOPIC });
+      expect(isDirectoryEntryDeleted(directory, FORMER)).toBe(false);
+      expect(getDirectoryEntry(directory, CURRENT)?.supersedes).toBe(FORMER);
+      directory.getMap("deleted-docs").set(FORMER, true);
+      directory.getMap(DIRECTORY_DELETED_DECISION_RECORDS_KEY).set(FORMER, { topic: LATE, supersedes: TOPIC });
+      enforceDeletedDirectoryEntries(directory);
+      expect(getDirectoryEntry(directory, CURRENT)?.supersedes).toBe(FORMER);
+      expect(resolveDecisionTopics(directory)[0]!.conflicts.map((record) => record.uuid)).toEqual([TOPIC, CURRENT]);
+    } finally { directory.destroy(); }
   });
 });

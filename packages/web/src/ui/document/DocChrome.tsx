@@ -65,7 +65,7 @@ export type DocumentActionProps = {
   focusRestore?: boolean;
   onRestoreFocused?: (() => void) | undefined;
   onRestore?: (() => void) | null;
-  onDelete?: ((topic: boolean) => void) | null;
+  onDelete?: ((scope: "document" | "record" | "topic") => void) | null;
 };
 
 function titleOf(meta: DocMeta): string {

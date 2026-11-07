@@ -5,6 +5,7 @@ import type { Connection } from "@hocuspocus/server";
 import { messageYjsUpdate } from "y-protocols/sync";
 import {
   deleteDirectoryEntry,
+  deleteDecisionRecord,
   deleteDecisionTopic,
   DIRECTORY_DELETED_DECISION_TOPICS_KEY,
   directoryRoom,
@@ -14,6 +15,8 @@ import {
   isDirectoryEntryDeleted,
   parseRoom,
   roomForDoc,
+  resolveDecisionTopics,
+  restoreDirectoryEntry,
   setKind,
   tombstoneDecisionRecord,
   tombstoneDirectoryEntry,
@@ -81,6 +84,92 @@ afterEach(async () => {
 });
 
 describe("permanent room deletion", () => {
+  it.each(["coalesced reconnect", "ordered updates"])("keeps single-record marks through %s without deleting the topic, and requires rearchiving a late record", async (delivery) => {
+    const databasePath = tempDatabasePath();
+    const first = await hub(databasePath);
+    const topicRoom = testRoom();
+    const middleRoom = testRoom();
+    const lateRoom = testRoom();
+    const topic = parseRoom(topicRoom).uuid;
+    const middle = parseRoom(middleRoom).uuid;
+    const late = parseRoom(lateRoom).uuid;
+    const topicWriter = await client(first, topicRoom, decision(topic, topic));
+    const middleWriter = await client(first, middleRoom, decision(middle, topic));
+    const lateWriter = await client(first, lateRoom, decision(late, topic));
+    const directory = await client(first, directoryRoom(WORKSPACE));
+    await Promise.all([topicWriter.synced, middleWriter.synced, lateWriter.synced, directory.synced]);
+    topicWriter.text.insert(0, "first answer stays");
+    middleWriter.text.insert(0, "middle answer removed");
+    lateWriter.text.insert(0, "late answer removed later");
+    await Promise.all([acknowledged(topicWriter), acknowledged(middleWriter), acknowledged(lateWriter)]);
+    upsertDirectoryEntry(directory.doc, { uuid: topic, title: "Question", kind: "decision", topic, status: "decided" });
+    upsertDirectoryEntry(directory.doc, { uuid: middle, title: "Question", kind: "decision", topic, supersedes: topic, status: "decided" });
+    tombstoneDirectoryEntry(directory.doc, topic);
+    await acknowledged(directory, "topic archive");
+    upsertDirectoryEntry(directory.doc, { uuid: late, title: "Late answer", kind: "decision", topic, supersedes: middle, status: "decided" });
+    await acknowledged(directory, "late record with a live stub");
+    expect(getDirectoryEntry(directory.doc, late)?.deleted).toBeUndefined();
+    await first.flush();
+
+    const offline = new Y.Doc();
+    try {
+      Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory.doc));
+      expect(deleteDecisionRecord(offline, middle)).toBe(true);
+      if (delivery === "coalesced reconnect") {
+        const reconnect = await client(first, directoryRoom(WORKSPACE), offline);
+        await reconnect.synced;
+        await acknowledged(reconnect, "offline middle-record deletion");
+        await waitUntil("middle mark to reach the existing reader", () => isDirectoryEntryDeleted(directory.doc, middle));
+      } else {
+        Y.applyUpdate(directory.doc, Y.encodeStateAsUpdate(offline, Y.encodeStateVector(directory.doc)));
+        await acknowledged(directory, "middle-record deletion");
+      }
+      expect(await middleWriter.denied).toBe(DOC_DELETED_REASON);
+      expect(resolveDecisionTopics(directory.doc)[0]?.inForce?.uuid).toBe(late);
+      expect(resolveDecisionTopics(directory.doc)[0]?.conflicts).toEqual([]);
+      expect(storedText(databasePath, middleRoom)).toBeNull();
+      expect(storedText(databasePath, topicRoom)).toBe("first answer stays");
+      expect(storedText(databasePath, lateRoom)).toBe("late answer removed later");
+
+      expect(isDirectoryEntryDeleted(directory.doc, middle)).toBe(true);
+      expect(directory.doc.getMap("docs").has(middle)).toBe(false);
+
+      Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory.doc));
+      expect(deleteDecisionRecord(offline, late)).toBe(false);
+      restoreDirectoryEntry(directory.doc, topic);
+      await acknowledged(directory, "topic restoration before rearchiving");
+      tombstoneDirectoryEntry(directory.doc, topic);
+      await acknowledged(directory, "topic rearchive includes late record");
+      expect(getDirectoryEntry(directory.doc, late)?.deleted).toBe(true);
+      Y.applyUpdate(offline, Y.encodeStateAsUpdate(directory.doc));
+      expect(deleteDecisionRecord(offline, late)).toBe(true);
+      const deletion = Y.encodeStateAsUpdate(offline, Y.encodeStateVector(directory.doc));
+      Y.applyUpdate(directory.doc, deletion);
+      await acknowledged(directory, "rearchived late-record deletion in one update");
+      expect(await lateWriter.denied).toBe(DOC_DELETED_REASON);
+      expect(isDirectoryEntryDeleted(directory.doc, late)).toBe(true);
+      expect(isDirectoryEntryDeleted(directory.doc, topic)).toBe(false);
+      expect(resolveDecisionTopics(directory.doc)[0]?.inForce?.uuid).toBe(topic);
+      expect(storedText(databasePath, lateRoom)).toBeNull();
+
+      restoreDirectoryEntry(directory.doc, topic);
+      await acknowledged(directory, "remaining topic restoration");
+      expect(resolveDecisionTopics(directory.doc)[0]?.records.map(record => record.uuid)).toEqual([topic]);
+      expect(resolveDecisionTopics(directory.doc)[0]?.archived).toBe(false);
+      await first.flush();
+    } finally { offline.destroy(); }
+
+    for (const created of clients.splice(0)) created.destroy();
+    await first.stop();
+    hubs.length = 0;
+    const second = await hub(databasePath);
+    expect(await (await client(second, middleRoom)).denied).toBe(DOC_DELETED_REASON);
+    expect(await (await client(second, lateRoom)).denied).toBe(DOC_DELETED_REASON);
+    const surviving = await client(second, topicRoom);
+    await surviving.synced;
+    expect(surviving.text.toString()).toBe("first answer stays");
+  });
+
   it.each(["after archive", "after deletion"])("purges a whole topic and a late record arriving %s, including across restart", async (arrival) => {
     const databasePath = tempDatabasePath();
     const first = await hub(databasePath);

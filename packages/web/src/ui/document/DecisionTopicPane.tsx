@@ -158,6 +158,19 @@ function recordEvent(record: DirectoryEntry, inForce: boolean): string | null {
   return record.status === "decided" || record.status === "rejected" ? record.decidedBy : null;
 }
 
+function RecordSummary({ topic, record }: { topic: DecisionTopicResolution; record: DirectoryEntry }): ReactElement {
+  const now = useTimestampClock();
+  const date = recordDate(record);
+  const time = date === undefined ? null : formatDecisionTimestamp(date, now);
+  const event = recordEvent(record, topic.inForce?.uuid === record.uuid);
+  return <>
+    {time !== null && <><time dateTime={time.dateTime} title={time.title}>{time.label}</time>{" · "}</>}
+    {ANSWER_STATES[answerState(topic, record)]}
+    {event && <> · {event}</>}
+    {record.description && <> · {record.description}</>}
+  </>;
+}
+
 function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, directoryConnection }: {
   topic: DecisionTopicResolution; selected: string; linkedRecord: string | null;
   segment: string; navigate: Navigate; docLinks: DocLinkContext | null;
@@ -283,6 +296,9 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     isDecisionTopic
     topicArchived={topic.archived}
     actionTitle={decisionTopicTitle(topic)}
+    deleteRecordSummary={selected === topic.topic || directoryConnection === null ||
+      getDirectoryEntry(directoryConnection.ydoc, selected)?.deleted !== true
+      ? null : <RecordSummary topic={topic} record={record} />}
     decisionView
     displayTitle={decisionTopicTitle(topic)}
     copyPath={explicit || (linkedRecord === selected && record.recordArchived === true)
