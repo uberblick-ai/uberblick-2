@@ -20,7 +20,7 @@ A guest can turn the order into an account afterwards from the confirmation page
 Pin the page in the sidebar. Pinned pages are where an agent new to the workspace
 starts. Write rules about the product; tasks and delivery stay on GitHub.
 
-You should see: your rule page in the sidebar beside the two starter pages.
+You should see: your rule page in the sidebar beside the starter pages.
 
 ## 2. Connect the agent
 

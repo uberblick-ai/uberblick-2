@@ -39,7 +39,7 @@ it.each([
   { origin: "https://github.com/Acme/notes.git", args: [] },
   { origin: "git@github.com:Acme/notes.git", args: [] },
   { origin: "ssh://git@github.com/Acme/notes.git", args: [] },
-  { origin: "https://github.com/Acme/notes.git", args: ["--empty"] },
+  { origin: "https://github.com/Acme/notes.git", args: ["--no-starters"] },
 ])("fills create from the checkout's origin $origin ($args)", async ({ origin, args }) => {
   const box = unboundSandbox();
   gitOrigin(box, origin);

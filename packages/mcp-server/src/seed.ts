@@ -23,6 +23,7 @@ import type { ImportedDoc } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
+import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
@@ -318,11 +319,19 @@ export async function importSeedDir(
   config: McpConfig,
   starter: StarterSeed | null = null,
 ): Promise<{ results: SeedImport[]; hub: string; sidebar: boolean }> {
+  return importWorkspaceSeed(config, readSeedDocs(dir), starter);
+}
+
+/** Import selected templates with the same lifecycle and sidebar protections. */
+export async function importWorkspaceSeed(
+  config: McpConfig,
+  docs: SeedDoc[],
+  starter: StarterSeed | null = null,
+): Promise<{ results: SeedImport[]; hub: string; sidebar: boolean }> {
   const workspace = openWorkspaceReplicas(config);
   const { replicas } = workspace;
   replicas.setWriteSurface({ kind: "cli", name: "ub workspace" });
   try {
-    const docs = readSeedDocs(dir);
     if (starter !== null) {
       // Settle hydrates and checks log health before eligibility. An extra
       // wait would repeat connect grace offline while holding the seed lock.
@@ -335,6 +344,8 @@ export async function importSeedDir(
         return { results: [], hub: replicas.sync.state().status, sidebar: false };
       }
     }
+    await seedTagCatalogOnce(replicas);
+    replicas.assertHealthy();
     const results = await importSeedDocs(replicas, docs);
     const seeded =
       starter === null ? false : await seedSidebar(replicas, starter);

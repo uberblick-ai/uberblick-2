@@ -257,28 +257,30 @@ describe("ub mcp serve", () => {
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it.each([false, true])("opens a newly created local workspace without a hub or login: empty %s", async empty => {
+  it.each([false, true])("opens a newly created local workspace with guidance and without a hub or login: no starters %s", async noStarters => {
     const box = unboundSandbox();
-    const created = await runUbAsync(["workspace", "create", "Local MCP", ...(empty ? ["--empty"] : [])], box);
+    const created = await runUbAsync(["workspace", "create", "Local MCP", ...(noStarters ? ["--no-starters"] : [])], box);
     expect(created.status, created.output).toBe(0);
     const session = await connect(box);
     try {
-      const result = await session.client.callTool({ name: "list_docs", arguments: {} });
+      expect(session.client.getInstructions()).toContain("Writing pages (`5c61b635-0ac1-44a8-8aa3-9895082aae07`)");
+      const result = await session.client.callTool({ name: "list_docs", arguments: { include_deleted: true } });
       expect(result.isError).not.toBe(true);
       const content = result.content as { text: string }[];
-      if (empty) {
-        expect(JSON.parse(content[0]!.text).docs).toEqual([]);
-        for (const [name, args, field] of [
-          ["list_docs", { include_deleted: true }, "docs"],
-          ["get_sidebar", {}, "groups"],
-        ] as const) {
-          const read = await session.client.callTool({ name, arguments: args });
-          expect(read.isError).not.toBe(true);
-          const content = read.content as { text: string }[];
-          expect(JSON.parse(content[0]!.text)[field]).toEqual([]);
-        }
-      } else {
-        expect(content[0]!.text).toContain("Welcome");
+      expect(JSON.parse(content[0]!.text).docs.map((doc: { title: string }) => doc.title).sort()).toEqual(noStarters
+        ? ["Writing pages"]
+        : ["How to Use It", "Welcome to Uberblick", "Writing pages"]);
+      const guidance = await session.client.callTool({ name: "list_docs", arguments: { tag: "guidance" } });
+      expect(guidance.isError).not.toBe(true);
+      const guidanceContent = guidance.content as { text: string }[];
+      expect(JSON.parse(guidanceContent[0]!.text).docs).toEqual([
+        expect.objectContaining({ title: "Writing pages", uuid: "5c61b635-0ac1-44a8-8aa3-9895082aae07" }),
+      ]);
+      if (noStarters) {
+        const sidebar = await session.client.callTool({ name: "get_sidebar", arguments: {} });
+        expect(sidebar.isError).not.toBe(true);
+        const sidebarContent = sidebar.content as { text: string }[];
+        expect(JSON.parse(sidebarContent[0]!.text).groups).toEqual([]);
       }
       expect(session.stderr()).not.toMatch(/sign.in required|HUB_AUTH_TOKEN missing/i);
     } finally { await session.close(); }

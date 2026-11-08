@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  importSeedDir,
+  importWorkspaceSeed,
   readSeedDocs,
 } from "@uberblick/mcp-server";
 import type { SeedDoc } from "@uberblick/mcp-server";
@@ -41,14 +41,18 @@ function pinnedUuids(starters: SeedDoc[]): string[] {
 export async function seedStarterDocs(
   env: NodeJS.ProcessEnv,
   config = resolveMcpConfig(env),
+  noStarters = false,
 ): Promise<void> {
-  const starters = readSeedDocs(TEMPLATE_DIR);
-  const { results, sidebar } = await importSeedDir(TEMPLATE_DIR, config, {
+  const templates = readSeedDocs(TEMPLATE_DIR);
+  const guidance = templates.find(doc => doc.file === "writing-pages.md");
+  if (guidance === undefined) throw new Error("templates/writing-pages.md is missing");
+  const starters = noStarters ? [guidance] : templates;
+  const { results, sidebar } = await importWorkspaceSeed(config, starters, noStarters ? null : {
     id: STARTER_GROUP_ID,
     name: STARTER_GROUP_NAME,
     docs: pinnedUuids(starters),
   });
-  if (!sidebar || results.length !== starters.length || results.some(result => result.action !== "created")) {
+  if (sidebar !== !noStarters || results.length !== starters.length || results.some(result => result.action !== "created")) {
     throw new Error("starter documents and sidebar were not completely seeded");
   }
 }

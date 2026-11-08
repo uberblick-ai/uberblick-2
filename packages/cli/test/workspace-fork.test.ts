@@ -101,7 +101,7 @@ import { syncBuiltinESMExports } from "node:module";
 crypto.randomUUID = () => ${JSON.stringify(nextUuid)};
 syncBuiltinESMExports();
 `);
-  const result = runUb(["workspace", command, ...(command === "create" ? ["Next", "--empty"] : [])], box,
+  const result = runUb(["workspace", command, ...(command === "create" ? ["Next", "--no-starters"] : [])], box,
     { NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` });
   expect(result.status, result.output).toBe(0);
   expect(selected(box)).toEqual({ workspaceId: nextUuid, hubUrl: null });
