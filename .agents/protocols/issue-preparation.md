@@ -47,8 +47,10 @@
 ## Ground it at a commit
 
 When code grounding begins, fetch `origin/main` and record its exact SHA. Ground
-relevant claims in that revision's code, interfaces, invariants and tests; retain
-evidence pointers so an implementer can compare its later baseline.
+relevant claims in that revision's code, interfaces, invariants and tests,
+including how a library, platform or browser behaves where a criterion or owner
+question depends on it (its source, documentation or a probe); retain evidence
+pointers so an implementer can compare its later baseline.
 
 `ready`, `review`, `split` and `wontfix` require completed code grounding at a
 recorded `origin/main` SHA. `not-started` is only for a clarification
