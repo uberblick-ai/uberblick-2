@@ -576,6 +576,46 @@ for (const scheme of ["light"] as const) {
   });
 }
 
+/**
+ * The creation rows are occasional actions, so they rest a step behind the
+ * navigation rows and come forward to full sidebar ink under the pointer or
+ * keyboard focus. Their resting ink still holds the small-text AA floor.
+ */
+for (const scheme of ["light", "dark"] as const) {
+  test(`sidebar creation rows rest dimmed and come forward on hover and focus — ${scheme}`, async ({
+    browser,
+  }) => {
+    const page = await openAppearanceApp(browser, scheme);
+    const rows = [page.getByRole("button", { name: "+ New page", exact: true }), page.locator(".ub-group-add")];
+    for (const row of rows) {
+      await expect(row).toBeEnabled();
+      const tokens = await row.evaluate((element) => {
+        const probe = document.createElement("span");
+        probe.style.cssText = "color:var(--sidebar-muted-foreground);background:var(--sidebar);border-color:var(--sidebar-foreground)";
+        element.append(probe);
+        const style = getComputedStyle(probe);
+        const paint = { rest: style.color, ground: style.backgroundColor, full: style.borderTopColor };
+        probe.remove();
+        return paint;
+      });
+      await page.mouse.move(0, 0);
+      await expect(row).toHaveCSS("color", tokens.rest);
+      expect(contrast(tokens.rest, tokens.ground)).toBeGreaterThanOrEqual(4.5);
+
+      await page.keyboard.press("Shift");
+      await row.focus();
+      expect(await row.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+      await expect(row).toHaveCSS("color", tokens.full);
+      await row.blur();
+      await expect(row).toHaveCSS("color", tokens.rest);
+
+      await row.hover();
+      await expect(row).toHaveCSS("color", tokens.full);
+      await page.mouse.move(0, 0);
+    }
+  });
+}
+
 for (const scheme of ["light"] as const) {
   test(`sidebar controls keep their treatment after touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
     const page = await openApp(browser, "/", {
