@@ -18,6 +18,9 @@ Variables (put them before /bin/bash):
   ALLOW_ROOT=1   Allow an explicit root run; Docker is never installed or updated.
   HELP=1         Print this help without checks or changes (also: --help).
 
+A fresh Linux install in a terminal, with HUB_HOST unset, offers the host's
+Tailscale name when up; Enter keeps loopback HTTP.
+
 Re-run to update or change the HTTPS hostname. Without route variables, an
 existing .env keeps its route and other values. HTTPS-to-loopback switching,
 release downgrades, Windows/WSL, Podman and rootless Docker are not supported.
@@ -61,6 +64,37 @@ setup_ip_valid() {
     for (i=1; i<=4; i++) if (octets[i]!~/^[0-9]+$/ || octets[i]>255 || octets[i]~/^0[0-9]/) exit 1;
   }'
 }
+
+setup_tail_ip_valid() {
+  setup_ip_valid "$1" && [[ $1 =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+$ ]]
+}
+
+setup_offer_tailnet() (
+  exec 3<>/dev/tty || exit 0
+  [ -t 3 ] || exit 0
+  command -v tailscale >/dev/null 2>&1 || exit 0
+  local status name ip reply
+  status=$(tailscale status --json --peers=false) || exit 0
+  # Read only the local name from Tailscale's indented JSON; unfamiliar output skips the offer.
+  name=$(printf '%s\n' "$status" | awk '
+    /^  "BackendState": "Running",?$/ {running=1}
+    /^  "Self": \{$/ {self=1; next}
+    /^  },?$/ {self=0}
+    self && /^    "DNSName": "[A-Za-z0-9.-]+",?$/ {
+      name=$0; sub(/^    "DNSName": "/,"",name); sub(/",?$/,"",name)
+    }
+    END {if (running) print name}
+  ') || exit 0
+  name=${name%.}
+  case "$name" in *.[tT][sS].[nN][eE][tT]) ;; *) exit 0 ;; esac
+  setup_host_valid "$name" || exit 0
+  ip=$(tailscale ip -4) || exit 0
+  setup_tail_ip_valid "$ip" || exit 0
+  printf 'Tailscale is up. Serve the hub on https://%s? [y/N] ' "$name" >&3
+  if IFS= read -r reply <&3; then
+    case "$reply" in [yY] | [yY][eE][sS]) printf '%s\n' "$name" ;; esac
+  fi
+) 2>/dev/null
 
 setup_env_value() {
   printf '%s\n' "$resolved" | awk -v key="$1" 'index($0,key "=")==1 {print substr($0,length(key)+2); exit}'
@@ -269,6 +303,10 @@ $(setup_bindings "$id")"
     if [ -n "$reported_release" ]; then previous=$reported_release; fi
     old_protocol=$(printf '%s\n' "$status" | awk '$1=="protocol" {print $2}')
   fi
+  if [ "$os" = Linux ] && [ -z "$host_given" ] && [ ! -f "$directory/.env" ]; then
+    requested_host=$(setup_offer_tailnet)
+    if [ -n "$requested_host" ]; then host_given=x; fi
+  fi
   if [ -n "$host_given" ]; then
     if [ -z "$requested_host" ] && [ -n "${web_host:-$tail_host}" ]; then
       setup_fail 'route check: switching HTTPS back to loopback is unsupported. Keep HUB_HOST or follow REMOTE.md to change the deployment manually.'
@@ -289,7 +327,7 @@ $(setup_bindings "$id")"
       command -v tailscale >/dev/null 2>&1 || setup_fail 'Tailscale is missing. Install and connect it: https://tailscale.com/download/linux'
       local current_tail_ip
       current_tail_ip=$(tailscale ip -4) || setup_fail 'Tailscale is not up. Run tailscale up, then re-run.'
-      [[ $current_tail_ip =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+$ ]] || setup_fail 'Tailscale is not up with an IPv4 address. Run tailscale up, then re-run.'
+      setup_tail_ip_valid "$current_tail_ip" || setup_fail 'Tailscale is not up with an IPv4 address. Run tailscale up, then re-run.'
       if [ -n "$host_given" ] || [ ! -f "$directory/.env" ]; then tail_ip=$current_tail_ip; fi
       ;;
   esac

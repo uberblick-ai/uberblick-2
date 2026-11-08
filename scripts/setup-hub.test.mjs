@@ -51,7 +51,9 @@ else if (command === "uname") out((args.includes("-m") ? config.arch : config.os
 else if (command === "sleep") process.exit(0);
 else if (command === "tailscale") {
   if (config.tailscaleError) die(config.tailscaleError);
-  out((config.tailscaleIp ?? "100.64.0.2") + "\n");
+  if (args[0] === "status" && args.includes("--json")) out(config.tailscaleStatus ?? JSON.stringify({ BackendState: config.tailscaleState ?? "Running", Self: { DNSName: config.tailscaleName ?? "hub.tailnet.ts.net." } }, null, 2));
+  else if (args.join(" ") === "ip -4") out((config.tailscaleIp ?? "100.64.0.2") + "\n");
+  else die("Unexpected Tailscale command: " + args.join(" "));
 } else if (command === "ss") {
   for (const bind of config.listeners) out("LISTEN 0 128 " + bind.address + ":" + bind.port + " 0.0.0.0:*\n");
 } else if (command === "netstat") {
@@ -157,6 +159,58 @@ else if (command === "tailscale") {
 } else die("Unexpected fake command: " + command);
 `;
 
+// pty.fork supplies a controlling terminal on both Linux and macOS. The
+// installer still gets detached stdin, as in the hosted bash -c invocation.
+const terminalProgram = String.raw`
+import errno, json, os, pty, select, signal, sys, time
+
+with open(sys.argv[1]) as source:
+    script = source.read()
+answer = json.loads(sys.argv[2])
+pid, terminal = pty.fork()
+if pid == 0:
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)
+    if null != 0:
+        os.close(null)
+    os.execv("/bin/bash", ["/bin/bash", "-c", script, "setup-hub.sh", *sys.argv[3:]])
+
+output = b""
+answered = False
+reaped = False
+deadline = time.monotonic() + 45
+try:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([terminal], [], [], remaining)[0]:
+            raise TimeoutError("installer did not finish in its terminal")
+        try:
+            chunk = os.read(terminal, 65536)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                break
+            raise
+        if not chunk:
+            break
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.buffer.flush()
+        output += chunk
+        if not answered and b"Serve the hub on" in output and b"[y/N]" in output:
+            os.write(terminal, b"\x04" if answer is None else (answer + "\n").encode())
+            answered = True
+    _, status = os.waitpid(pid, 0)
+    reaped = True
+    sys.exit(os.waitstatus_to_exitcode(status))
+finally:
+    os.close(terminal)
+    if not reaped:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        os.waitpid(pid, 0)
+`;
+
 function fixture(t, overrides = {}) {
 	const scratch = realpathSync(mkdtempSync(join(process.env.UB_AGENTS_SCRATCH ?? tmpdir(), `setup-hub-${process.env.UB_AGENTS_RUN ?? "test"}-`)));
 	t.after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -186,7 +240,7 @@ function fixture(t, overrides = {}) {
 			const isolated = join(scratch, `without-${command}`);
 			mkdirSync(isolated);
 			for (const name of readdirSync(bin)) if (name !== command) symlinkSync(join(bin, name), join(isolated, name));
-			for (const name of ["awk", "cat", "chmod", "cp", "mkdir", "mktemp", "mv", "od", "rm", "rmdir", "sed", "tr"]) {
+			for (const name of ["awk", "cat", "chmod", "cp", "mkdir", "mktemp", "mv", "od", "python3", "rm", "rmdir", "sed", "tr"]) {
 				const source = process.env.PATH.split(":").map((directory) => join(directory, name)).find((path) => existsSync(path));
 				if (source) symlinkSync(source, join(isolated, name));
 			}
@@ -197,12 +251,19 @@ function fixture(t, overrides = {}) {
 			writeFileSync(join(directory, ".env"), contents, { mode: 0o600 });
 		},
 		files(directory = hub) { return existsSync(directory) ? Object.fromEntries(readdirSync(directory).map((name) => [name, readFileSync(join(directory, name), "utf8")])) : {}; },
-		run(overrides = {}, args = []) {
+		runTerminal(answer, overrides = {}, args = []) {
+			return this.run(overrides, args, { answer });
+		},
+		run(overrides = {}, args = [], terminal = null) {
 			save();
 			const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HUB_DIR: hub, TEST_SETUP_CONFIG: configPath, TEST_SETUP_LOG: log };
 			for (const name of ["HUB_HOST", "HUB_VERSION", "HUB_PORT", "LOOPBACK_PORT", "HELP", "ALLOW_ROOT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP"]) delete env[name];
-			const result = spawnSync("/bin/bash", ["-c", readFileSync(join(root, "setup-hub.sh"), "utf8"), "setup-hub.sh", ...args], {
-				cwd: scratch, env: { ...env, ...overrides }, encoding: "utf8", timeout: 55_000,
+			const command = terminal ? "python3" : "/bin/bash";
+			const commandArgs = terminal
+				? ["-c", terminalProgram, join(root, "setup-hub.sh"), JSON.stringify(terminal.answer), ...args]
+				: ["-c", readFileSync(join(root, "setup-hub.sh"), "utf8"), "setup-hub.sh", ...args];
+			const result = spawnSync(command, commandArgs, {
+				cwd: scratch, env: { ...env, ...overrides }, encoding: "utf8", timeout: 55_000, detached: !terminal,
 			});
 			Object.assign(config, JSON.parse(readFileSync(configPath, "utf8")));
 			return result;
@@ -580,6 +641,117 @@ test("Tailscale selection requires Linux and a working client and records the cu
 		failed(broken.run({ HUB_HOST: "hub.tailnet.ts.net" }), cause);
 		noDownloads(broken);
 		assert.deepEqual(broken.files(), {});
+	}
+});
+
+test("accepting the terminal tailnet offer matches an explicit HUB_HOST with detached installer stdin", { timeout: 60_000 }, (t) => {
+	const config = { tailscaleIp: "100.100.1.2", listeners: [{ address: "127.0.0.1", port: 8080 }] };
+	const offered = fixture(t, config);
+	const explicit = fixture(t, config);
+	const result = offered.runTerminal("yes", { COMPOSE_PROJECT_NAME: "terminal-offer" });
+	const selected = explicit.run({ HUB_HOST: "hub.tailnet.ts.net", COMPOSE_PROJECT_NAME: "terminal-offer" });
+	passed(result);
+	passed(selected);
+	assert.match(result.stdout, /Serve the hub on https:\/\/hub\.tailnet\.ts\.net\? \[y\/N\]/);
+	assert.equal(offered.files()[".env"], explicit.files()[".env"]);
+	assertSetting(offered.files()[".env"], "COMPOSE_FILE", "compose.yml:remote.https.yml:remote.tailscale.yml");
+	assertSetting(offered.files()[".env"], "WEB_HOST", "hub.tailnet.ts.net");
+	assertSetting(offered.files()[".env"], "TAILSCALE_IP", "100.100.1.2");
+	assert.match(result.stdout, /ub auth login https:\/\/hub\.tailnet\.ts\.net/);
+	assert.match(selected.stdout, /ub auth login https:\/\/hub\.tailnet\.ts\.net/);
+	const busy = fixture(t, { listeners: [{ address: "100.64.0.2", port: 443 }] });
+	failed(busy.runTerminal("y"), /100\.64\.0\.2:443/);
+	noDownloads(busy);
+	assert.deepEqual(busy.files(), {});
+});
+
+test("declining, pressing Enter, or terminal EOF keeps the fresh loopback default", { timeout: 60_000 }, (t) => {
+	for (const answer of ["no", "", null]) {
+		const f = fixture(t, { listeners: [{ address: "100.64.0.2", port: 443 }] });
+		const result = f.runTerminal(answer);
+		passed(result);
+		assert.match(result.stdout, /Serve the hub on/);
+		assertSetting(f.files()[".env"], "COMPOSE_FILE", "compose.yml");
+		assertSetting(f.files()[".env"], "WEB_HOST", "");
+		assertSetting(f.files()[".env"], "TAILSCALE_IP", "");
+		assert.match(result.stdout, /ub auth login http:\/\/localhost:8080/);
+	}
+});
+
+test("no terminal and explicitly set HUB_HOST values suppress the tailnet offer", { timeout: 60_000 }, (t) => {
+	const unattended = fixture(t);
+	const result = unattended.run();
+	passed(result);
+	assert.doesNotMatch(result.stdout, /Serve the hub on/);
+	assertSetting(unattended.files()[".env"], "COMPOSE_FILE", "compose.yml");
+	assert.equal(unattended.calls().filter((call) => call.command === "tailscale").length, 0);
+	for (const [host, compose] of [["", "compose.yml"], ["public.example.com", "compose.yml:remote.https.yml"], ["chosen.tailnet.ts.net", "compose.yml:remote.https.yml:remote.tailscale.yml"]]) {
+		const f = fixture(t);
+		const configured = f.runTerminal("yes", { HUB_HOST: host });
+		passed(configured);
+		assert.doesNotMatch(configured.stdout, /Serve the hub on/);
+		assertSetting(f.files()[".env"], "COMPOSE_FILE", compose);
+		assertSetting(f.files()[".env"], "WEB_HOST", host);
+		assert.equal(f.calls().filter((call) => call.command === "tailscale" && call.args[0] === "status").length, 0);
+	}
+});
+
+test("terminal reruns preserve their recorded route unless HUB_HOST is explicitly supplied", { timeout: 60_000 }, (t) => {
+	for (const [settings, host, compose] of [
+		["COMPOSE_FILE=compose.yml\nLOOPBACK_PORT=9191\n", "", "compose.yml"],
+		["COMPOSE_FILE=compose.yml:remote.https.yml\nWEB_HOST=saved.example.com\n", "saved.example.com", "compose.yml:remote.https.yml"],
+		["COMPOSE_FILE=compose.yml:remote.https.yml:remote.tailscale.yml\nWEB_HOST=saved.tailnet.ts.net\nTAILSCALE_IP=100.64.0.3\n", "saved.tailnet.ts.net", "compose.yml:remote.https.yml:remote.tailscale.yml"],
+	]) {
+		const f = fixture(t);
+		f.env(`HUB_VERSION=0.4.12\n${settings}`);
+		const result = f.runTerminal("yes");
+		passed(result);
+		assert.doesNotMatch(result.stdout, /Serve the hub on/);
+		assertSetting(f.files()[".env"], "COMPOSE_FILE", compose);
+		if (host) assertSetting(f.files()[".env"], "WEB_HOST", host);
+		assert.equal(f.calls().filter((call) => call.command === "tailscale" && call.args[0] === "status").length, 0);
+	}
+	const changed = fixture(t);
+	changed.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\n");
+	const result = changed.runTerminal("yes", { HUB_HOST: "chosen.tailnet.ts.net" });
+	passed(result);
+	assert.doesNotMatch(result.stdout, /Serve the hub on/);
+	assertSetting(changed.files()[".env"], "WEB_HOST", "chosen.tailnet.ts.net");
+});
+
+test("unavailable or stopped Tailscale is silently ignored by the terminal offer", { timeout: 60_000 }, (t) => {
+	for (const config of [{ os: "Darwin", arch: "arm64" }, { tailscaleError: "synthetic Tailscale unavailable" }, { tailscaleState: "Stopped" }, { tailscaleState: "NeedsLogin" }]) {
+		const f = fixture(t, config);
+		const result = f.runTerminal("yes");
+		passed(result);
+		assert.doesNotMatch(result.stdout + result.stderr, /Serve the hub on|synthetic Tailscale unavailable/);
+		assertSetting(f.files()[".env"], "COMPOSE_FILE", "compose.yml");
+	}
+	const missing = fixture(t);
+	const result = missing.runTerminal("yes", { PATH: missing.without("tailscale") });
+	passed(result);
+	assert.doesNotMatch(result.stdout + result.stderr, /Serve the hub on|tailscale.*(missing|required)/i);
+	assertSetting(missing.files()[".env"], "COMPOSE_FILE", "compose.yml");
+});
+
+test("the terminal offer requires a valid local ts.net name and tailnet IPv4 address", { timeout: 60_000 }, (t) => {
+	for (const config of [
+		{ tailscaleName: "" },
+		{ tailscaleName: "hub.example.com." },
+		{ tailscaleName: "-invalid.tailnet.ts.net." },
+		{ tailscaleName: "hub..ts.net." },
+		{ tailscaleIp: "" },
+		{ tailscaleIp: "100.63.255.255" },
+		{ tailscaleIp: "100.128.0.1" },
+		{ tailscaleIp: "100.64.0.256" },
+		{ tailscaleStatus: "not JSON" },
+		{ tailscaleStatus: JSON.stringify({ BackendState: "Running", Self: {}, Peer: { other: { DNSName: "peer.tailnet.ts.net." } } }, null, 2) },
+	]) {
+		const f = fixture(t, config);
+		const result = f.runTerminal("yes");
+		passed(result);
+		assert.doesNotMatch(result.stdout, /Serve the hub on/);
+		assertSetting(f.files()[".env"], "COMPOSE_FILE", "compose.yml");
 	}
 });
 
