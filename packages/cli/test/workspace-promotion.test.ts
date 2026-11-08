@@ -9,7 +9,7 @@ import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { readHubLogins, writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
-import { appendBlock, createAnnotation, createTagCatalogEntry, deleteDirectoryEntry, deleteTagCatalogEntry, getWorkspaceName, getWorkspaceMainRepository, initDoc, isDirectoryEntryDeleted, listDirectory, readSidebar, renameGroup, setInlineLink, setKind, setLinks, setTags, setWorkspaceMainRepository, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { appendBlock, createAnnotation, createTagCatalogEntry, deleteDirectoryEntry, deleteTagCatalogEntry, getWorkspaceName, getWorkspaceMainRepository, initDoc, isDirectoryEntryDeleted, listDirectory, readSidebar, renameGroup, setInlineLink, setKind, setLinks, setTags, settingsRoom, setWorkspaceMainRepository, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
@@ -59,6 +59,21 @@ function accessRows(hub: Hub) {
       claims: db.prepare("SELECT * FROM hub_claim_state").all(),
       receipts: db.prepare("SELECT * FROM hub_workspace_promotions").all() };
   } finally { db.close(); }
+}
+
+function onPromotionVerification(hub: Hub, workspaceId: string, action: () => void) {
+  let uploadSocket: string | undefined;
+  let acted = false;
+  hub.hocuspocus.configuration.extensions.push({
+    async beforeSync({ documentName, connection }) {
+      if (documentName !== settingsRoom(workspaceId)) return;
+      // Upload and fresh-client verification read settings on separate sockets.
+      uploadSocket ??= connection.socketId;
+      if (connection.socketId === uploadSocket || acted) return;
+      acted = true;
+      action();
+    },
+  });
 }
 
 describe("workspace creation and promotion", () => {
@@ -175,27 +190,74 @@ describe("workspace creation and promotion", () => {
     expect(isIdentical(compareCorpus(expected.workspace!, remote.workspace!))).toBe(true);
   });
 
+  it.each([["live", "1 document"], ["archived", "1 document"], ["empty", "0 documents"]] as const)("reports the verified count for %s workspace content without starters", async (state, count) => {
+    const box = unboundSandbox();
+    const created = await runInProcess(["workspace", "create", "Project corpus", "--no-starters"], box);
+    expect(created.status, created.output).toBe(0);
+    const local = createMcpServer(offline(box));
+    try {
+      const directory = local.replicas.directory().doc;
+      const [entry] = listDirectory(directory);
+      expect(listDirectory(directory)).toHaveLength(1);
+      if (state === "archived") tombstoneDirectoryEntry(directory, entry!.uuid);
+      if (state === "empty") deleteDirectoryEntry(directory, entry!.uuid);
+    } finally { await local.close(); }
+    const { endpoint } = await hubFor(box);
+    const result = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
+    expect(result.status, result.output).toBe(0);
+    const workspaceId = selected(box).workspaceId;
+    expect(result.stdout).toBe(
+      `uploading  Project corpus (${workspaceId}) to ${endpoint}\n` +
+      `verified   ${count}, including archived ones\n` +
+      `promoted   Project corpus (${workspaceId}, ${endpoint})\n` +
+      `wrote      ${join(box.cwd, ".uberblick.json")}\n\n` +
+      `share link: ${endpoint}/${workspaceId}\n` +
+      "commit .uberblick.json so teammates only need `ub auth login` to access it\n",
+    );
+    expect(result.stderr).toBe("");
+  });
+
+  it("reports a failed fresh-client verification with recovery guidance and keeps the local binding", async () => {
+    const box = await localWorkspace();
+    const { hub, endpoint } = await hubFor(box);
+    const workspaceId = selected(box).workspaceId;
+    const before = bindingBytes(box);
+    let changed = false;
+    onPromotionVerification(hub, workspaceId, () => {
+      changed = true;
+      setWorkspaceMainRepository(hub.hocuspocus.documents.get(settingsRoom(workspaceId))!, "changed/during-verification");
+    });
+    const result = await runInProcess(["workspace", "promote", endpoint], box, { UB_TEST_MAX_WAIT_MS: "5000" });
+    expect(changed).toBe(true);
+    expect(result.status, result.output).toBe(1);
+    expect(result.stdout).toBe(`uploading  Project notes (${workspaceId}) to ${endpoint}\n`);
+    expect(result.stderr).toBe(`ub workspace promote: ${endpoint} does not match this workspace's name, settings or sidebar..\n` +
+      "Project binding unchanged; the local workspace remains usable.\n" +
+      "After resolving the error, rerun this command on this machine to resume the same attempt.\n");
+    expect(bindingBytes(box)).toBe(before);
+    expect(readWorkspaceHub(workspaceId, box.env)).toBeNull();
+  });
+
   it("does not select the hub when private admission persistence fails after upload", async () => {
     const box = await localWorkspace();
     const { hub, endpoint } = await hubFor(box);
     const before = bindingBytes(box);
+    let injected = false;
+    onPromotionVerification(hub, selected(box).workspaceId, () => {
+      injected = true;
+      mkdirSync(join(box.configHome, "uberblick", "config.json"));
+    });
     const result = await new Promise<{ status: number | null; output: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], {
         cwd: box.cwd, env: { ...box.env, UB_TEST_MAX_WAIT_MS: "5000" }, timeout: 60_000,
       });
       let output = "";
-      let injected = false;
       child.stdout.on("data", data => { output += String(data); });
-      child.stderr.on("data", data => {
-        output += String(data);
-        if (!injected && output.includes("verifying")) {
-          injected = true;
-          mkdirSync(join(box.configHome, "uberblick", "config.json"));
-        }
-      });
+      child.stderr.on("data", data => { output += String(data); });
       child.on("error", reject);
       child.on("close", status => resolve({ status, output }));
     });
+    expect(injected).toBe(true);
     expect(result.status, result.output).toBe(1);
     expect(accessRows(hub).receipts).toHaveLength(1);
     expect(bindingBytes(box)).toBe(before);
@@ -270,6 +332,7 @@ describe("workspace creation and promotion", () => {
     expect(shareLink).toBe(`${displayHub}/${workspaceId}`);
     expect(parseJoinTarget(shareLink!)).toEqual({ endpoint, workspace: workspaceId });
     expect(result.stderr).not.toContain("Uploading workspace");
+    expect(result.stderr).not.toContain("verifying");
     expect(result.stdout).not.toContain("switch");
     expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
@@ -461,20 +524,21 @@ describe("workspace creation and promotion", () => {
     const box = await localWorkspace();
     const { hub, endpoint, login } = await hubFor(box);
     const binding = bindingBytes(box);
+    let sent = false;
     const interrupted = await new Promise<{ status: number | null; output: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], {
         cwd: box.cwd, env: { ...box.env, UB_TEST_MAX_WAIT_MS: "5000" }, timeout: 60_000,
       });
-      let output = "";
-      let sent = false;
-      child.stdout.on("data", data => { output += String(data); });
-      child.stderr.on("data", data => {
-        output += String(data);
-        if (!sent && output.includes("verifying")) { sent = true; child.kill("SIGINT"); }
+      onPromotionVerification(hub, selected(box).workspaceId, () => {
+        sent = child.kill("SIGINT");
       });
+      let output = "";
+      child.stdout.on("data", data => { output += String(data); });
+      child.stderr.on("data", data => { output += String(data); });
       child.on("error", reject);
       child.on("close", status => resolve({ status, output }));
     });
+    expect(sent).toBe(true);
     expect(interrupted.status, interrupted.output).toBe(1);
     expect(interrupted.output).toContain("promotion interrupted");
     expect(bindingBytes(box)).toBe(binding);
