@@ -50,7 +50,10 @@ const GROUP_ACTION_CLASSES = "flex-none [@media(any-pointer:coarse)]:min-w-11 ro
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
 
-const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 items-center gap-2 rounded-(--radius-sm) border border-solid border-transparent px-2 py-1.5 text-left ub-type-ui text-(--sidebar-row-foreground) enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_ROW_SHAPE = "flex min-h-8.5 items-center gap-2 rounded-(--radius-sm) border border-solid border-transparent px-2 py-1.5 text-left ub-type-ui enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_ROW_CLASSES = `${SIDEBAR_ROW_SHAPE} text-(--sidebar-row-foreground)`;
+/** Creation rows rest a step back from navigation and come forward under pointer or keyboard. */
+const SIDEBAR_CREATE_CLASSES = `${SIDEBAR_ROW_SHAPE} min-w-0 flex-1 whitespace-nowrap text-(--sidebar-muted-foreground) enabled:focus-visible:text-sidebar-foreground disabled:opacity-50`;
 const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
@@ -343,7 +346,7 @@ function SidebarContent({
             <div className="ub-sidebar-create flex min-w-0 gap-1 mt-[0.35rem]">
               <Button variant="plain" size="custom"
                 type="button"
-                className={`${SIDEBAR_ROW_CLASSES} min-w-0 flex-1 whitespace-nowrap disabled:text-(--sidebar-muted-foreground)`}
+                className={SIDEBAR_CREATE_CLASSES}
                 onClick={onCreate}
                 disabled={!status.writable}
                 title={
@@ -356,7 +359,7 @@ function SidebarContent({
               </Button>
               <Button variant="plain" size="custom"
                 type="button"
-                className={`ub-group-add ${SIDEBAR_ROW_CLASSES} min-w-0 flex-1 whitespace-nowrap disabled:opacity-50`}
+                className={`ub-group-add ${SIDEBAR_CREATE_CLASSES}`}
                 onClick={addGroup}
                 disabled={ydoc === null}
                 title={
