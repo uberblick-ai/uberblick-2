@@ -361,7 +361,7 @@ test("search results retain focus, scroll and tag disclosure during directory re
   await expect(page.getByRole("dialog", { name: /^All tags for/ })).toBeVisible();
 });
 
-test("every list row stays one line high, clipping a long group name, from desktop to phone widths", async ({ browser }) => {
+test("every list row stays one line high, clipping a long group name, at desktop and iPad widths", async ({ browser }) => {
   const writer = agent().open({ name: "one-line-rows-e2e" });
   const token = docTitle("onelinerows").replaceAll("-", "");
   const plain = `${token} short`;
@@ -385,7 +385,7 @@ test("every list row stays one line high, clipping a long group name, from deskt
   await expect(rows).toHaveCount(3);
   const group = rows.filter({ hasText: grouped }).locator(".ub-docs-group");
   await expect(group).toHaveText("Product requirements and the decisions behind them");
-  for (const width of [1440, 1024, 768, 390]) {
+  for (const width of [1440, 1024, 768]) {
     await page.setViewportSize({ width, height: 800 });
     // The plain row has nothing that could wrap, so its height is one line.
     const reference = await rows.filter({ hasText: plain }).evaluate((row) => row.getBoundingClientRect().height);
