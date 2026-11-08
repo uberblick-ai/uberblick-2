@@ -18,6 +18,7 @@ import { corpusProblem, verify } from "./remote.js";
 import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { reportEnvironmentBinding } from "./workspace-create.js";
 import { displayWorkspaceHub, useField } from "./workspace-use-output.js";
+import { plural } from "./strings.js";
 
 export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>
 
@@ -186,7 +187,7 @@ export async function promoteWorkspaceCommand({ positionals }: CommandArgs<Recor
       const problem = corpusProblem(endpoint, uploaded);
       if (problem !== null) throw new Error(problem.trim());
       interrupted.signal.throwIfAborted();
-      const checked = await verify({ base, env, target: endpoint, io }, uploaded.entries, { documents: true, workspace: uploaded.workspace });
+      const checked = await verify({ base, env, target: endpoint, io: { out() {}, err() {} } }, uploaded.entries, { documents: true, workspace: uploaded.workspace });
       if (checked.problem !== null) throw new Error(checked.problem.trim());
       interrupted.signal.throwIfAborted();
       const bindingLock = await acquireInitLock();
@@ -205,7 +206,7 @@ export async function promoteWorkspaceCommand({ positionals }: CommandArgs<Recor
         writeProjectBinding(binding, { path, record: "promote" });
       } finally { bindingLock.release(); }
       const promoted = name === null ? `${workspaceId} (${displayHub})` : `${name} (${workspaceId}, ${displayHub})`;
-      io.out(useField("verified", `${uploaded.entries.length} documents, including archived ones`) +
+      io.out(useField("verified", `${plural(uploaded.entries.length, "document")}, including archived ones`) +
         useField("promoted", promoted) + useField("wrote", path) +
         `\nshare link: ${displayHub}/${workspaceId}\n` +
         "commit .uberblick.json so teammates only need `ub auth login` to access it\n");
