@@ -5,6 +5,35 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.17 — 2026-11-08
+
+Easier hub setup, with a Tailscale option and independent hubs on one machine. New workspaces start with Writing pages, and GitHub links show the live state of their issue or pull request.
+
+### Added
+
+- GitHub pills in the editor, comments and history show the item's live state through icon, colour and label. `ub open` reads it with your GitHub credentials, which never enter document content (#2679).
+- Pills fall back to the last state seen in the workspace, with its age on hover. Your own fresh reading takes precedence, and the shared state stays out of pages and history (#2685).
+- Every new workspace includes Writing pages. `ub workspace create --no-starters` leaves out the other starter pages and the sidebar group (#2642, #2680).
+- Delete one record from an archived decision topic through MCP or the web banner, keeping the topic and its other records. A topic's first record still goes only with the whole topic (#2592).
+- `ub-hub workspace-admin add` restores a workspace admin from the hub's host, replacing device-code admin setup. Each use is logged, and the role shows as "added on the host" in Members (#2637).
+- Fresh Linux terminal hub installs offer Tailscale HTTPS when Tailscale is running. Only an explicit yes selects it (#2678).
+
+### Improved
+
+- Hub setup in a terminal asks for any unset route, port and release, and Enter accepts the default shown (#2682).
+- Ablauf playback uses always-visible controls and ablauf's own viewer, and drawings can fill the column (#2666).
+- `ub workspace ls`, `ub member ls` and `ub member rm` work as aliases, and workspace help and results are consistent (#2649).
+- `ub workspace promote` prints less and counts documents correctly (#2683).
+- `+ New page` and `+ New group` stay dim in the sidebar until hover or focus (#2673).
+- `edit_block` refusals explain when `old_text` is only part of a block (#2639).
+- **Experimental:** hosted MCP refuses excess load with `503` and `Retry-After`, closes idle sessions, and enforces read-only tokens on every writing call (#2593, #2667).
+
+### Fixed
+
+- Hubs on one machine no longer collide: each new hub directory gets its own Compose project, updates keep existing projects and volumes, and overlapping ports name the other deployment (#2677).
+- Long sidebar group names no longer stretch rows in All documents (#2670).
+- Folds open with their full animation on iPad (#2626).
+
 ## v0.4.16 — 2026-11-05
 
 Security audit fixes: the hub protects decision records from deletion and keeps their history, and signing out everywhere now ends browser sessions. Also new: rendered ablauf drawings for agents, `ub uninstall`, and an experimental hosted MCP endpoint.
