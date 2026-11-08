@@ -9,6 +9,7 @@ import { jsonChangeStarts, openFoldedChange, spanningComparison } from "../../ed
 import { createRevisionEditor, createRevisionInline } from "../../editor/revision-view.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
+import { useGitHubItemStates } from "../github-item-states.js";
 import { alignRevisionSides, createRevisionSplit } from "../../editor/revision-split.js";
 import type { RevisionRow } from "../../editor/revision-split.js";
 import { revealFoldedTarget } from "../../editor/toggle-headings.js";
@@ -416,6 +417,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
   const [failed, setFailed] = useState<Y.Doc | null>(null);
   const [editors, setEditors] = useState<{ side: string; editor: Editor }[]>([]);
   const members = useWorkspaceMembers();
+  const githubStates = useGitHubItemStates();
   useEffect(() => {
     for (const { editor } of editors) if (!editor.isDestroyed) setEditorMembers(editor, members);
   }, [editors, members]);
@@ -464,7 +466,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       let destroy: () => void;
       if (split && beforeDocument !== null && beforeHost.current !== null && afterHost.current !== null) {
         const rendered = createRevisionSplit({ beforeElement: beforeHost.current, afterElement: afterHost.current,
-          before: beforeDocument, after: afterDocument, docLinks, workspaceSettings,
+          before: beforeDocument, after: afterDocument, docLinks, workspaceSettings, githubStates,
           folding: { collapse: readCollapse(), expanded: new Set() },
           onExpand });
         view = rendered;
@@ -473,14 +475,14 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
       } else {
         if (host.current === null) return;
         if (beforeDocument === null) {
-          const editor = createRevisionEditor({ element: host.current, before: null, after: afterDocument, docLinks, workspaceSettings,
+          const editor = createRevisionEditor({ element: host.current, before: null, after: afterDocument, docLinks, workspaceSettings, githubStates,
             ariaLabel: "Document revision" });
           const activate = (event: MouseEvent): void => { handleDocLinkClick(event, docLinks); };
           editor.view.dom.addEventListener("click", activate);
           setEditors([{ side: "single", editor }]);
           return () => { editor.view.dom.removeEventListener("click", activate); setEditors([]); editor.destroy(); };
         }
-        const rendered = createRevisionInline({ element: host.current, before: beforeDocument, after: afterDocument, docLinks, workspaceSettings,
+        const rendered = createRevisionInline({ element: host.current, before: beforeDocument, after: afterDocument, docLinks, workspaceSettings, githubStates,
           ariaLabel: "Document revision",
           folding: { collapse: readCollapse(), expanded: new Set() }, onExpand });
         view = { get model() { return rendered.model; }, after: rendered.editor, expand: rendered.expand, setCollapse: rendered.setCollapse };
@@ -501,7 +503,7 @@ export function RevisionPane({ history, docLinks, workspaceSettings, writable = 
         destroy();
       };
     } catch { setFailed(afterDocument); }
-  }, [beforeDocument, afterDocument, split, docLinks, workspaceSettings, stopHolding]);
+  }, [beforeDocument, afterDocument, split, docLinks, workspaceSettings, githubStates, stopHolding]);
   useLayoutEffect(() => {
     const view = comparison.current;
     if (view === null || pane.current === null) return;

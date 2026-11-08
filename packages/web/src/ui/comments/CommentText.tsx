@@ -1,12 +1,13 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { githubItemUrl } from "@uberblick/schema";
-import type { InlineRun } from "@uberblick/schema";
+import type { GitHubItem, InlineRun } from "@uberblick/schema";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import { githubLinkNamesItem, githubPillPresentation } from "../../github-pill.js";
 import { personMentionTokens } from "../../mentions.js";
 import { isPlainClick } from "../route.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
+import { useGitHubItemStates } from "../github-item-states.js";
 import { commentInline } from "./comment-inline.js";
 
 function personText(text: string, members: readonly string[], offset: number): ReactNode[] {
@@ -30,16 +31,38 @@ function formatted(run: InlineRun, members: readonly string[], key: number): Rea
   return <Fragment key={key}>{content}</Fragment>;
 }
 
+function githubItems(runs: readonly InlineRun[]): GitHubItem[] {
+  const items: GitHubItem[] = [];
+  for (let index = 0; index < runs.length;) {
+    const run = runs[index];
+    if (run === undefined) break;
+    const { link: href, docLink } = run.marks;
+    if (href === undefined) { index += 1; continue; }
+    let text = "";
+    while (runs[index]?.marks.link === href && runs[index]?.marks.docLink === docLink) {
+      text += runs[index]?.text ?? "";
+      index += 1;
+    }
+    const item = githubItemUrl(href);
+    if (item !== null && githubLinkNamesItem(text, href, item)) items.push(item);
+  }
+  return items;
+}
+
 export function CommentText({ text, docLinks, mainRepository = null }: {
   text: string;
   docLinks: DocLinkContext | null;
   mainRepository?: string | null;
 }): ReactElement {
   const members = useWorkspaceMembers();
+  const states = useGitHubItemStates();
   const [, refresh] = useState(0);
   useEffect(() => docLinks?.subscribe(() => refresh((tick) => tick + 1)), [docLinks]);
+  const hasDocLinks = docLinks !== null;
+  const runs = useMemo(() => commentInline(text, hasDocLinks), [text, hasDocLinks]);
+  const items = useMemo(() => githubItems(runs), [runs]);
+  useEffect(() => states?.subscribe(items, () => refresh((tick) => tick + 1)), [states, items]);
   const result: ReactNode[] = [];
-  const runs = commentInline(text, docLinks !== null);
   for (let index = 0; index < runs.length;) {
     const run = runs[index];
     if (run === undefined) break;
@@ -61,10 +84,10 @@ export function CommentText({ text, docLinks, mainRepository = null }: {
     if (href !== undefined) {
       const item = githubItemUrl(href);
       const pill = item !== null && githubLinkNamesItem(group.map((part) => part.text).join(""), href, item)
-        ? githubPillPresentation(item, mainRepository) : null;
+        ? githubPillPresentation(item, mainRepository, states?.get(item) ?? null) : null;
       result.push(<a key={key} className="ub-link" href={href} target="_blank" rel="noopener noreferrer nofollow"
         aria-label={pill?.label} title={pill?.label} onClick={(event) => event.stopPropagation()}>
-        {pill === null ? content : <span className="ub-github-pill">
+        {pill === null ? content : <span className="ub-github-pill" data-github-state={pill.state}>
           <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d={pill.path} />
             {pill.issueDot && <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />}

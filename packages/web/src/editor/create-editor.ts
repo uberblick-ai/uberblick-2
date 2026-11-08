@@ -18,6 +18,7 @@ import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
+import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
 import { PersonMentions } from "./person-mentions.js";
 import { EmojiTyping } from "./emoji-menu.js";
@@ -69,6 +70,8 @@ export interface CreateEditorOptions {
   docLinks?: DocLinkContext | null;
   /** Shared settings drive presentation without changing the document. */
   workspaceSettings?: Y.Doc | null;
+  /** Reader-local GitHub state only affects link decorations. */
+  githubStates?: GitHubItemStates | null;
   /** Limit authored block choices and Markdown shortcuts without narrowing the stored schema. */
   blockMenuEntries?: readonly BlockMenuEntry[];
   /** Live content gate, independent of React's last render and repair permissions. */
@@ -130,7 +133,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,
-    GitHubLinks.configure({ settings: options.workspaceSettings ?? null }),
+    GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }),
     InlineIcons,
     PersonMentions,
     EmojiTyping,

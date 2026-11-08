@@ -11,10 +11,38 @@ import { CommentText } from "../src/ui/comments/CommentText.js";
 import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
 import { threadsFromDoc } from "../src/ui/comments/threads.js";
 import { WorkspaceMembersContext } from "../src/ui/workspace-members.js";
+import { GitHubItemStatesContext } from "../src/ui/github-item-states.js";
+import type { GitHubItemStates } from "../src/github-item-states.js";
+import type { GitHubItemState } from "@uberblick/schema";
 
 const DOC = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
 const TARGET = "0189abcd-2222-4333-8444-555566667777";
 const OTHER = "3f7d1e88-1111-4222-9333-444455556666";
+
+it("comment pills subscribe to the shared reader state and repaint their icon and accessible label", () => {
+  let state: GitHubItemState | null = "issue-completed";
+  let refresh = (): void => {};
+  const unsubscribe = vi.fn();
+  const states: GitHubItemStates = {
+    get: () => state,
+    subscribe: (_items, listener) => { refresh = listener; return unsubscribe; },
+  };
+  const text = "See [**repo**#12](https://github.com/owner/repo/issues/12).";
+  const view = render(<GitHubItemStatesContext value={states}><CommentText text={text} docLinks={null} /></GitHubItemStatesContext>);
+  const anchor = screen.getByRole("link", { name: "Issue owner/repo#12 · Closed as completed" });
+  expect(anchor.getAttribute("title")).toBe("Issue owner/repo#12 · Closed as completed");
+  const completedPath = anchor.querySelector("path")?.getAttribute("d");
+  act(() => { state = "issue-duplicate"; refresh(); });
+  expect(anchor.getAttribute("aria-label")).toBe("Issue owner/repo#12 · Closed as duplicate");
+  expect(anchor.querySelector("path")?.getAttribute("d")).not.toBe(completedPath);
+  expect(anchor.querySelector("circle")).toBeNull();
+  act(() => { state = null; refresh(); });
+  expect(anchor.getAttribute("title")).toBe("Issue owner/repo#12 · State unknown");
+  expect(anchor.querySelector("circle")).not.toBeNull();
+  expect(view.container.textContent).toBe("See repo#12.");
+  view.unmount();
+  expect(unsubscribe).toHaveBeenCalledOnce();
+});
 
 function directory(): { ydoc: Y.Doc; context: DocLinkContext; opened: string[] } {
   const ydoc = new Y.Doc();
@@ -183,8 +211,8 @@ describe("comment inline Markdown", () => {
     ["https://github.com/acme/crm-prototype/pull/69", "Pull request acme/crm-prototype#69"],
   ])("renders a document-style pill for %s", (text, label) => {
     render(<CommentText text={text} docLinks={null} mainRepository="uberblick-ai/uberblick-2" />);
-    const anchor = screen.getByRole<HTMLAnchorElement>("link", { name: label });
-    expect(anchor.title).toBe(label);
+    const anchor = screen.getByRole<HTMLAnchorElement>("link", { name: `${label} · State unknown` });
+    expect(anchor.title).toBe(`${label} · State unknown`);
     const pill = anchor.querySelector(".ub-github-pill");
     expect(pill).not.toBeNull();
     expect(pill?.querySelector(".ub-github-pill-number")?.textContent).toBe(label.includes("#2170") ? "#2170" : "#69");
@@ -203,7 +231,7 @@ describe("comment inline Markdown", () => {
   it.each(["crm-prototype#69", "acme/crm-prototype#69"])("folds matching %s and its parenthesised GitHub address into one pill", (reference) => {
     const view = render(<CommentText text={`See ${reference} (https://github.com/acme/crm-prototype/issues/69).`} docLinks={null} />);
     expect(screen.getAllByRole("link")).toHaveLength(1);
-    const anchor = screen.getByRole("link", { name: "Issue acme/crm-prototype#69" });
+    const anchor = screen.getByRole("link", { name: "Issue acme/crm-prototype#69 · State unknown" });
     expect(anchor.textContent).toBe("crm-prototype#69");
     expect(view.container.textContent).toBe("See crm-prototype#69.");
   });
@@ -320,12 +348,12 @@ it.each([false, true])("repaints comment repository labels from catalog settings
   const view = render(<ThreadsPane connection={connection} catalogConnection={catalogConnection} focused={null} author="Reader"
     threads={threadsFromDoc(ydoc)} onFocus={() => {}} narrow={narrow} open readOnly />);
   const card = screen.getByRole("group", { name: "Comment" });
-  const anchor = within(card).getByRole("link", { name: "Issue acme/crm-prototype#69" });
+  const anchor = within(card).getByRole("link", { name: "Issue acme/crm-prototype#69 · State unknown" });
   expect(card.querySelector("strong")?.textContent).toBe("must");
   expect(anchor.querySelector(".ub-github-pill-repo")?.textContent).toBe("crm-prototype");
   await act(async () => { setWorkspaceMainRepository(catalog, "ACME/crm-prototype"); });
   expect(anchor.querySelector(".ub-github-pill-repo")).toBeNull();
-  expect(anchor.getAttribute("aria-label")).toBe("Issue acme/crm-prototype#69");
+  expect(anchor.getAttribute("aria-label")).toBe("Issue acme/crm-prototype#69 · State unknown");
   Y.applyUpdate(peer, Y.encodeStateAsUpdate(catalog));
   setWorkspaceMainRepository(peer, "other/repository");
   await act(async () => { Y.applyUpdate(catalog, Y.encodeStateAsUpdate(peer)); });

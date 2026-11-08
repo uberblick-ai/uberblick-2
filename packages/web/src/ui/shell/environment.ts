@@ -5,6 +5,8 @@ import { randomIdentity } from "../../collab/identity.js";
 import { createAccountClient } from "../../shell/account.js";
 import { createDocumentSearchClient } from "../../shell/document-search.js";
 import { createDocumentRevisionsClient } from "../../shell/document-revisions.js";
+import { createGitHubItemStateClient } from "../../shell/github-item-states.js";
+import { createGitHubItemStates } from "../../github-item-states.js";
 import { useHubEndpoint, useIdentity, useLocalSessionMissing, useSetting } from "../hooks.js";
 import { parseRoute } from "../route.js";
 import { useServingAccount } from "../status/serving-account.js";
@@ -65,6 +67,12 @@ export function useShellEnvironment(path: string) {
       : createAccountClient(workspaceUuid, identity.name),
     [identity.name, serving, workspaceUuid],
   );
+  const githubStates = useMemo(
+    () => serving === null || workspaceUuid === null
+      ? null
+      : createGitHubItemStates(createGitHubItemStateClient(workspaceUuid, identity.name)),
+    [identity.name, serving, workspaceUuid],
+  );
   const account = useServingAccount(accountClient);
   const memberReading = useAccessReading(workspaceUuid, serving, identity.name, path,
     "list-member-usernames", account.state === "signed-in" ? account.accountId ?? null : null);
@@ -94,6 +102,6 @@ export function useShellEnvironment(path: string) {
   const listing = route.kind === "all" || route.kind === "list";
   return { path, hubReady, defaultIdentity, identity, configured, startupServing, defaultWorkspace,
     route, workspace, workspaceUuid, serving, remoteSignIn, sessionMissing, roomReady, endpoint,
-    statusEndpoint, documentSearch, documentRevisions, account, members, hubAdministration, settingsAccess, workspaceLocation, settings, listing };
+    statusEndpoint, documentSearch, documentRevisions, githubStates, account, members, hubAdministration, settingsAccess, workspaceLocation, settings, listing };
 }
 export type ShellEnvironment = ReturnType<typeof useShellEnvironment>;

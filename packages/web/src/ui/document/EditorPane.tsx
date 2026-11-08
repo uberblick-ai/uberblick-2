@@ -50,6 +50,7 @@ import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
+import { useGitHubItemStates } from "../github-item-states.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import {
@@ -735,6 +736,7 @@ const BoundEditor = memo(function BoundEditor({
   const [bindingEpoch, setBindingEpoch] = useState(0);
   const { writable } = useRoomStatus(connection);
   const members = useWorkspaceMembers();
+  const githubStates = useGitHubItemStates();
   useEffect(() => {
     if (editor !== null && !editor.isDestroyed) setEditorMembers(editor, members);
   }, [editor, members]);
@@ -778,6 +780,7 @@ const BoundEditor = memo(function BoundEditor({
       },
       docLinks,
       workspaceSettings: catalogConnection?.ydoc ?? null,
+      githubStates,
     });
     liveEditor = binding.editor;
     const stopSourceStatus = connection.onStatusChange(refreshEditable);
@@ -867,7 +870,7 @@ const BoundEditor = memo(function BoundEditor({
       directoryConnection?.ydoc.off("afterTransaction", refreshEditable);
       binding.destroy();
     };
-  }, [connection, directoryConnection, catalogConnection, docLinks, onSelectThread, bindingEpoch]);
+  }, [connection, directoryConnection, catalogConnection, docLinks, githubStates, onSelectThread, bindingEpoch]);
 
   /**
    * Change ProseMirror editable in place to preserve caret, scroll, selection

@@ -3,12 +3,120 @@ import { expectOpenPages, provePageArrival } from "./settle.js";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as Y from "yjs";
+import { appendBlock, createAnnotation, githubItemKey, githubItemUrl, initDoc } from "@uberblick/schema";
+import type { GitHubItemState, InlineRun } from "@uberblick/schema";
 import { createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, openApp } = setupHarness();
 const TARGET = "https://github.com/Example/SomeRepo/pull/12/files#diff-abc";
 const STORED = "Example/SomeRepo#12";
+
+test("one local reading repaints every GitHub state in prose and comments with only icon paint changing", { tag: "@webkit" }, async ({ browser }, info) => {
+  const cases: Array<{ kind: "issue" | "pull"; number: number; state: GitHubItemState; label: string; color: "green" | "purple" | "grey" | "red" }> = [
+    { kind: "issue", number: 101, state: "issue-open", label: "Open", color: "green" },
+    { kind: "issue", number: 102, state: "issue-completed", label: "Closed as completed", color: "purple" },
+    { kind: "issue", number: 103, state: "issue-not-planned", label: "Closed as not planned", color: "grey" },
+    { kind: "issue", number: 104, state: "issue-duplicate", label: "Closed as duplicate", color: "grey" },
+    { kind: "pull", number: 105, state: "pull-open", label: "Open", color: "green" },
+    { kind: "pull", number: 106, state: "pull-draft", label: "Draft", color: "grey" },
+    { kind: "pull", number: 107, state: "pull-merged", label: "Merged", color: "purple" },
+    { kind: "pull", number: 108, state: "pull-closed", label: "Closed without merging", color: "red" },
+  ];
+  const refs = cases.map((entry) => ({ ...entry, href: `https://github.com/Example/SomeRepo/${entry.kind === "issue" ? "issues" : "pull"}/${entry.number}` }));
+  const doc = new Y.Doc();
+  const uuid = randomUUID();
+  initDoc(doc, { uuid, title: "GitHub state proof" });
+  const inline: InlineRun[] = refs.flatMap(({ number, href }) => [
+    { text: `SomeRepo#${number}`, marks: { link: href } }, { text: " ", marks: {} },
+  ]);
+  const block = appendBlock(doc, { type: "paragraph", inline });
+  createAnnotation(doc, block, 0, 1, "Reader", refs.map(({ href }) => href).join(" "));
+  await harness().seedDocument(doc);
+  doc.destroy();
+  let release = (): void => {};
+  const responseReady = new Promise<void>((resolve) => { release = resolve; });
+  const requests: Array<{ items: unknown[] }> = [];
+  try {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: async (opened) => {
+        await opened.route("**/api/github-item-states", async (route) => {
+          requests.push(route.request().postDataJSON() as { items: unknown[] });
+          await responseReady;
+          const states = Object.fromEntries(refs.map(({ href, state }) => {
+            const item = githubItemUrl(href);
+            if (item === null) throw new Error("e2e: state fixture needs GitHub addresses");
+            return [githubItemKey(item), state];
+          }));
+          await route.fulfill({ json: { states } });
+        });
+      },
+    });
+    const prose = page.locator(".ub-editor .ub-github-pill");
+    await expect(prose).toHaveCount(cases.length);
+    await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]?.items).toHaveLength(cases.length);
+    const revision = await page.locator(".ub-doc-rev").innerText();
+    const unknownPaths = await prose.locator("path").evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
+    const baselines = new Map<string, Array<Record<string, string>>>();
+    for (const appearance of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: appearance });
+      baselines.set(appearance, await Promise.all(cases.map((_entry, index) => pillStyle(prose.nth(index)))));
+      await expect(prose.first().locator("svg")).toHaveCSS("color", await prose.first().locator(".ub-github-pill-repo").evaluate((node) => getComputedStyle(node).color));
+    }
+    release();
+    for (const [index, entry] of cases.entries()) {
+      const pill = prose.nth(index);
+      await expect(pill).toHaveAttribute("data-github-state", entry.state);
+      const label = `${entry.kind === "issue" ? "Issue" : "Pull request"} Example/SomeRepo#${entry.number} · ${entry.label}`;
+      await expect(pill.locator("xpath=ancestor::a[1]")).toHaveAccessibleName(label);
+      await expect(pill.locator("xpath=ancestor::a[1]")).toHaveAttribute("title", label);
+    }
+    if ((page.viewportSize()?.width ?? 1280) < 1280) await page.locator(".ub-threads-toggle").click();
+    const comments = page.locator(".ub-thread-text .ub-github-pill");
+    await expect(comments).toHaveCount(cases.length);
+    const paths = await prose.locator("path").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("d")));
+    expect(paths[0]).toBe(unknownPaths[0]);
+    expect(paths[4]).toBe(unknownPaths[4]);
+    expect(new Set([paths[0], paths[1], paths[2]]).size).toBe(3);
+    expect(paths[2]).toBe(paths[3]);
+    expect(new Set(paths.slice(4)).size).toBe(4);
+    for (const appearance of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: appearance });
+      const expected = {
+        green: appearance === "light" ? "rgb(26, 127, 55)" : "rgb(63, 185, 80)",
+        purple: appearance === "light" ? "rgb(130, 80, 223)" : "rgb(163, 113, 247)",
+        red: appearance === "light" ? "rgb(207, 34, 46)" : "rgb(248, 81, 73)",
+        grey: await prose.first().locator(".ub-github-pill-repo").evaluate((node) => getComputedStyle(node).color),
+      };
+      for (const [index, entry] of cases.entries()) {
+        const pill = prose.nth(index);
+        await expect(pill.locator("svg")).toHaveCSS("color", expected[entry.color]);
+        await expect(comments.nth(index)).toHaveAttribute("data-github-state", entry.state);
+        await expect(comments.nth(index).locator("svg")).toHaveCSS("color", expected[entry.color]);
+        expect(await pillStyle(pill)).toEqual(baselines.get(appearance)?.[index]);
+        expect(await pill.locator("path").evaluate((node) => (node as SVGPathElement).getTotalLength())).toBeGreaterThan(10);
+      }
+      if (process.env.UB_AGENTS_SCRATCH !== undefined) await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `github-states-${info.project.name}-${appearance}.png`) });
+    }
+    await expect(page.locator(".ub-doc-rev")).toHaveText(revision);
+    expect(requests).toHaveLength(1);
+    const upstreamRequests: string[] = [];
+    const upstream = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      upstream: true,
+      beforeNavigate: async (opened) => {
+        opened.on("request", (request) => { if (request.url().endsWith("/api/github-item-states")) upstreamRequests.push(request.url()); });
+      },
+    });
+    await expect(upstream.locator(".ub-editor .ub-github-pill")).toHaveCount(cases.length);
+    await expect(upstream.locator(".ub-editor .ub-github-pill").first()).toHaveAttribute("data-github-state", "unknown");
+    await expect(upstream.locator(".ub-editor .ub-github-pill").first().locator("xpath=ancestor::a[1]"))
+      .toHaveAccessibleName("Issue Example/SomeRepo#101 · State unknown");
+    expect(upstreamRequests).toEqual([]);
+  } finally { release(); }
+});
 
 async function newDoc(page: Page): Promise<string> {
   await page.goto(harness().appUrl);
@@ -104,10 +212,10 @@ async function archiveDoc(page: Page): Promise<void> {
 test("only link text naming its GitHub issue or pull request becomes a pill", async ({ page }) => {
   await newDoc(page);
   const accepted = [
-    { text: "#12", href: "https://github.com/Example/SomeRepo/issues/12#issuecomment-1", name: "Issue Example/SomeRepo#12" },
-    { text: "somerepo#12", href: TARGET, name: "Pull request Example/SomeRepo#12" },
-    { text: "example/SOMEREPO#12", href: TARGET, name: "Pull request Example/SomeRepo#12" },
-    { text: "http://github.com/Other/repo/issues/9", href: "http://github.com/Other/repo/issues/9", name: "Issue Other/repo#9" },
+    { text: "#12", href: "https://github.com/Example/SomeRepo/issues/12#issuecomment-1", name: "Issue Example/SomeRepo#12 · State unknown" },
+    { text: "somerepo#12", href: TARGET, name: "Pull request Example/SomeRepo#12 · State unknown" },
+    { text: "example/SOMEREPO#12", href: TARGET, name: "Pull request Example/SomeRepo#12 · State unknown" },
+    { text: "http://github.com/Other/repo/issues/9", href: "http://github.com/Other/repo/issues/9", name: "Issue Other/repo#9 · State unknown" },
   ];
   const ordinary = [
     { text: "the launcher fix", href: TARGET },
@@ -294,7 +402,7 @@ async function commentPill(page: Page): Promise<void> {
   const pill = page.locator(".ub-github-pill");
   await expect(pill).toBeVisible();
   const link = pill.locator("xpath=ancestor::a[1]");
-  await expect(link).toHaveAccessibleName("Pull request Example/SomeRepo#12");
+  await expect(link).toHaveAccessibleName("Pull request Example/SomeRepo#12 · State unknown");
   await expect(link).toHaveAttribute("href", TARGET);
   await expect.poll(() => pill.evaluate(element => {
     const comment = element.closest("[data-comment-thread]");

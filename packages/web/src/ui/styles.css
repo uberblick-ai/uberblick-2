@@ -82,6 +82,9 @@
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
   --agent-claude: #d97757;
   --agent-codex: light-dark(#0d0d0d, #ffffff);
+  --github-open: light-dark(#1a7f37, #3fb950);
+  --github-done: light-dark(#8250df, #a371f7);
+  --github-closed: light-dark(#cf222e, #f85149);
 
   /*
    * Use brand-ink for text and brand for non-text accents. Light ink clears
@@ -2392,7 +2395,10 @@ h6.ub-heading {
 }
 .ub-github-pill { cursor: pointer; }
 
-.ub-github-pill svg { width: 1em; height: 1em; }
+.ub-github-pill svg { width: 1em; height: 1em; color: var(--muted-foreground); }
+.ub-github-pill:is([data-github-state="issue-open"], [data-github-state="pull-open"]) svg { color: var(--github-open); }
+.ub-github-pill:is([data-github-state="issue-completed"], [data-github-state="pull-merged"]) svg { color: var(--github-done); }
+.ub-github-pill[data-github-state="pull-closed"] svg { color: var(--github-closed); }
 .ub-github-pill-repo { color: var(--muted-foreground); }
 .ub-github-pill-number { color: var(--foreground); font-weight: 600; }
 

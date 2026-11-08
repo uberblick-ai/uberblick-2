@@ -40,6 +40,7 @@ import { createBrowserAccess } from "./open-session.js";
 import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
 import { openBanner } from "./open-output.js";
 import { startUpdateCheck, type UpdateCheck } from "./open-update.js";
+import { createGitHubItemStateLookup, type GitHubItemStateLookup } from "./open-github-items.js";
 import { cliVersion, isInstallPayload } from "./version.js";
 import { registerOpenRun } from "./open-run.js";
 import { requestRecentDevices } from "./recent-devices.js";
@@ -286,6 +287,7 @@ interface Owned {
   replicas: BrowserReplicas | null;
   hubMonitor: { stop(): void } | null;
   updateCheck: UpdateCheck | null;
+  githubItems: GitHubItemStateLookup | null;
 }
 
 interface EngineMonitor {
@@ -392,6 +394,7 @@ function takeForeground(owned: Owned, io: Io): Foreground {
     owned.engineMonitor?.stop();
     owned.hubMonitor?.stop();
     owned.updateCheck?.stop();
+    await owned.githubItems?.stop();
     let result = code;
 
     if (owned.localServer !== null) {
@@ -494,6 +497,8 @@ async function startBrowserServer(startup: BrowserStartup) {
   // Only an installed copy can follow the banner's advice to run ub update.
   const updateCheck = isInstallPayload() ? startUpdateCheck(cliVersion()) : null;
   owned.updateCheck = updateCheck;
+  const githubItems = createGitHubItemStateLookup(startupEnv);
+  owned.githubItems = githubItems;
   const status = (workspaceId: string): ServingSyncStatus => {
     if (localServer !== null) {
       const current = new Set<string>();
@@ -552,6 +557,7 @@ async function startBrowserServer(startup: BrowserStartup) {
         replicas,
         statusForWorkspace: status,
         availableUpdate: () => updateCheck?.available() ?? null,
+        githubItems,
         env: startupEnv,
         expectedOrigin: servedUrl.origin,
         access,
@@ -596,6 +602,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     replicas: null,
     hubMonitor: null,
     updateCheck: null,
+    githubItems: null,
   };
   const foreground = takeForeground(owned, io);
   let hubNote = "";

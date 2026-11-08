@@ -21,6 +21,7 @@ import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
+import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
@@ -330,7 +331,7 @@ function sidePresentation(rows: readonly RevisionRow[], side: RevisionSide, docL
 }
 
 function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: readonly RevisionRow[], side: RevisionSide,
-  docLinks: DocLinkContext | null, workspaceSettings: Y.Doc | null): Editor {
+  docLinks: DocLinkContext | null, workspaceSettings: Y.Doc | null, githubStates: GitHubItemStates | null): Editor {
   const editor = new Editor({
     element,
     extensions: [
@@ -338,7 +339,7 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
       ...revisionPalette(data), sidePresentation(rows, side, docLinks),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
       DocLinks.configure({ context: docLinks }), ExternalLinks,
-      GitHubLinks.configure({ settings: workspaceSettings }), InlineIcons, PersonMentions, ToggleHeadings,
+      GitHubLinks.configure({ settings: workspaceSettings, states: githubStates }), InlineIcons, PersonMentions, ToggleHeadings,
     ],
     content,
     editable: false,
@@ -432,6 +433,7 @@ export interface CreateRevisionSplitOptions {
   after: Y.Doc;
   docLinks?: DocLinkContext | null;
   workspaceSettings?: Y.Doc | null;
+  githubStates?: GitHubItemStates | null;
   folding?: RevisionFolding;
   /** A fold bar was pressed: show that run again. */
   onExpand?: (run: number) => void;
@@ -440,8 +442,8 @@ export interface CreateRevisionSplitOptions {
 export function createRevisionSplit(options: CreateRevisionSplitOptions): RevisionSplit {
   let model = revisionSplitModel(options.before, options.after, options.folding);
   const expanded = new Set(options.folding?.expanded);
-  const before = sideEditor(options.beforeElement, model.before, options.before, model.rows, "before", options.docLinks ?? null, options.workspaceSettings ?? null);
-  const after = sideEditor(options.afterElement, model.after, options.after, model.rows, "after", options.docLinks ?? null, options.workspaceSettings ?? null);
+  const before = sideEditor(options.beforeElement, model.before, options.before, model.rows, "before", options.docLinks ?? null, options.workspaceSettings ?? null, options.githubStates ?? null);
+  const after = sideEditor(options.afterElement, model.after, options.after, model.rows, "after", options.docLinks ?? null, options.workspaceSettings ?? null, options.githubStates ?? null);
   let frame = 0;
   const align = (): void => {
     cancelAnimationFrame(frame);

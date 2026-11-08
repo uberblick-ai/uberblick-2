@@ -15,7 +15,7 @@ export interface AccessBinding {
   env: NodeJS.ProcessEnv;
 }
 
-function readInput(request: IncomingMessage): Promise<string | null> {
+function readInput(request: IncomingMessage, maxBytes: number): Promise<string | null> {
   return new Promise(resolve => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -30,7 +30,7 @@ function readInput(request: IncomingMessage): Promise<string | null> {
     };
     const data = (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_INPUT_BYTES) finish(null);
+      if (size > maxBytes) finish(null);
       else chunks.push(chunk);
     };
     const end = () => finish(Buffer.concat(chunks).toString("utf8"));
@@ -45,11 +45,11 @@ function readInput(request: IncomingMessage): Promise<string | null> {
 }
 
 /** A bounded JSON object body, or null for any other request. */
-export async function readJsonObject(request: IncomingMessage): Promise<Record<string, unknown> | null> {
+export async function readJsonObject(request: IncomingMessage, maxBytes = MAX_INPUT_BYTES): Promise<Record<string, unknown> | null> {
   if (request.headers["content-type"]?.split(";")[0] !== "application/json") return null;
-  if (Number(request.headers["content-length"] ?? 0) > MAX_INPUT_BYTES) return null;
+  if (Number(request.headers["content-length"] ?? 0) > maxBytes) return null;
   try {
-    const input = await readInput(request);
+    const input = await readInput(request, maxBytes);
     if (input === null) return null;
     const body: unknown = JSON.parse(input);
     if (body === null || typeof body !== "object" || Array.isArray(body)) return null;

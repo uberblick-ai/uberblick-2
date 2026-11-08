@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { importRootSecret, verifyToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
+import { githubItemKey, githubItemUrl } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
 import { LAUNCH_LIFETIME_MS, LaunchSecret } from "../src/open-session.js";
@@ -34,6 +35,47 @@ function client(url: string) {
 }
 
 describe("ub open browser sessions", () => {
+  it.each([false, true])("authenticates GitHub state readings and keeps credentials out of output (verbose=%s)", async verbose => {
+    await holdDefaultHub();
+    const { box, env } = configured();
+    const secret = "github-token-must-stay-in-the-server-2675";
+    const app = await open(box, ["--port", String(await freePort()), ...(verbose ? ["--verbose"] : [])], {
+      ...env, GH_TOKEN: secret,
+    });
+    try {
+      const origin = new URL(app.url).origin;
+      const key = localBrowserKey(WORKSPACE, box.env);
+      const signed = { authorization: `Bearer ${await authMessage(key)}` };
+      const local = client(app.url);
+      const session = (await local.exchange(app.launch)).body.session as string;
+      const headers = { ...json, origin, ...signed, "x-uberblick-session": session };
+      const item = githubItemUrl("https://github.com/uberblick-ai/uberblick-2/issues/2147483648")!;
+      const body = JSON.stringify({ items: [item] });
+      const request = (extra: Record<string, string>) => fetch(`${app.url}api/github-item-states`, {
+        method: "POST", headers: extra, body,
+      });
+      expect((await request({ ...json, origin })).status).toBe(401);
+      expect((await request({ ...json, origin, ...signed })).status).toBe(401);
+      expect((await request({ ...headers, origin: "http://attacker.example" })).status).toBe(403);
+      expect((await fetch(`${app.url}api/github-item-states`, { headers })).status).toBe(405);
+      const answer = await request(headers);
+      expect(answer.status).toBe(200);
+      // Out-of-range GitHub integers stay unknown without an outbound request.
+      expect(await answer.json()).toEqual({
+        states: { [githubItemKey(item)]: null }, refreshAfterMs: { [githubItemKey(item)]: 300_000 },
+      });
+      const invalid = await fetch(`${app.url}api/github-item-states`, { method: "POST", headers,
+        body: JSON.stringify({ items: [{ ...item, owner: "bad/owner" }] }) });
+      expect(invalid.status).toBe(400);
+      const config = await (await get(`${app.url}uberblick-config.json`)).text();
+      expect(config).not.toContain(secret);
+    } finally {
+      expect((await app.interrupt()).status).toBe(0);
+    }
+    expect(app.stdout()).not.toContain(secret);
+    expect(app.stderr()).not.toContain(secret);
+  });
+
   it("serves no key without a session and trades the printed launch secret exactly once", async () => {
     await holdDefaultHub();
     const { box, env } = configured();

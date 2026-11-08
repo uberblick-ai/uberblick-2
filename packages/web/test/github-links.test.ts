@@ -1,15 +1,62 @@
 import { expect, it } from "vitest";
 import * as Y from "yjs";
+import { undo } from "y-prosemirror";
 import {
   appendBlock, createAnnotation, exportMarkdown, getBlockInline,
-  getBlocksFragment, importMarkdown, initDoc,
+  getBlocksFragment, githubItemKey, importMarkdown, initDoc,
   setWorkspaceMainRepository, WORKSPACE_SETTINGS_KEY,
 } from "@uberblick/schema";
-import type { InlineRun } from "@uberblick/schema";
+import type { GitHubItem, GitHubItemState, InlineRun } from "@uberblick/schema";
 import { HelpCatalog } from "../../mcp-server/src/help.js";
 import { mountEditor } from "./helpers.js";
+import type { GitHubItemStates } from "../src/github-item-states.js";
 
 const HREF = "http://github.com/Owner/Repo/pull/0012/files#diff-abc";
+
+it.each([true, false])("repaints reader-local state and accessible labels without writes or an undo step (editable %s)", async (editable) => {
+  const { ydoc, blockId } = fixture("Owner/Repo#12");
+  let current: GitHubItemState | null = "pull-draft";
+  const subscriptions = new Set<() => void>();
+  let observed: readonly GitHubItem[] = [];
+  const states: GitHubItemStates = {
+    get: () => current,
+    subscribe: (items, listener) => {
+      observed = items;
+      subscriptions.add(listener);
+      return () => { subscriptions.delete(listener); };
+    },
+  };
+  const { editor, element } = mountEditor(ydoc, { githubStates: states });
+  try {
+    editor.setEditable(editable);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const before = Y.encodeStateAsUpdate(ydoc);
+    const inline = getBlockInline(ydoc, blockId);
+    const markdown = exportMarkdown(ydoc);
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
+    expect(observed.map(githubItemKey)).toEqual(["owner/repo#12:pull-request"]);
+    const anchor = (): HTMLAnchorElement | null => element.querySelector("a.ub-link");
+    expect(anchor()?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012 · Draft");
+    const draftPath = anchor()?.querySelector("path")?.getAttribute("d");
+    current = "pull-merged";
+    for (const listener of subscriptions) listener();
+    expect(anchor()?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012 · Merged");
+    expect(anchor()?.getAttribute("title")).toBe("Pull request Owner/Repo#0012 · Merged");
+    expect(anchor()?.querySelector("path")?.getAttribute("d")).not.toBe(draftPath);
+    expect(anchor()?.querySelector(".ub-github-pill")?.getAttribute("data-github-state")).toBe("pull-merged");
+    current = null;
+    for (const listener of subscriptions) listener();
+    expect(anchor()?.getAttribute("title")).toBe("Pull request Owner/Repo#0012 · State unknown");
+    expect(writes).toBe(0);
+    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    expect(getBlockInline(ydoc, blockId)).toEqual(inline);
+    expect(exportMarkdown(ydoc)).toBe(markdown);
+    expect(undo(editor.state)).toBe(false);
+    editor.destroy();
+    expect(subscriptions.size).toBe(0);
+  } finally { if (!editor.isDestroyed) editor.destroy(); ydoc.destroy(); }
+});
 
 it("renders the markdown help's GitHub reference example as a pill without changing its inline runs", async () => {
   const topic = new HelpCatalog().read("markdown").text;
@@ -25,7 +72,7 @@ it("renders the markdown help's GitHub reference example as a pill without chang
   try {
     const anchor = element.querySelector(".ub-github-pill")?.closest("a.ub-link");
     expect(anchor?.getAttribute("href")).toBe("https://github.com/acme/app/pull/2005");
-    expect(anchor?.getAttribute("aria-label")).toBe("Pull request acme/app#2005");
+    expect(anchor?.getAttribute("aria-label")).toBe("Pull request acme/app#2005 · State unknown");
     expect(anchor?.querySelector(".ub-github-pill-repo")?.textContent).toBe("app");
     expect(anchor?.querySelector(".ub-github-pill-number")?.textContent).toBe("#2005");
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -48,8 +95,8 @@ it.each([true, false])("repaints local and remote main-repository changes withou
     const repo = (): string | undefined => element.querySelector(".ub-github-pill-repo")?.textContent ?? undefined;
     const expectFullReference = (): void => {
       const anchor = element.querySelector("a.ub-link");
-      expect(anchor?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012");
-      expect(anchor?.getAttribute("title")).toBe("Pull request Owner/Repo#0012");
+      expect(anchor?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012 · State unknown");
+      expect(anchor?.getAttribute("title")).toBe("Pull request Owner/Repo#0012 · State unknown");
       expect(anchor?.querySelector(".ub-github-pill-number")?.textContent).toBe("#0012");
       expect(anchor?.querySelectorAll("svg")).toHaveLength(1);
     };
@@ -103,7 +150,7 @@ it.each(["#12", "repo#12", "OWNER/REPO#0012", HREF])(
     const { editor, element } = mountEditor(ydoc);
     try {
       const anchor = element.querySelector("a.ub-link");
-      expect(anchor?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012");
+      expect(anchor?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012 · State unknown");
       expect(anchor?.querySelector(".ub-github-pill-repo")?.textContent).toBe("Repo");
       expect(anchor?.querySelector(".ub-github-pill-number")?.textContent).toBe("#0012");
       editor.view.focus();
@@ -149,14 +196,14 @@ it("keeps partial comment highlights on the pill and repaints remote text and ad
   try {
     editor.setEditable(false);
     expect(element.querySelector(".ub-github-pill")?.closest("[data-comment-thread]")?.getAttribute("data-comment-thread")).toBe(thread.id);
-    expect(element.querySelector(".ub-github-pill")?.closest("a.ub-link")?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012");
+    expect(element.querySelector(".ub-github-pill")?.closest("a.ub-link")?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012 · State unknown");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(getBlockInline(ydoc, blockId)).toEqual(before);
 
     const text = (getBlocksFragment(remote).get(0) as Y.XmlElement).firstChild as Y.XmlText;
     text.format(7, 13, { link: { href: "https://github.com/owner/repo/issues/12" } });
     Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(remote));
-    expect(element.querySelector(".ub-github-pill")?.closest("a.ub-link")?.getAttribute("aria-label"), element.innerHTML).toBe("Issue owner/repo#12");
+    expect(element.querySelector(".ub-github-pill")?.closest("a.ub-link")?.getAttribute("aria-label"), element.innerHTML).toBe("Issue owner/repo#12 · State unknown");
     text.insert(20, "3", { link: { href: "https://github.com/owner/repo/issues/12" } });
     Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(remote));
     expect(element.querySelector(".ub-github-pill")).toBeNull();

@@ -11,6 +11,7 @@ import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { retypeBlockInTransaction } from "../src/editor/retype.js";
 import type { RetypeAttrs } from "../src/editor/retype.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
+import type { GitHubItemStates } from "../src/github-item-states.js";
 import { plainText } from "../src/editor/ytext.js";
 import { onTestCleanup } from "./test-cleanup.js";
 
@@ -66,7 +67,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  */
 export function mountEditor(
   ydoc: Y.Doc,
-  options: { newBlockId?: () => string; docLinks?: DocLinkContext | null; workspaceSettings?: Y.Doc | null; canCleanupTags?: () => boolean } = {},
+  options: { newBlockId?: () => string; docLinks?: DocLinkContext | null; workspaceSettings?: Y.Doc | null; githubStates?: GitHubItemStates | null; canCleanupTags?: () => boolean } = {},
 ): { editor: Editor; element: HTMLElement } {
   const element = document.createElement("div");
   document.body.appendChild(element);
@@ -82,6 +83,7 @@ export function mountEditor(
     // real state of the app too (see `CreateEditorOptions.docLinks`).
     ...(options.docLinks === undefined ? {} : { docLinks: options.docLinks }),
     ...(options.workspaceSettings === undefined ? {} : { workspaceSettings: options.workspaceSettings }),
+    ...(options.githubStates === undefined ? {} : { githubStates: options.githubStates }),
     ...(options.canCleanupTags === undefined ? {} : { canCleanupTags: options.canCleanupTags }),
   });
   const forgetEditor = onTestCleanup(() => {
