@@ -112,7 +112,8 @@ test("one local reading repaints every GitHub state in prose and comments with o
     });
     await expect(upstream.locator(".ub-editor .ub-github-pill")).toHaveCount(cases.length);
     await expect(upstream.locator(".ub-editor .ub-github-pill").first()).toHaveAttribute("data-github-state", "unknown");
-    await expect(upstream.locator(".ub-editor a.ub-link").first()).toHaveAccessibleName("Issue Example/SomeRepo#101 · State unknown");
+    await expect(upstream.locator(".ub-editor .ub-github-pill").first().locator("xpath=ancestor::a[1]"))
+      .toHaveAccessibleName("Issue Example/SomeRepo#101 · State unknown");
     expect(upstreamRequests).toEqual([]);
   } finally { release(); }
 });
