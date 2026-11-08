@@ -13,7 +13,8 @@ Variables (put them before /bin/bash):
                  A *.ts.net name: Tailscale HTTPS on Linux (Tailscale must be up).
   HUB_VERSION    Pin X.Y.Z; otherwise use GitHub's latest hub release.
   HUB_DIR        Deployment directory (default: ~/uberblick-remote).
-  LOOPBACK_PORT  Loopback HTTP port (default: 8080).
+  HUB_PORT       Loopback HTTP port (default: 8080).
+  LOOPBACK_PORT  Legacy alias for HUB_PORT; different values are refused.
   ALLOW_ROOT=1   Allow an explicit root run; Docker is never installed or updated.
   HELP=1         Print this help without checks or changes (also: --help).
 
@@ -101,7 +102,7 @@ setup_owns_binding() {
 }
 
 setup_check_port() {
-  local sockets candidates id protocol ip port endpoint own_id ours bindings
+  local sockets candidates id protocol ip port endpoint own_id ours bindings holder
   if [ "$os" = Linux ]; then
     command -v ss >/dev/null 2>&1 || setup_fail 'port check requires ss from iproute2. Install it: https://wiki.linuxfoundation.org/networking/iproute2'
     sockets=$(ss -H -ltn) || setup_fail 'port check: ss failed; install iproute2 or repair access and re-run.'
@@ -111,6 +112,7 @@ setup_check_port() {
     sockets=$(netstat -an) || setup_fail 'port check: netstat failed; repair access to the system socket table and re-run.'
     sockets=$(printf '%s\n' "$sockets" | awk '/^tcp/ && !/^tcp6[[:space:]]/ && /LISTEN/ {print $4}')
   fi
+  # known limit: stopped hubs do not reserve ports; revisit when port reservations are supported.
   candidates=$(docker ps --format '{{.ID}}')
   for id in $candidates; do
     ours=0
@@ -120,7 +122,9 @@ setup_check_port() {
     while read -r protocol ip port; do
       case "$protocol" in */tcp) ;; *) continue ;; esac
       if [ "$port" = "$listen_port" ] && setup_overlap "$ip"; then
-        setup_fail "port check: $bind:$listen_port is published by another Docker deployment. Stop that listener or choose another route/LOOPBACK_PORT."
+        holder=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$id") || setup_fail 'port check: Docker could not inspect the deployment directory. Check docker info and re-run.'
+        case "$holder" in '' | '<no value>') holder='an unknown directory' ;; esac
+        setup_fail "port check: $bind:$listen_port is published by another Docker deployment in $holder. Stop that listener or choose another route/HUB_PORT."
       fi
     done <<< "$bindings"
   done
@@ -133,7 +137,7 @@ setup_check_port() {
     esac
     if [ "$ip" = '*' ]; then ip=0.0.0.0; fi
     if [ "$port" = "$listen_port" ] && setup_overlap "$ip" && ! setup_owns_binding "$ip"; then
-      setup_fail "port check: $bind:$listen_port is in use. Stop that listener or choose another route/LOOPBACK_PORT."
+      setup_fail "port check: $bind:$listen_port is in use. Stop that listener or choose another route/HUB_PORT."
     fi
   done <<< "$sockets"
 }
@@ -155,12 +159,16 @@ setup_main() {
   trap 'exit 130' INT TERM HUP
   local directory=${HUB_DIR:-$HOME/uberblick-remote}
   local host_given=${HUB_HOST+x} requested_host=${HUB_HOST:-}
-  local port_given=${LOOPBACK_PORT+x} requested_port=${LOOPBACK_PORT:-}
+  local port_given=${HUB_PORT+x}${LOOPBACK_PORT+x} requested_port=${HUB_PORT-${LOOPBACK_PORT-}}
   local requested_version=${HUB_VERSION:-} os arch engine compose_version resolved=''
   local web_host='' tail_host='' tail_ip='' https_ip='' loop_port=8080 files='' inferred=0 previous='' old_protocol=''
-  local project=${COMPOSE_PROJECT_NAME:-uberblick-remote} ids id workdir service running hub_id='' own_bindings=''
+  local requested_project=${COMPOSE_PROJECT_NAME:-} project='' ids id workdir service running hub_id='' own_bindings='' volumes networks env_port=''
+  local project_recorded=0 discovered_project='' container_project candidates
   local bind listen_port status='' protocol='' target fetch_url='' url file attempt
-  unset HUB_VERSION LOOPBACK_PORT COMPOSE_FILE WEB_HOST TAILSCALE_HOST TAILSCALE_IP HTTPS_BIND_IP
+  if [ -n "${HUB_PORT+x}" ] && [ -n "${LOOPBACK_PORT+x}" ] && [ "$HUB_PORT" != "$LOOPBACK_PORT" ]; then
+    setup_fail "port check: HUB_PORT=$HUB_PORT and LOOPBACK_PORT=$LOOPBACK_PORT differ. Set just one, or give both the same value."
+  fi
+  unset HUB_VERSION HUB_PORT LOOPBACK_PORT COMPOSE_FILE COMPOSE_PROJECT_NAME WEB_HOST TAILSCALE_HOST TAILSCALE_IP HTTPS_BIND_IP
   [ "$(id -u)" != 0 ] || [ "${ALLOW_ROOT:-0}" = 1 ] || setup_fail 'root run refused. Run as your Docker user, or explicitly set ALLOW_ROOT=1.'
   command -v curl >/dev/null 2>&1 || setup_fail 'curl is required. Install curl: https://curl.se/download.html'
   os=$(uname -s); arch=$(uname -m)
@@ -189,22 +197,57 @@ services:
   tail-ip: {image: 'TAILSCALE_IP=${TAILSCALE_IP:-}'}
   https-ip: {image: 'HTTPS_BIND_IP=${HTTPS_BIND_IP:-}'}
   port: {image: 'LOOPBACK_PORT=${LOOPBACK_PORT:-}'}
+  hub-port: {image: 'HUB_PORT=${HUB_PORT:-}'}
   files: {image: 'COMPOSE_FILE=${COMPOSE_FILE:-}'}
   project: {image: 'COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-}'}
 COMPOSE
     ) || setup_fail 'read .env failed. Repair its Compose dotenv syntax, then re-run.'
     web_host=$(setup_env_value WEB_HOST); tail_host=$(setup_env_value TAILSCALE_HOST)
     tail_ip=$(setup_env_value TAILSCALE_IP); https_ip=$(setup_env_value HTTPS_BIND_IP)
-    loop_port=$(setup_env_value LOOPBACK_PORT); loop_port=${loop_port:-8080}
+    loop_port=$(setup_env_value LOOPBACK_PORT); env_port=$(setup_env_value HUB_PORT)
+    if [ -z "$port_given" ] && [ -n "$env_port" ] && [ -n "$loop_port" ] && [ "$env_port" != "$loop_port" ]; then
+      setup_fail "port check: HUB_PORT=$env_port and LOOPBACK_PORT=$loop_port differ in .env. Set just one, or give both the same value."
+    fi
+    loop_port=${env_port:-${loop_port:-8080}}
     files=$(setup_env_value COMPOSE_FILE); previous=$(setup_env_value HUB_VERSION)
     project=$(setup_env_value COMPOSE_PROJECT_NAME); project=${project:-uberblick-remote}
+    if awk '/^[[:space:]]*(export[[:space:]]+)?COMPOSE_PROJECT_NAME[[:space:]]*=/ {found=1} END {exit !found}' "$directory/.env"; then
+      project_recorded=1
+    else
+      # Older deployments could select their project only through the shell.
+      candidates=$(docker ps -a --filter 'label=com.docker.compose.project.working_dir' --format '{{.ID}}')
+      for id in $candidates; do
+        workdir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$id")
+        if [ -d "$workdir" ]; then workdir=$(cd "$workdir" && pwd -P); fi
+        [ "$workdir" = "$directory" ] || continue
+        container_project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$id")
+        [ -z "$discovered_project" ] || [ "$discovered_project" = "$container_project" ] || setup_fail "deployment check: $directory has containers from multiple projects. Identify its existing project before updating."
+        discovered_project=$container_project
+      done
+      if [ -n "$discovered_project" ]; then project=$discovered_project; project_recorded=1; fi
+    fi
+    if [ -n "$requested_project" ] && [ "$requested_project" != "$project" ]; then
+      if [ "$project_recorded" = 1 ]; then
+        setup_fail "deployment check: COMPOSE_PROJECT_NAME=$requested_project differs from this deployment's project $project. Keep the project in .env to preserve its data."
+      fi
+      ids=$(docker ps -a --filter "label=com.docker.compose.project=$requested_project" --format '{{.ID}}')
+      volumes=$(docker volume ls --filter "label=com.docker.compose.project=$requested_project" --format '{{.Name}}')
+      [ -n "$ids$volumes" ] || setup_fail "deployment check: COMPOSE_PROJECT_NAME=$requested_project has no existing deployment. Keep project $project to preserve its data."
+      project=$requested_project
+    fi
+  else
+    project=$requested_project
+    if [ -z "$project" ]; then
+      project=uberblick-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+    fi
   fi
+  [[ $project =~ ^[a-z0-9][a-z0-9_-]*$ ]] || setup_fail 'deployment check: COMPOSE_PROJECT_NAME must start with a lowercase letter or digit and contain only lowercase letters, digits, hyphens or underscores.'
   ids=$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.ID}}')
   for id in $ids; do
-    [ -f "$directory/.env" ] || setup_fail "deployment check: project $project already exists, but HUB_DIR has no .env. Set HUB_DIR to its existing deployment directory."
     workdir=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$id")
     if [ -d "$workdir" ]; then workdir=$(cd "$workdir" && pwd -P); fi
     [ "$workdir" = "$directory" ] || setup_fail "deployment check: project $project belongs to $workdir. Set HUB_DIR to that existing deployment directory."
+    [ -f "$directory/.env" ] || setup_fail "deployment check: project $project already exists in $workdir, but HUB_DIR has no .env. Restore that deployment's .env before updating."
     service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$id")
     running=$(docker inspect --format '{{.State.Running}}' "$id")
     if [ "$running" = true ]; then
@@ -213,6 +256,12 @@ $(setup_bindings "$id")"
       if [ "$service" = hub ]; then hub_id=$id; fi
     fi
   done
+  if [ ! -f "$directory/.env" ]; then
+    volumes=$(docker volume ls --filter "label=com.docker.compose.project=$project" --format '{{.Name}}')
+    networks=$(docker network ls --filter "label=com.docker.compose.project=$project" --format '{{.ID}}')
+    [ -z "$volumes$networks" ] || setup_fail "deployment check: project $project already has volumes or networks. Restore its existing deployment's .env, or unset COMPOSE_PROJECT_NAME for a new hub."
+  fi
+  export COMPOSE_PROJECT_NAME=$project
   if [ -n "$hub_id" ]; then
     local reported_release
     status=$(docker exec "$hub_id" ub-hub status) || setup_fail 'status check failed on the running hub. Run docker compose exec hub ub-hub doctor from HUB_DIR before retrying.'
@@ -227,8 +276,8 @@ $(setup_bindings "$id")"
     web_host=$requested_host; tail_host=''; tail_ip=''; files=''
   fi
   if [ -n "$port_given" ]; then loop_port=$requested_port; fi
-  case "$loop_port" in '' | *[!0-9]* | 0* | ??????*) setup_fail 'LOOPBACK_PORT must be an integer from 1 to 65535.' ;; esac
-  [ "$loop_port" -le 65535 ] || setup_fail 'LOOPBACK_PORT must be an integer from 1 to 65535.'
+  case "$loop_port" in '' | *[!0-9]* | 0* | ??????*) setup_fail 'HUB_PORT / LOOPBACK_PORT must be an integer from 1 to 65535.' ;; esac
+  [ "$loop_port" -le 65535 ] || setup_fail 'HUB_PORT / LOOPBACK_PORT must be an integer from 1 to 65535.'
   [ -z "$web_host" ] || [ -z "$tail_host" ] || [ "$web_host" = "$tail_host" ] || setup_fail 'route check: WEB_HOST and TAILSCALE_HOST differ. Correct .env or supply HUB_HOST.'
   target=${web_host:-$tail_host}
   if [ -n "$target" ]; then
@@ -287,11 +336,13 @@ $(setup_bindings "$id")"
   done
   if [ -f "$directory/.env" ]; then cp "$directory/.env" "$stage/.env"; else cp "$stage/remote.env.example" "$stage/.env"; fi
   setup_set HUB_VERSION "$target"
+  setup_set COMPOSE_PROJECT_NAME "$project"
+  if [ -n "$env_port" ]; then setup_set HUB_PORT ''; fi
   if [ "$inferred" = 1 ]; then setup_set COMPOSE_FILE "$files"; fi
   if [ ! -f "$directory/.env" ] || [ -n "$host_given" ]; then
     setup_set WEB_HOST "$web_host"; setup_set TAILSCALE_HOST "$tail_host"; setup_set TAILSCALE_IP "$tail_ip"
     setup_set LOOPBACK_PORT "$loop_port"
-  elif [ -n "$port_given" ]; then setup_set LOOPBACK_PORT "$loop_port"; fi
+  elif [ -n "$port_given$env_port" ]; then setup_set LOOPBACK_PORT "$loop_port"; fi
   chmod 600 "$stage/.env"
   step='Compose validation'; fix='Correct the .env settings in HUB_DIR and re-run; no release files were replaced.'
   (cd "$stage" && docker compose config --quiet)
