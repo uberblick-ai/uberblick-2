@@ -720,8 +720,10 @@ test("terminal answers fail through the same variable checks before downloads or
 		const explicit = fixture(t, { tailscaleState: "Stopped" });
 		const result = answered.runTerminal(answers, variables);
 		const configured = explicit.run({ ...variables, [name]: value });
-		failed(result, new RegExp(name));
-		failed(configured, new RegExp(name));
+		failed(result, /setup-hub:/);
+		failed(configured, /setup-hub:/);
+		assert.ok(result.stderr.includes(name), result.stderr);
+		assert.ok(configured.stderr.includes(name), configured.stderr);
 		assert.equal(result.stderr.match(/setup-hub: ([^\r\n]+)/)?.[1], configured.stderr.match(/setup-hub: ([^\r\n]+)/)?.[1]);
 		noDownloads(answered);
 		assert.deepEqual(answered.files(), {});
