@@ -187,7 +187,7 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     apiResponse(request, response, 200, requestDeviceLogin({ workspaceId, hubUrl: workspace.binding.hubUrl, env }, rebound));
     return;
   }
-  if (await serveLocalReading(context, reply)) return;
+  if (await serveLocalReading(context, reply, workspaceId)) return;
   let engine: UberblickMcpEngine;
   try { engine = await replicas.prepare(workspaceId); }
   catch (error) {
@@ -291,6 +291,7 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
 async function serveLocalReading(
   context: ApiRequestContext,
   reply: (status: number, body: object, headers?: Record<string, string>) => void,
+  workspaceId: string,
 ): Promise<boolean> {
   const { target, request, expectedOrigin } = context;
   if (target.pathname === UPDATE_PATH) {
@@ -313,7 +314,14 @@ async function serveLocalReading(
       request.resume();
       return true;
     }
-    reply(200, await context.githubItems.read(items));
+    const reading = await context.githubItems.read(items);
+    if (Object.keys(reading.observations).length > 0) {
+      try {
+        const engine = await context.replicas.prepare(workspaceId);
+        engine.replicas.recordGitHubItemObservations(reading.observations);
+      } catch { /* A failed optional record never hides the reader's own answer. */ }
+    }
+    reply(200, { states: reading.states, refreshAfterMs: reading.refreshAfterMs });
     return true;
   }
   return false;

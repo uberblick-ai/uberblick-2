@@ -1,6 +1,6 @@
 import type { GitHubItem } from "./github-reference.js";
 
-/** Transient GitHub readings; these never belong to a document or its history. */
+/** GitHub readings never belong to a document or its history. */
 export type GitHubItemState =
   | "issue-open" | "issue-completed" | "issue-not-planned" | "issue-duplicate"
   | "pull-open" | "pull-draft" | "pull-merged" | "pull-closed";

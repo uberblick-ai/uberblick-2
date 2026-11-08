@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   DIRECTORY_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
   InvalidWorkspaceIdError,
   MAX_ROOM_NAME_LENGTH,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   directoryRoom,
+  githubItemsRoom,
   isCanonicalRoom,
   isRoomNameWithinBounds,
   parseRoom,
@@ -70,6 +72,7 @@ describe("room names", () => {
     expect(sidebarRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SIDEBAR_SUFFIX}`);
     expect(SETTINGS_SUFFIX).toBe("_settings");
     expect(settingsRoom(WORKSPACE)).toBe(`${WORKSPACE}/${SETTINGS_SUFFIX}`);
+    expect(githubItemsRoom(WORKSPACE)).toBe(`${WORKSPACE}/${GITHUB_ITEMS_SUFFIX}`);
   });
 
   it("keeps the slug out of the room name, so both spellings name one room", () => {
@@ -167,6 +170,7 @@ describe("the canonical room grammar", () => {
       ["the directory", `${WORKSPACE}/${DIRECTORY_SUFFIX}`],
       ["the sidebar", `${WORKSPACE}/${SIDEBAR_SUFFIX}`],
       ["the settings doc", `${WORKSPACE}/${SETTINGS_SUFFIX}`],
+      ["last-seen GitHub state", githubItemsRoom(WORKSPACE)],
     ];
     for (const [label, room] of accepted) {
       expect(isCanonicalRoom(room), label).toBe(true);

@@ -249,6 +249,7 @@ describe("hub sync", () => {
       `${WORKSPACE}/_directory`,
       `${WORKSPACE}/_sidebar`,
       `${WORKSPACE}/_settings`,
+      `${WORKSPACE}/_github_items`,
       legacyRoom,
     ]);
 
@@ -269,6 +270,7 @@ describe("hub sync", () => {
       `${WORKSPACE}/_directory`,
       `${WORKSPACE}/_sidebar`,
       `${WORKSPACE}/_settings`,
+      `${WORKSPACE}/_github_items`,
     ]);
   });
 

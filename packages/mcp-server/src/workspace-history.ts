@@ -51,7 +51,7 @@ export function startWorkspaceHistory(replicas: Replicas, isCurrent: () => boole
     },
     retention: () => store.readHistoryRetention(),
     stamp,
-    ready: () => isCurrent() && sync.isQuiet() && store.pendingRooms().length === 0 &&
+    ready: () => isCurrent() && sync.isQuiet() && replicas.pendingSyncRooms().length === 0 &&
       replicas.persistenceError() === null && !store.isRemoved() && !store.isDetached(),
     request: async (room, operation) => {
       requireAccount(room);

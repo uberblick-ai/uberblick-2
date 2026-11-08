@@ -11,6 +11,7 @@ import { hubTransportProblem, isLoopbackHost } from "@uberblick/mcp-server/remot
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
   DIRECTORY_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
   SIDEBAR_SUFFIX,
   parseRoom,
 } from "@uberblick/schema";
@@ -546,6 +547,7 @@ async function startBrowserServer(startup: BrowserStartup) {
       const { uuid } = parseRoom(room);
       if (uuid === DIRECTORY_SUFFIX) return engine.replicas.directory().awareness;
       if (uuid === SIDEBAR_SUFFIX) return engine.replicas.sidebar().awareness;
+      if (uuid === GITHUB_ITEMS_SUFFIX) return engine.replicas.githubItems().awareness;
       return engine.replicas.replica(uuid).awareness;
     },
     onRequest: (request, response) => {

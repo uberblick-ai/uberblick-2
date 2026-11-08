@@ -7,14 +7,16 @@ import { MessageType } from "@hocuspocus/provider";
 import {
   appendBlock, applyDocData, createAnnotation, getBlocks, getMeta,
   encodeOriginAck, initDoc, isDirectoryEntryDeleted, listAnnotations, readDocData, readOriginUpdate, setTitle,
+  githubItemsRoom, readGitHubItemObservations, writeGitHubItemObservation,
 } from "@uberblick/schema";
 import { afterEach, expect, it } from "vitest";
 import { writeSyncStep1, writeSyncStep2, writeUpdate } from "y-protocols/sync";
 import * as Y from "yjs";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
+import { collectReplicaSyncState, collectSyncStatus } from "../src/status.js";
 import {
   cleanupTestResources, hubUrl, startServer, testConfig, TEST_SECRET, trackListener, waitUntil,
-  type Rig,
+  type Rig, WORKSPACE,
 } from "./helpers.js";
 
 // Use the pinned transport's dependencies, matching the bytes its receiver reads.
@@ -67,7 +69,7 @@ function frame(room: string, type: number, body: (encoder: Encoder) => void = ()
   return encoding.toUint8Array(encoder);
 }
 
-async function endpoint() {
+async function endpoint(options: { githubItems?: "unsupported" | "read-only" } = {}) {
   const { default: nodeAdapter } = await import(/* @vite-ignore */ pathToFileURL(serverRequire.resolve("crossws/adapters/node")).href) as {
     default(options: {
       idleTimeout: number;
@@ -94,11 +96,32 @@ async function endpoint() {
       const room = decoding.readVarString(decoder);
       const type = decoding.readVarUint(decoder);
       received.get(socket)!.push({ room, type });
+      if (options.githubItems !== undefined && type === MessageType.Auth) {
+        if (options.githubItems === "unsupported" && room === githubItemsRoom(WORKSPACE)) {
+          socket.send(frame(room, MessageType.Auth, encoder => {
+            encoding.writeVarUint(encoder, AuthMessageType.PermissionDenied);
+            encoding.writeVarString(encoder, "room-name-invalid");
+          }));
+        } else {
+          socket.send(frame(room, MessageType.Auth, encoder => {
+            encoding.writeVarUint(encoder, AuthMessageType.Authenticated);
+            encoding.writeVarString(encoder, room === githubItemsRoom(WORKSPACE) ? "read-only" : "read-write");
+          }));
+          const empty = new Y.Doc();
+          try {
+            socket.send(frame(room, MessageType.Sync, encoder => writeSyncStep1(encoder, empty)));
+            socket.send(frame(room, MessageType.Sync, encoder => writeSyncStep2(encoder, empty)));
+          } finally { empty.destroy(); }
+        }
+      }
       if (type === MessageType.Stateless) {
         const update = readOriginUpdate(decoding.readVarString(decoder));
         if (update !== null) socket.send(frame(room, MessageType.Stateless, encoder => {
           encoding.writeVarString(encoder, encodeOriginAck(update.updateId, true));
         }));
+      }
+      if (options.githubItems !== undefined && type === MessageType.Sync && decoding.readVarUint(decoder) !== 0) {
+        socket.send(frame(room, MessageType.SyncStatus, encoder => encoding.writeVarUint(encoder, 1)));
       }
     },
     pong(socket) { pongs.get(socket)?.(); pongs.delete(socket); },
@@ -328,4 +351,48 @@ it("purges only a room refused after authentication without writing a directory 
   await waitUntil("healthy room's update after refusal", () => peer.frames(socket, healthy.replica.room).length > before);
   expect(getMeta(healthy.replica.doc).title).toBe("Still syncing after the refusal");
   expect(opened.store.hasRoom(healthy.replica.room)).toBe(true);
+});
+
+it("keeps ordinary rooms caught up when an older hub refuses optional GitHub state", async () => {
+  const peer = await endpoint({ githubItems: "unsupported" });
+  const opened = workspace(peer.port);
+  const optionalRoom = githubItemsRoom(WORKSPACE);
+  writeGitHubItemObservation(opened.replicas.githubItems().doc, "acme/notes#1:issue", {
+    state: "issue-open", seenAt: Date.now(), isPublic: true,
+  });
+  const target = seed(opened);
+  await waitUntil("the optional room refusal and ordinary room acknowledgement", () => {
+    opened.replicas.refresh();
+    return opened.replicas.sync.isRoomUnavailable(optionalRoom) && collectReplicaSyncState(opened.replicas).caughtUp;
+  });
+  const status = await collectSyncStatus(opened.replicas);
+  expect(status).toMatchObject({ caughtUp: true, unsyncedChanges: 0, inFlightUpdates: 0,
+    hub: { status: "connected" } });
+  expect(status.hub.authRecovery).toBeUndefined();
+  expect(status.rooms.find(room => room.room === optionalRoom)?.synced).toBe(false);
+  expect(opened.store.pendingRooms().some(room => room.room === optionalRoom)).toBe(true);
+  const before = opened.store.updateCount(optionalRoom);
+  opened.replicas.recordGitHubItemObservations({ "acme/notes#1:issue": {
+    state: "issue-completed", seenAt: Date.now() + 1, isPublic: true,
+  } });
+  expect(opened.store.updateCount(optionalRoom)).toBe(before);
+  setTitle(target.replica.doc, "Ordinary updates still reach the hub");
+  expect(await opened.replicas.waitForSettled()).toEqual({ caughtUp: true, reason: "caught-up" });
+  expect(await opened.replicas.waitForPendingChanges(performance.now() + 1_000)).toBe(0);
+  expect(peer.sockets).toHaveLength(1);
+});
+
+it("does not create local writes on a read-only GitHub-state connection", async () => {
+  const peer = await endpoint({ githubItems: "read-only" });
+  const opened = workspace(peer.port);
+  const room = githubItemsRoom(WORKSPACE);
+  await waitUntil("the read-only room handshake", () => opened.replicas.sync.isRoomQuiet(room));
+  expect(opened.replicas.sync.canWriteRoom(room)).toBe(false);
+  opened.replicas.recordGitHubItemObservations({ "acme/notes#1:issue": {
+    state: "issue-open", seenAt: Date.now(), isPublic: true,
+  } });
+  await peer.roundTrip(peer.sockets[0]!);
+  expect(readGitHubItemObservations(opened.replicas.githubItems().doc).size).toBe(0);
+  expect(opened.store.hasRoom(room)).toBe(false);
+  expect(opened.replicas.sync.state()).toMatchObject({ status: "connected" });
 });

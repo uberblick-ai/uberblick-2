@@ -6,6 +6,7 @@ import {
   DIRECTORY_ARCHIVED_RECORDS_KEY,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
   directoryRoom,
   enforceDeletedDirectoryEntries,
   repairDirectoryStub,
@@ -46,14 +47,16 @@ import {
   figmaCaptionElement,
   CARD_PARTS,
   githubReference,
+  githubItemsRoom,
+  writeGitHubItemObservation,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
-import type { Block, CardPart, CommentAttribution, DocMeta, InlineRun, UpdateOriginMetadata, UpdateSurface } from "@uberblick/schema";
+import type { Block, CardPart, CommentAttribution, DocMeta, GitHubItemObservation, InlineRun, UpdateOriginMetadata, UpdateSurface } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { closeDocumentHistory } from "./revision-client.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
-import type { MirrorStore, UpdateOrigin } from "./store.js";
+import type { MirrorStore, PendingRoom, UpdateOrigin } from "./store.js";
 import { SettingsResetError, WorkspaceDetachedError, WorkspaceRemovedError } from "./store.js";
 import { HubSync, LOCAL_HUB_REASON, type HubState, type SyncWaitResult } from "./sync.js";
 import { createLocalCredentialProvider, type CredentialProvider } from "./credential-provider.js";
@@ -75,6 +78,7 @@ export interface Replica {
   readonly isDirectory: boolean;
   readonly isSidebar: boolean;
   readonly isSettings: boolean;
+  readonly isGitHubItems: boolean;
   readonly doc: Y.Doc;
   readonly awareness: Awareness;
   /** The highest log sequence applied to this replica. */
@@ -249,7 +253,7 @@ export class Replicas {
       const prefix = `${config.workspaceId}/`;
       if (!room.startsWith(prefix)) return;
       const uuid = room.slice(prefix.length);
-      if ([DIRECTORY_SUFFIX, SIDEBAR_SUFFIX, SETTINGS_SUFFIX].includes(uuid)) return;
+      if ([DIRECTORY_SUFFIX, SIDEBAR_SUFFIX, SETTINGS_SUFFIX, GITHUB_ITEMS_SUFFIX].includes(uuid)) return;
       this.refusedDeletedDocs.add(uuid);
       this.purgeDeletedDocs();
     }, onSettingsReset: (state, refused) => this.acceptSettingsReset(state, refused),
@@ -263,6 +267,7 @@ export class Replicas {
     // Hydrate curation and tags before tools read an otherwise empty replica.
     this.sidebar();
     this.settings();
+    this.githubItems();
     for (const pending of this.store.pendingRooms()) {
       this.adoptRoom(pending.room);
     }
@@ -368,7 +373,8 @@ export class Replicas {
       !this.publishOwnPresence ||
       replica.isDirectory ||
       replica.isSidebar ||
-      replica.isSettings
+      replica.isSettings ||
+      replica.isGitHubItems
     ) {
       return;
     }
@@ -424,6 +430,27 @@ export class Replicas {
     );
   }
 
+  /** Last-seen GitHub state is workspace metadata, never document content. */
+  githubItems(): Replica {
+    return this.ensureRoom(githubItemsRoom(this.config.workspaceId), GITHUB_ITEMS_SUFFIX);
+  }
+
+  recordGitHubItemObservations(observations: Readonly<Record<string, GitHubItemObservation>>): void {
+    const room = githubItemsRoom(this.config.workspaceId);
+    if (this.persistenceFailure !== null || this.destroyed ||
+      !(this.config.localWorkspace === true || this.sync.canWriteRoom(room))) return;
+    try {
+      const doc = this.githubItems().doc;
+      doc.transact(() => {
+        for (const [key, observation] of Object.entries(observations)) {
+          writeGitHubItemObservation(doc, key, observation);
+        }
+      });
+    } catch (error) {
+      log.warn("failed to record last-seen GitHub state", error);
+    }
+  }
+
   /** The replica for one document, hydrated from the log and attached to the hub. */
   replica(uuid: string): Replica {
     this.assertNotDeleted(uuid);
@@ -473,6 +500,7 @@ export class Replicas {
       isDirectory: id === DIRECTORY_SUFFIX,
       isSidebar: id === SIDEBAR_SUFFIX,
       isSettings: id === SETTINGS_SUFFIX,
+      isGitHubItems: id === GITHUB_ITEMS_SUFFIX,
       doc,
       awareness,
       lastSeq: 0,
@@ -514,7 +542,7 @@ export class Replicas {
       if (origin === LOG_ORIGIN) {
         return;
       }
-      if (!replica.isDirectory && !replica.isSidebar && !replica.isSettings && this.isDeleted(id)) {
+      if (!replica.isDirectory && !replica.isSidebar && !replica.isSettings && !replica.isGitHubItems && this.isDeleted(id)) {
         this.purgeDeletedDocs();
         return;
       }
@@ -557,7 +585,7 @@ export class Replicas {
         return;
       }
       // Checks refresh the stub cache without consuming an authored edit window.
-      this.afterChange(replica, kind === "local" && !isCodeCheckOnlyTransaction(transaction));
+      this.afterChange(replica, kind === "local" && !replica.isGitHubItems && !isCodeCheckOnlyTransaction(transaction));
     });
 
     this.replicas.set(room, replica);
@@ -671,7 +699,8 @@ export class Replicas {
         if (
           document.isDirectory ||
           document.isSidebar ||
-          document.isSettings
+          document.isSettings ||
+          document.isGitHubItems
         ) {
           continue;
         }
@@ -693,7 +722,7 @@ export class Replicas {
       }
       return;
     }
-    if (replica.isSidebar) {
+    if (replica.isSidebar || replica.isGitHubItems) {
       return;
     }
     if (this.isDeleted(replica.id)) {
@@ -1061,19 +1090,24 @@ export class Replicas {
       return 0;
     }
     if (!this.sync.enabled || this.persistenceFailure !== null) {
-      return this.store.pendingRooms().length;
+      return this.pendingSyncRooms().length;
     }
     // Poll before releasing markers: a local append has not advanced lastSeq.
     this.refresh();
-    const rooms = this.store.pendingRooms().map(({ room }) => room);
+    const rooms = this.pendingSyncRooms().map(({ room }) => room);
     if (rooms.length > 0) {
       await this.sync.waitForQuiet({
-        isQuiet: () => rooms.every((room) => this.sync.isRoomQuiet(room)),
+        isQuiet: () => rooms.every((room) => this.sync.isRoomUnavailable(room) || this.sync.isRoomQuiet(room)),
         deadline,
       });
       if (this.persistenceFailure === null) this.refresh();
     }
-    return this.store.pendingRooms().length;
+    return this.pendingSyncRooms().length;
+  }
+
+  /** Retain unsupported optional-room log entries without holding up other work. */
+  pendingSyncRooms(): PendingRoom[] {
+    return this.store.pendingRooms().filter(({ room }) => !this.sync.isRoomUnavailable(room));
   }
 
   /** Replay the log tail and attach newly discovered documents. Synchronous. */

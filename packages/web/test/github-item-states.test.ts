@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { githubItemKey, githubItemUrl } from "@uberblick/schema";
+import { githubItemKey, githubItemUrl, writeGitHubItemObservation } from "@uberblick/schema";
 import type { GitHubItem } from "@uberblick/schema";
+import * as Y from "yjs";
 import { createGitHubItemStates } from "../src/github-item-states.js";
 import { createGitHubItemStateClient } from "../src/shell/github-item-states.js";
 import type { GitHubItemStateReadings } from "../src/shell/github-item-states.js";
@@ -30,6 +31,57 @@ afterEach(() => {
 });
 
 describe("page GitHub state readings", () => {
+  it("reads workspace state without a personal route and updates its subscribers and age live", async () => {
+    vi.useFakeTimers();
+    const shared = new Y.Doc();
+    const seenAt = Date.now() - 3 * hour;
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-completed", seenAt, isPublic: false });
+    const states = createGitHubItemStates(null, shared);
+    const changed = vi.fn();
+    const stop = states.subscribe([issue], changed);
+    expect(states.get(issue)).toBe("issue-completed");
+    expect(states.seenAt?.(issue)).toBe(seenAt);
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-not-planned", seenAt: Date.now(), isPublic: false });
+    expect(states.get(issue)).toBe("issue-not-planned");
+    expect(changed).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(changed).toHaveBeenCalledTimes(2);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    shared.destroy();
+  });
+
+  it("gives a fresh personal reading precedence and falls back while refreshing and after an inaccessible or offline answer", async () => {
+    vi.useFakeTimers();
+    const shared = new Y.Doc();
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-completed", seenAt: Date.now() - hour, isPublic: true });
+    let answer!: (reading: GitHubItemStateReadings) => void;
+    const read = vi.fn().mockResolvedValueOnce({ states: { [githubItemKey(issue)]: "issue-open" } })
+      .mockImplementationOnce(() => new Promise<GitHubItemStateReadings>((resolve) => { answer = resolve; }))
+      .mockRejectedValueOnce(new Error("offline"));
+    const states = createGitHubItemStates(read, shared);
+    const changed = vi.fn();
+    const stop = states.subscribe([issue], changed);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.get(issue)).toBe("issue-open");
+    expect(states.seenAt?.(issue)).toBeNull();
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-not-planned", seenAt: Date.now(), isPublic: true });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(states.get(issue)).toBe("issue-open");
+    await vi.advanceTimersByTimeAsync(fiveMinutes);
+    expect(states.get(issue)).toBe("issue-not-planned");
+    expect(states.seenAt?.(issue)).not.toBeNull();
+    answer({ states: {} });
+    await Promise.resolve();
+    expect(states.get(issue)).toBe("issue-not-planned");
+    await vi.advanceTimersByTimeAsync(fiveMinutes);
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(states.get(issue)).toBe("issue-not-planned");
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    shared.destroy();
+  });
+
   it("batches duplicate editor, comment and comparison references and repaints their readers", async () => {
     vi.useFakeTimers();
     let answer!: (states: GitHubItemStateReadings) => void;
@@ -54,7 +106,7 @@ describe("page GitHub state readings", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("shows its cached reading at once and replaces it only when the next answer arrives", async () => {
+  it("shows its fresh cached reading at once and stops claiming it while a refresh is pending", async () => {
     vi.useFakeTimers();
     let answer!: (states: GitHubItemStateReadings) => void;
     const read = vi.fn().mockResolvedValueOnce({ states: { [githubItemKey(issue)]: "issue-open" } })
@@ -68,11 +120,11 @@ describe("page GitHub state readings", () => {
     expect(read).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(read).toHaveBeenCalledTimes(2);
-    expect(states.get(issue)).toBe("issue-open");
+    expect(states.get(issue)).toBeNull();
     answer({ states: { [githubItemKey(issue)]: "issue-completed" } });
     await Promise.resolve();
     expect(states.get(issue)).toBe("issue-completed");
-    expect(changed).toHaveBeenCalledTimes(2);
+    expect(changed).toHaveBeenCalledTimes(3);
     stop();
     const resume = states.subscribe([issue], vi.fn());
     expect(states.get(issue)).toBe("issue-completed");

@@ -47,8 +47,8 @@ import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { AgentGrantRegistry } from "../../hub/src/agent-grants.js";
 import { HubDatabase } from "../../hub/src/persistence.js";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
-import { createRevisionResponseReader, directoryRoom, encodeRevisionRequest, getBlocks, getDirectoryEntry, getMeta, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom, snapshotRevision } from "@uberblick/schema";
-import type { DirectoryEntry, RevisionEntry, RevisionResponse } from "@uberblick/schema";
+import { createRevisionResponseReader, directoryRoom, encodeRevisionRequest, getBlocks, getDirectoryEntry, getMeta, getWorkspaceMainRepository, getWorkspaceName, githubItemKey, githubItemsRoom, listTagCatalog, repairDirectoryStub, roomForDoc, seedTagCatalog, settingsRoom, snapshotRevision, writeGitHubItemObservation } from "@uberblick/schema";
+import type { DirectoryEntry, GitHubItem, GitHubItemObservation, RevisionEntry, RevisionResponse } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
@@ -293,6 +293,7 @@ export interface Harness {
   readonly secondHubUrl?: string;
   /** Seed a document and its directory entry through the fixture hub. */
   seedDocument(source: Y.Doc): Promise<void>;
+  recordGitHubItem(item: GitHubItem, observation: GitHubItemObservation): Promise<void>;
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
   /** Retain hub directory arrivals before garbage collection hides losing entries. */
@@ -761,6 +762,12 @@ export async function startHarness(options: {
             now: Date.now(), changedAt: null, coarsenessMs: 0,
           }));
         } finally { await directory.disconnect(); }
+      },
+      async recordGitHubItem(item, observation) {
+        if (hub === null) throw new Error("e2e: GitHub state seeding needs a running hub");
+        const record = await hub.hocuspocus.openDirectConnection(githubItemsRoom(workspaceUuid));
+        try { await record.transact((target) => { writeGitHubItemObservation(target, githubItemKey(item), observation); }); }
+        finally { await record.disconnect(); }
       },
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);

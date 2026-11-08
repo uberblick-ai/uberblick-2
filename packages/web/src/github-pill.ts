@@ -1,4 +1,5 @@
 import type { GitHubItem, GitHubItemState } from "@uberblick/schema";
+import { formatTimestamp } from "./ui/timestamps.js";
 
 const ISSUE_RING = "M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13";
 const PULL_BRANCH = "M4 5v6M4 2a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M4 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3";
@@ -38,9 +39,10 @@ export function githubLinkNamesItem(text: string, href: string, item: GitHubItem
   );
 }
 
-export function githubPillPresentation(item: GitHubItem, mainRepository: string | null, state: GitHubItemState | null = null) {
+export function githubPillPresentation(item: GitHubItem, mainRepository: string | null, state: GitHubItemState | null = null, seenAt: number | null = null) {
+  const age = seenAt === null ? null : formatTimestamp(seenAt, Date.now(), true)?.label ?? null;
   return {
-    label: `${item.kind === "issue" ? "Issue" : "Pull request"} ${item.owner}/${item.repo}#${item.numberText} · ${state === null ? "State unknown" : STATE_NAMES[state]}`,
+    label: `${item.kind === "issue" ? "Issue" : "Pull request"} ${item.owner}/${item.repo}#${item.numberText} · ${state === null ? "State unknown" : STATE_NAMES[state]}${age === null ? "" : ` · seen ${age}`}`,
     state: state ?? "unknown",
     visibleRepo: `${item.owner}/${item.repo}`.toLowerCase() === mainRepository?.toLowerCase() ? null : item.repo,
     number: `#${item.numberText}`,

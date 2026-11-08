@@ -14,6 +14,7 @@ import {
 import * as Y from "yjs";
 import {
   directoryRoom,
+  GITHUB_ITEMS_SUFFIX,
   enforceDeletedDirectoryEntries,
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
@@ -90,6 +91,7 @@ let protocolMismatch: { hub: number; client: number } | null = null;
 
 /** Rooms the store refused remain closed until this page is reloaded. */
 const storeRefusedRooms = new Set<string>();
+const unavailableRooms = new Set<string>();
 
 /** Deletion is permanent even if the directory has not reached this page yet. */
 const deletedRooms = new Set<string>();
@@ -287,6 +289,8 @@ export interface RoomStatus {
   storeRefused: boolean;
   /** Terminal document deletion, distinct from authentication and storage failures. */
   deleted?: boolean;
+  /** An optional room refused by an older hub, with no effect on other rooms. */
+  unavailable?: boolean;
   /** Unacked messages, not edits; batches merge and reconnect resets to one handshake. */
   unsyncedChanges: number;
   /** Terminal page-wide client/hub versions; new rooms inherit refusal without dialing. */
@@ -366,13 +370,13 @@ function refreshRoomStatus(
   // disconnect() precedes its close event, so the page-wide halt wins over
   // socket/provider state even during a late or re-entrant refresh.
   status.protocolMismatch = protocolMismatch;
-  const halted = protocolMismatch !== null || status.storeRefused || status.deleted;
+  const halted = protocolMismatch !== null || status.storeRefused || status.deleted || status.unavailable;
   status.connected = !halted &&
     provider.isAttached && socket.status === WebSocketStatus.Connected;
   status.synced = !halted && provider.isSynced;
   // Permission denial emits before the provider clears its authentication.
   status.writable = status.connected && provider.hasAuthenticated && !refused(status);
-  status.unsyncedChanges = status.deleted ? 0 : provider.unsyncedChanges;
+  status.unsyncedChanges = status.deleted || status.unavailable ? 0 : provider.unsyncedChanges;
 }
 
 function createRoomProvider(room: string, identity: AwarenessUser, onSettingsReset: () => void): PacedRoomProvider {
@@ -426,11 +430,12 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // sockets it owns. destroy() detaches without destroying the shared socket.
   // Keep terminally refused rooms detached; they still expose their status.
   const storeRefused = storeRefusedRooms.has(room);
+  const unavailable = unavailableRooms.has(room);
   const directory = entries.get(directoryRoom(parsed.workspaceId));
   const deleted = deletedRooms.has(room) ||
     (directory !== undefined && isDirectoryEntryDeleted(directory.connection.ydoc, parsed.uuid));
   const tokenMissing = missingWorkspaceKeys.has(parseRoom(room).workspaceId);
-  if (protocolMismatch === null && !storeRefused && !deleted) {
+  if (protocolMismatch === null && !storeRefused && !deleted && !unavailable) {
     provider.attach();
   }
 
@@ -447,7 +452,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   };
   let stopPreference = (): void => {};
   const startPresence = (): void => {
-    if (status.deleted) return;
+    if (status.deleted || status.unavailable) return;
     publishedColor = "";
     publishedName = "";
     publishUser();
@@ -474,8 +479,9 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     ...BLANK_ROOM_STATUS,
     hasReceivedServerState: provider.isSynced,
     hasAnswered:
-      provider.isSynced || protocolMismatch !== null || storeRefused || deleted || tokenMissing,
+      provider.isSynced || protocolMismatch !== null || storeRefused || deleted || tokenMissing || unavailable,
     storeRefused,
+    unavailable,
     deleted,
     // Seed the workspace's known missing-key state before its first attempt.
     tokenMissing,
@@ -505,7 +511,17 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // Match protocol refusal strictly and never render hub text. Other refusals
   // remain room-local while the shared socket retries.
   provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
-    if (status.deleted) return;
+    if (status.deleted || status.unavailable) return;
+    if (parsed.uuid === GITHUB_ITEMS_SUFFIX && reason === "room-name-invalid") {
+      unavailableRooms.add(room);
+      status.unavailable = true;
+      status.authFailed = false;
+      status.hasAnswered = true;
+      stopPresence(false);
+      provider.detach();
+      refresh();
+      return;
+    }
     if (isDocDeletedReason(reason)) {
       if (provider.hasAuthenticated) rememberDeletedRoom(room);
       else {
@@ -555,7 +571,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
       refresh();
       return;
     }
-    if (status.deleted) return;
+    if (status.deleted || status.unavailable) return;
     status.hasAnswered = true;
     // Store-busy remains retryable through ordinary reconnect backoff.
     if (reason === STORE_REFUSED_REASON) {

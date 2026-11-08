@@ -51,8 +51,8 @@ function linkRanges(doc: ProseMirrorNode): LinkRange[] {
   return ranges;
 }
 
-function pill(item: GitHubItem, mainRepository: string | null, state: GitHubItemState | null): HTMLElement {
-  const presentation = githubPillPresentation(item, mainRepository, state);
+function pill(item: GitHubItem, mainRepository: string | null, state: GitHubItemState | null, seenAt: number | null): HTMLElement {
+  const presentation = githubPillPresentation(item, mainRepository, state, seenAt);
   const dom = document.createElement("span");
   dom.className = "ub-github-pill";
   dom.dataset.githubState = presentation.state;
@@ -101,6 +101,8 @@ function decorations(state: EditorState, focused: boolean, mainRepository: strin
     const item = githubItemUrl(href);
     if (item === null || !githubLinkNamesItem(range.text, href, item)) continue;
     const itemState = states?.get(item) ?? null;
+    const seenAt = states?.seenAt?.(item) ?? null;
+    const label = githubPillPresentation(item, mainRepository, itemState, seenAt).label;
     const editing = selection.empty
       ? range.from < selection.from && selection.from < range.to
       : selection.from < range.to && range.from < selection.to;
@@ -110,11 +112,11 @@ function decorations(state: EditorState, focused: boolean, mainRepository: strin
         class: "ub-github-link-text",
         "aria-hidden": "true",
       }),
-      Decoration.widget(range.to, () => pill(item, mainRepository, itemState), {
+      Decoration.widget(range.to, () => pill(item, mainRepository, itemState, seenAt), {
         // Explicit marks keep activation and comment presentation on their usual paths.
         marks: [range.link, ...range.comments],
         side: -1,
-        key: JSON.stringify([range.to, href, range.text, mainRepository, itemState, range.comments.map((mark) => mark.attrs)]),
+        key: JSON.stringify([range.to, href, range.text, mainRepository, label, range.comments.map((mark) => mark.attrs)]),
       }),
     );
   }

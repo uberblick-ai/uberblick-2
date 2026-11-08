@@ -31,6 +31,7 @@ import {
   createGroup,
   createTagCatalogEntry,
   directoryRoom,
+  githubItemsRoom,
   getDirectoryMap,
   initDoc,
   listDirectory,
@@ -689,11 +690,9 @@ describe("the list", () => {
     // And the listing's reserved address, which is a link somebody may hold.
     const host = await openApp(allPath(WORKSPACE));
     expect(rowTitles(host)).toEqual(["Editing", "Overview"]);
-    // Discovery is the directory doc, and the list is that doc: rendering the
-    // whole corpus opens no document room. (`_sidebar` is the shell's, for the
-    // group a row is pinned in; `_settings` supplies the workspace name.)
+    // The shell joins workspace records; listing never opens document rooms.
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE), githubItemsRoom(WORKSPACE)].sort(),
     );
     expect(parseRoute(`/${WORKSPACE}/all`, null)).toEqual({
       kind: "all",
@@ -863,7 +862,7 @@ describe("decision topics in the list", () => {
     expect(row.textContent).not.toMatch(/\d+ comments?/);
     expect(within(row).getByRole("time").getAttribute("dateTime")).toBe("1970-01-01T00:00:01.000Z");
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE), githubItemsRoom(WORKSPACE)].sort(),
     );
 
     await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
@@ -874,7 +873,7 @@ describe("decision topics in the list", () => {
     expect(rowUuids(host)).toEqual([ONE]);
     expect(search.mock.calls.map(([query]) => query)).toEqual(["pending proposal", "stable answer"]);
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE), githubItemsRoom(WORKSPACE)].sort(),
     );
   });
 
@@ -1010,7 +1009,7 @@ describe("decision topics in the list", () => {
     expect(rowUuids(host)).toEqual([THREE]);
     expect(rowTitles(host)).toEqual(["Live first"]);
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE), githubItemsRoom(WORKSPACE)].sort(),
     );
   });
 
@@ -1176,7 +1175,7 @@ describe("the filter", () => {
     expect(within(host).queryByRole("button", { name: "Product" })).toBeNull();
     expect(getDirectoryMap(peer).get(ONE)).toMatchObject({ kind: "requirement", status: "planned" });
     expect([...rooms.keys()].sort()).toEqual(
-      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE), githubItemsRoom(WORKSPACE)].sort(),
     );
 
     await act(async () => fireEvent.keyDown(mode("Decisions"), { key: "Enter" }));

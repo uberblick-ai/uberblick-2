@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { createMcpServer, defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
-import { appendBlock, listDirectory, tombstoneDirectoryEntry } from "@uberblick/schema";
+import { appendBlock, listDirectory, readGitHubItemObservations, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterAll, expect, it } from "vitest";
 import { initLockPath } from "@uberblick/mcp-server/init-lock";
 import { parseJoinTarget } from "@uberblick/mcp-server/remote-url";
@@ -45,6 +45,9 @@ it("forks without network or credential reads while a source MCP session retains
     await source.replicas.settle();
     const docId = listDirectory(source.replicas.directory().doc)[0]!.uuid;
     appendBlock(source.replicas.replica(docId).doc, { type: "paragraph", text: "Unacknowledged local edit" });
+    const itemKey = "uberblick-ai/uberblick-2#2437:issue";
+    const observation = { state: "issue-completed" as const, seenAt: Date.now(), isPublic: true };
+    source.replicas.recordGitHubItemObservations({ [itemKey]: observation });
     const before = stored(config.databasePath);
     expect(before.pending.length).toBeGreaterThan(0);
     const credentials = join(box.configHome, "uberblick", "credentials.json");
@@ -73,6 +76,10 @@ syncBuiltinESMExports();
     expect(fork.workspaceId).not.toBe(binding.workspaceId);
     expect(fork.hubUrl).toBeNull();
     expect(readWorkspaceHub(fork.workspaceId, box.env)).toBeNull();
+    const copy = createMcpServer({ ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: fork.workspaceId }), authSecret: null });
+    try {
+      expect(readGitHubItemObservations(copy.replicas.githubItems().doc).get(itemKey)).toEqual(observation);
+    } finally { await copy.close(); }
     expect(result.stdout).toContain(`forked     Source notes (${fork.workspaceId}, local)`);
     expect(result.stdout).toContain(`wrote      ${join(box.cwd, ".uberblick.json")}`);
     expect(result.stdout).toContain(`previous   Source notes (${binding.workspaceId}, local)`);

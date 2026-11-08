@@ -14,6 +14,69 @@ const { harness, openApp } = setupHarness();
 const TARGET = "https://github.com/Example/SomeRepo/pull/12/files#diff-abc";
 const STORED = "Example/SomeRepo#12";
 
+test("workspace GitHub readings reach hub and local readers live, while personal answers win until unavailable", { tag: "@webkit" }, async ({ browser }) => {
+  const now = Date.now();
+  const hour = 60 * 60_000;
+  const first = githubItemUrl("https://github.com/Example/SharedState/issues/2437");
+  const second = githubItemUrl("https://github.com/Example/SharedState/issues/2438");
+  if (first === null || second === null) throw new Error("e2e: invalid shared-state fixture");
+  const doc = new Y.Doc();
+  const uuid = randomUUID();
+  initDoc(doc, { uuid, title: "Shared GitHub readings" });
+  const firstUrl = "https://github.com/Example/SharedState/issues/2437";
+  const secondUrl = "https://github.com/Example/SharedState/issues/2438";
+  const block = appendBlock(doc, { type: "paragraph", inline: [
+    { text: "#2437", marks: { link: firstUrl } }, { text: " ", marks: {} },
+    { text: "#2438", marks: { link: secondUrl } },
+  ] });
+  createAnnotation(doc, block, 0, 1, "Reader", firstUrl);
+  await harness().seedDocument(doc);
+  doc.destroy();
+  await harness().recordGitHubItem(first, { state: "issue-completed", seenAt: now - 3 * hour, isPublic: false });
+  const upstreamRequests: string[] = [];
+  const upstream = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    upstream: true,
+    beforeNavigate: async (opened) => {
+      await opened.clock.install({ time: now });
+      opened.on("request", (request) => { if (request.url().endsWith("/api/github-item-states")) upstreamRequests.push(request.url()); });
+    },
+  });
+  const upstreamPills = upstream.locator(".ub-editor .ub-github-pill");
+  const initialLabel = "Issue Example/SharedState#2437 · Closed as completed · seen 3 hours ago";
+  await expect(upstreamPills.first()).toHaveAttribute("data-github-state", "issue-completed");
+  await expect(upstreamPills.first().locator("xpath=ancestor::a[1]")).toHaveAccessibleName(initialLabel);
+  await expect(upstreamPills.first().locator("xpath=ancestor::a[1]")).toHaveAttribute("title", initialLabel);
+  let personal = true;
+  const local = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async (opened) => {
+      await opened.clock.install({ time: now });
+      await opened.route("**/api/github-item-states", (route) => route.fulfill({ json: {
+        states: personal ? { [githubItemKey(first)]: "issue-open" } : {},
+      } }));
+    },
+  });
+  const localPills = local.locator(".ub-editor .ub-github-pill");
+  await expect(localPills.first()).toHaveAttribute("data-github-state", "issue-open");
+  await expect(localPills.first().locator("xpath=ancestor::a[1]")).toHaveAccessibleName("Issue Example/SharedState#2437 · Open");
+  await harness().recordGitHubItem(first, { state: "issue-not-planned", seenAt: now - 2 * hour, isPublic: false });
+  await harness().recordGitHubItem(second, { state: "issue-completed", seenAt: now, isPublic: true });
+  await expect(upstreamPills.first()).toHaveAttribute("data-github-state", "issue-not-planned");
+  // The second pill proves this record update reached the local reader before testing precedence.
+  await expect(localPills.nth(1)).toHaveAttribute("data-github-state", "issue-completed");
+  await expect(localPills.first()).toHaveAttribute("data-github-state", "issue-open");
+  personal = false;
+  await local.clock.fastForward(5 * 60_000);
+  await expect(localPills.first()).toHaveAttribute("data-github-state", "issue-not-planned");
+  await expect(localPills.first().locator("xpath=ancestor::a[1]"))
+    .toHaveAccessibleName("Issue Example/SharedState#2437 · Closed as not planned · seen 2 hours ago");
+  if ((upstream.viewportSize()?.width ?? 1280) < 1280) await upstream.locator(".ub-threads-toggle").click();
+  const comment = upstream.locator(".ub-thread-text .ub-github-pill");
+  await expect(comment).toHaveAttribute("data-github-state", "issue-not-planned");
+  await expect(comment.locator("xpath=ancestor::a[1]"))
+    .toHaveAccessibleName("Issue Example/SharedState#2437 · Closed as not planned · seen 2 hours ago");
+  expect(upstreamRequests).toEqual([]);
+});
+
 test("one local reading repaints every GitHub state in prose and comments with only icon paint changing", { tag: "@webkit" }, async ({ browser }, info) => {
   const cases: Array<{ kind: "issue" | "pull"; number: number; state: GitHubItemState; label: string; color: "green" | "purple" | "grey" | "red" }> = [
     { kind: "issue", number: 101, state: "issue-open", label: "Open", color: "green" },

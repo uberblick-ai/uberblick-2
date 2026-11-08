@@ -301,6 +301,7 @@ describe("with the hub stopped", () => {
       `${WORKSPACE}/_directory`,
       `${WORKSPACE}/_sidebar`,
       `${WORKSPACE}/_settings`,
+      `${WORKSPACE}/_github_items`,
     ]);
   });
 
