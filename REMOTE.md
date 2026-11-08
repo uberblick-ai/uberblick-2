@@ -36,9 +36,14 @@ Check these before deploying:
   Linux users may need their host's `docker` group and a new session; on macOS,
   start Docker Desktop.
 - **A free TCP port on the selected interface.** The default is
-  `127.0.0.1:8080`; `LOOPBACK_PORT` changes the port. An HTTPS route uses port
-  443. Docker binds it before Caddy starts; an address-in-use error is reported
-  by the daemon, so empty Caddy logs do not diagnose it.
+  `127.0.0.1:8080`; `HUB_PORT` selects another port for `setup-hub.sh`.
+  `LOOPBACK_PORT` remains supported by the installer and is the setting used
+  in `.env` by Compose. Conflicting explicit installer values are refused.
+  An HTTPS route uses port 443. The installer refuses a port another running
+  hub publishes and names that hub's directory. Different HTTPS bind addresses
+  can share port 443. A stopped hub's port is not reserved. Docker binds the port
+  before Caddy starts; an address-in-use error is reported by the daemon, so
+  empty Caddy logs do not diagnose it.
 - **An operator session on the host**, locally or over SSH. Tailscale SSH is
   sufficient. The operator deliberately launches and updates the stack; no
   timer, webhook or polling loop does it.
@@ -62,6 +67,17 @@ These links select the newest published hub release. Open the
 to find its `hub-vX.Y.Z` tag, or choose an earlier published release. Replace
 `X.Y.Z` below with that version so all four downloads come from the same
 release. No image extraction or installed `ub` client is needed.
+
+`setup-hub.sh` gives each new deployment its own Compose project and records it
+in that directory's `.env` as `COMPOSE_PROJECT_NAME`. Use a different `HUB_DIR`
+and `HUB_PORT` for each loopback hub on one host. Reruns keep each deployment's
+project, settings and volumes, including an older deployment whose containers
+were removed. Run operator commands from that hub's directory.
+
+The manual download procedure below retains the legacy `uberblick-remote`
+project by default. For an additional hub installed by hand, choose an unused
+`COMPOSE_PROJECT_NAME` in its new `.env` before starting it, and a different
+`LOOPBACK_PORT`. Do not copy another hub's project name into a new deployment.
 
 Run these commands **on the hub host**, in an empty deployment directory:
 
@@ -207,9 +223,11 @@ Check the selected site and `/ws` again. Keep your `.env` instead of replacing
 it with the template. Assets at a versioned URL never change. The `latest`
 download links are for finding host files, not a moving image tag.
 
-The project remains `uberblick-remote`, and its
-`hub-data`, `mcp-data`, `caddy-data` and `caddy-config` volumes keep documents,
-private access records, hosted grant keys and mirrors, and Caddy's certificate
+The deployment keeps its project, recorded by `setup-hub.sh` in `.env` as
+`COMPOSE_PROJECT_NAME`; older deployments without that setting retain
+`uberblick-remote`. Its `hub-data`, `mcp-data`, `caddy-data` and `caddy-config`
+volumes keep documents, private access records, hosted grant keys and mirrors,
+and Caddy's certificate
 state across replacement. `hub-mcp-socket` carries only the private socket
 shared by `hub` and `mcp`; it contains no backup state. Do not pass
 `--volumes` to `down`, rename the project or change these volume names.
@@ -328,8 +346,9 @@ Record `HUB_VERSION=X.Y.Z` and add the appropriate `COMPOSE_FILE` line to `.env`
 Retain the existing host name, bind address, workspace list and GitHub app
 settings. A host name alone does not select HTTPS with plain Compose; the
 `COMPOSE_FILE` line is required. Run `docker compose config` before starting:
-the project must remain `uberblick-remote`, the images must match the digest
-references in the selected release's `compose.yml`, and the resolved
+the project must remain the existing deployment's project (`uberblick-remote`
+for older deployments without `COMPOSE_PROJECT_NAME`), the images must match
+the digest references in the selected release's `compose.yml`, and the resolved
 `hub-data`, `caddy-data` and `caddy-config` volume names must match the existing
 ones. Run `docker compose pull` and
 `docker compose up -d`, then check the site, `/ws`, documents and claim state.
@@ -607,7 +626,8 @@ cp ~/uberblick-remote/.env ~/uberblick-hub-release/.env
 chmod 600 ~/uberblick-hub-release/.env
 ```
 
-Select the row for this deployment. The default project is `uberblick-remote`.
+Select the row for this deployment. Older deployments without an explicit
+project use `uberblick-remote`.
 Keep an existing `COMPOSE_PROJECT_NAME` that matches that label; if the old
 stack's project was supplied by a shell setting or `-p`, put that actual project
 name in the copied `.env` as `COMPOSE_PROJECT_NAME=<project-name>` before
@@ -1344,6 +1364,16 @@ port. The optional `remote.https.yml` replaces that publication with port 443;
 Caddy's configuration lives inside the web image. `.env` at mode `0600` carries
 host settings, never a remote signing secret.
 
+`setup-hub.sh` accepts `HUB_PORT` and saves the port as `LOOPBACK_PORT` for
+Compose and the browser's default hub URL. The legacy installer input
+`LOOPBACK_PORT` still works; setting both inputs to different values is refused.
+An existing `.env` keeps its port when neither input is supplied.
+
+The deployment's `COMPOSE_PROJECT_NAME` selects its containers, volumes and
+network for every plain `docker compose` command run here. Keep that value
+when replacing release files or switching routes. The legacy fallback in
+`compose.yml` stays `uberblick-remote` so updates preserve existing data.
+
 Set `HUB_GITHUB_CLIENT_ID` only for an operator-owned app (see
 [GitHub sign-in](#github-sign-in)); unset or empty uses Uberblick Login.
 `WEB_WORKSPACES` is an optional comma-separated list of workspace UUIDs, each
@@ -1365,7 +1395,9 @@ All three routes enforce the same device credentials and workspace membership.
 | HTTPS with Tailscale, Linux only | `COMPOSE_FILE=compose.yml:remote.https.yml:remote.tailscale.yml`, `WEB_HOST=machine.tailnet.ts.net`, `TAILSCALE_IP=<tailscale-ipv4>` | `ub auth login https://machine.tailnet.ts.net` | `ub workspace use wss://machine.tailnet.ts.net/ws/<WORKSPACE_ID>` |
 
 Use the UUID reported by the claim or **Hub → Workspaces**. Use the selected port
-in both loopback commands. The client's origin must be spelled consistently:
+in both loopback commands. Choose it with `HUB_PORT` when running the installer,
+or `LOOPBACK_PORT` when editing `.env` directly. The client's origin must be
+spelled consistently:
 `localhost` and `127.0.0.1`, or loopback and a configured DNS name, are different
 authentication origins and have separate stored logins.
 
@@ -1406,7 +1438,7 @@ Compose reads `COMPOSE_FILE` from the deployment's `.env`, so the same plain
 command starts every route. Change both the file selection and host settings
 when changing routes.
 
-Switching routes keeps the same `uberblick-remote` project and `hub-data`,
+Switching routes keeps the deployment's project and `hub-data`,
 `caddy-data` and `caddy-config` volumes, including the claim and certificate
 state. Clients sign in at the new origin and use a link with the same workspace UUID;
 no device key is copied. A claim made on loopback remains claimed after wider

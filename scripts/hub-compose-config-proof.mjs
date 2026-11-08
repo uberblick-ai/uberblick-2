@@ -95,6 +95,22 @@ try {
 		}
 		console.log(`Passed ${route}: shared pinned hub/MCP image, isolated volumes, issuer/origin settings, ports and old docker-compose.yml migration independent of HUB_VERSION.`);
 	}
+	const resources = [];
+	for (const [project, port] of [["uberblick-first", "8080"], ["uberblick-second", "9191"]]) {
+		writeFileSync(join(scratch, ".env"), `COMPOSE_PROJECT_NAME=${project}\nCOMPOSE_FILE=compose.yml\nLOOPBACK_PORT=${port}\n`);
+		const rendered = compose(["config", "--format", "json"]);
+		assert.equal(rendered.status, 0, rendered.stderr);
+		const config = JSON.parse(rendered.stdout);
+		assert.equal(config.name, project);
+		assert.equal(config.services.caddy.ports[0].published, port);
+		assert.equal(config.services.caddy.environment.LOOPBACK_PORT, port);
+		assert.equal(config.networks.default.name, `${project}_default`);
+		const names = Object.values(config.volumes).map((volume) => volume.name);
+		for (const [key, volume] of Object.entries(config.volumes)) assert.equal(volume.name, `${project}_${key}`);
+		resources.push([...names, config.networks.default.name]);
+	}
+	assert.ok(resources[0].every((name) => !resources[1].includes(name)));
+	console.log("Passed deployment .env project overrides: plain Compose isolates volumes and networks and preserves each loopback port.");
 } finally {
 	rmSync(scratch, { recursive: true, force: true });
 }

@@ -73,7 +73,7 @@ else if (command === "tailscale") {
   } else if (url.includes("/releases/download/")) {
     const name = url.split("/").at(-1);
     const version = url.match(/hub-v([^/]+)/)[1];
-    body = name === "remote.env.example" ? config.template : "# " + name + " release " + version + "\nservices: {}\n";
+    body = name === "remote.env.example" ? config.template : "# " + name + " release " + version + "\n" + (name === "compose.yml" ? "name: uberblick-remote\n" : "") + "services: {}\n";
     if (config.failAsset === name) { status = config.assetStatus ?? 503; body = "partial download"; failedTransfer = true; }
   } else die("Unexpected download URL: " + url);
   if (outputFile && outputFile !== "/dev/null") fs.writeFileSync(outputFile, body);
@@ -82,22 +82,31 @@ else if (command === "tailscale") {
   if (status >= 400 || failedTransfer) die("curl: synthetic download failure", status >= 400 ? 22 : 18);
 } else if (command === "docker") {
   const joined = args.join(" ");
+  const currentEnv = dotenv(path.join(process.env.HUB_DIR ?? process.cwd(), ".env"));
+  const projectFor = (container) => container.projectName ?? config.projectName ?? currentEnv.COMPOSE_PROJECT_NAME ?? "uberblick-remote";
+  const containers = [...config.containers.map((container) => ({ ...container, projectName: projectFor(container) })), ...config.foreignContainers];
+  const selectedProject = args.find((arg) => arg.startsWith("label=com.docker.compose.project="))?.split("=").at(-1);
+  const selectedResources = (resources) => resources.filter((resource) => !selectedProject || resource.projectName === selectedProject);
   if (args[0] === "info") {
     if (config.daemonError) die(config.daemonError);
   } else if (args[0] === "version") out(config.engine + "\n");
   else if (joined === "compose version --short") out(config.compose + "\n");
   else if (args[0] === "ps") {
-    const projectMatches = args.includes("label=com.docker.compose.project=" + (config.projectName ?? "uberblick-remote"));
-    const containers = args.includes("-a") ? (projectMatches ? config.containers : []) : [...config.containers, ...config.foreignContainers];
-    out(containers.map((container) => container.id).join("\n") + (containers.length ? "\n" : ""));
+    const matching = selectedResources(containers).filter((container) => (args.includes("-a") || container.running) && (!args.includes("label=com.docker.compose.project.working_dir") || container.workingDir));
+    out(matching.map((container) => container.id).join("\n") + (matching.length ? "\n" : ""));
+  } else if (args[0] === "volume" && args[1] === "ls") {
+    for (const volume of selectedResources(config.volumes)) out(volume.name + "\n");
+  } else if (args[0] === "network" && args[1] === "ls") {
+    for (const network of selectedResources(config.networks)) out(network.id + "\n");
   }
   else if (args[0] === "inspect") {
     if (config.inspectError === args.at(-1)) die("synthetic Docker inspect failure");
-    const container = [...config.containers, ...config.foreignContainers].find((candidate) => candidate.id === args.at(-1));
+    const container = containers.find((candidate) => candidate.id === args.at(-1));
     if (!container) die("No such container");
     const format = args[args.indexOf("--format") + 1];
     if (format.includes("working_dir")) out(container.workingDir + "\n");
     else if (format.includes("com.docker.compose.service")) out(container.service + "\n");
+    else if (format.includes("com.docker.compose.project")) out((container.projectName ?? "") + "\n");
     else if (format.includes("State.Running")) out(String(container.running) + "\n");
     else if (format.includes("NetworkSettings.Ports")) for (const bind of container.ports ?? []) out((bind.protocol ?? "80/tcp") + " " + bind.address + " " + bind.port + "\n");
     else die("Unexpected inspect format: " + format);
@@ -116,7 +125,7 @@ else if (command === "tailscale") {
       const envFile = args[args.indexOf("--env-file") + 1];
       const values = dotenv(envFile);
       values.COMPOSE_PROJECT_NAME ??= input.match(/^name:\s*([A-Za-z0-9_-]+)/m)?.[1] ?? path.basename(process.cwd()).toLowerCase();
-      for (const key of ["HUB_VERSION", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP", "LOOPBACK_PORT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"]) out(key + "=" + (process.env[key] ?? values[key] ?? "") + "\n");
+      for (const key of ["HUB_VERSION", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP", "HUB_PORT", "LOOPBACK_PORT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME"]) out(key + "=" + (process.env[key] ?? values[key] ?? "") + "\n");
     } else if (args.includes("logs")) {
       const requested = args.slice(args.indexOf("logs") + 1).filter((arg) => !arg.startsWith("-"));
       for (const service of requested) if (!config.services.includes(service)) die("no such service: " + service);
@@ -129,6 +138,20 @@ else if (command === "tailscale") {
       const step = args.includes("config") ? "config" : args.includes("pull") ? "pull" : args.includes("up") ? "up" : undefined;
       if (!step) die("Unexpected Compose command: " + joined);
       if (config.failStep === step) die("synthetic " + step + " cause");
+      if (config.modelProjects && step === "up") {
+        const values = dotenv(path.join(process.cwd(), ".env"));
+        const projectName = process.env.COMPOSE_PROJECT_NAME ?? values.COMPOSE_PROJECT_NAME ?? "uberblick-remote";
+        const workingDir = process.cwd();
+        const https = values.COMPOSE_FILE.includes("remote.https.yml");
+        config.containers = config.containers.filter((container) => projectFor(container) !== projectName);
+        for (const service of ["hub", "caddy"]) config.containers.push({ id: projectName + "-" + service, projectName, workingDir, service, running: true,
+          ports: service === "caddy" ? [{ address: https ? values.TAILSCALE_IP || values.HTTPS_BIND_IP || "0.0.0.0" : "127.0.0.1", port: Number(https ? 443 : values.LOOPBACK_PORT || 8080) }] : [] });
+        for (const name of ["hub-data", "hub-mcp-socket", "mcp-data", "caddy-data", "caddy-config"]) {
+          if (!config.volumes.some((volume) => volume.name === projectName + "_" + name)) config.volumes.push({ name: projectName + "_" + name, projectName });
+        }
+        if (!config.networks.some((network) => network.projectName === projectName)) config.networks.push({ id: projectName + "_default", projectName });
+        fs.writeFileSync(process.env.TEST_SETUP_CONFIG, JSON.stringify(config));
+      }
     }
   } else die("Unexpected Docker command: " + joined);
 } else die("Unexpected fake command: " + command);
@@ -149,7 +172,7 @@ function fixture(t, overrides = {}) {
 	const config = {
 		uid: 1000, os: "Linux", arch: "x86_64", engine: "28.0.0", compose: "2.24.4",
 		latest: "0.4.13", releases: ["0.4.13", "0.4.12", "0.4.11"], template,
-		listeners: [], containers: [], foreignContainers: [],
+		listeners: [], containers: [], foreignContainers: [], volumes: [], networks: [],
 		services: ["hub", "caddy"],
 		oldStatus: "hub running\nrelease 0.4.12\nprotocol 1\nclaimed no\n",
 		status: "hub running\nrelease 0.4.13\nprotocol 1\nclaimed no\n",
@@ -163,24 +186,26 @@ function fixture(t, overrides = {}) {
 			const isolated = join(scratch, `without-${command}`);
 			mkdirSync(isolated);
 			for (const name of readdirSync(bin)) if (name !== command) symlinkSync(join(bin, name), join(isolated, name));
-			for (const name of ["awk", "cat", "chmod", "cp", "mkdir", "mktemp", "mv", "rm", "rmdir", "sed", "tr"]) {
+			for (const name of ["awk", "cat", "chmod", "cp", "mkdir", "mktemp", "mv", "od", "rm", "rmdir", "sed", "tr"]) {
 				const source = process.env.PATH.split(":").map((directory) => join(directory, name)).find((path) => existsSync(path));
 				if (source) symlinkSync(source, join(isolated, name));
 			}
 			return isolated;
 		},
-		env(contents) {
-			mkdirSync(hub, { recursive: true });
-			writeFileSync(join(hub, ".env"), contents, { mode: 0o600 });
+		env(contents, directory = hub) {
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, ".env"), contents, { mode: 0o600 });
 		},
-		files() { return existsSync(hub) ? Object.fromEntries(readdirSync(hub).map((name) => [name, readFileSync(join(hub, name), "utf8")])) : {}; },
+		files(directory = hub) { return existsSync(directory) ? Object.fromEntries(readdirSync(directory).map((name) => [name, readFileSync(join(directory, name), "utf8")])) : {}; },
 		run(overrides = {}, args = []) {
 			save();
 			const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HUB_DIR: hub, TEST_SETUP_CONFIG: configPath, TEST_SETUP_LOG: log };
-			for (const name of ["HUB_HOST", "HUB_VERSION", "LOOPBACK_PORT", "HELP", "ALLOW_ROOT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP"]) delete env[name];
-			return spawnSync("/bin/bash", ["-c", readFileSync(join(root, "setup-hub.sh"), "utf8"), "setup-hub.sh", ...args], {
+			for (const name of ["HUB_HOST", "HUB_VERSION", "HUB_PORT", "LOOPBACK_PORT", "HELP", "ALLOW_ROOT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP"]) delete env[name];
+			const result = spawnSync("/bin/bash", ["-c", readFileSync(join(root, "setup-hub.sh"), "utf8"), "setup-hub.sh", ...args], {
 				cwd: scratch, env: { ...env, ...overrides }, encoding: "utf8", timeout: 55_000,
 			});
+			Object.assign(config, JSON.parse(readFileSync(configPath, "utf8")));
+			return result;
 		},
 	};
 }
@@ -207,7 +232,7 @@ test("hosted installer help and a truncated transfer perform no work", { timeout
 	for (const [env, args] of [[{ HELP: "1" }, []], [{}, ["--help"]]]) {
 		const result = f.run(env, args);
 		passed(result);
-		for (const variable of ["HUB_HOST", "HUB_VERSION", "HUB_DIR", "LOOPBACK_PORT", "ALLOW_ROOT", "HELP"]) assert.match(result.stdout, new RegExp(variable));
+		for (const variable of ["HUB_HOST", "HUB_VERSION", "HUB_DIR", "HUB_PORT", "LOOPBACK_PORT", "ALLOW_ROOT", "HELP"]) assert.match(result.stdout, new RegExp(variable));
 	}
 	assert.equal(f.calls().length, 0);
 	assert.deepEqual(f.files(), {});
@@ -271,6 +296,191 @@ test("fresh loopback install stages all four assets, writes private env, and pri
 	const up = actions.findIndex((action) => action.includes("up -d"));
 	const status = actions.findIndex((action) => action.includes("ub-hub status"));
 	assert.ok(config >= 0 && config < pull && pull < up && up < status, actions.join("\n"));
+});
+
+test("two hub directories keep separate projects and data through independent updates", { timeout: 60_000 }, (t) => {
+	const f = fixture(t, { modelProjects: true });
+	const other = join(f.scratch, "other-hub");
+	const projectAt = (directory) => f.files(directory)[".env"].match(/^COMPOSE_PROJECT_NAME=(.+)$/m)?.[1];
+	const resources = (projectName) => structuredClone(Object.fromEntries(["containers", "volumes", "networks"].map((kind) => [kind, f.config[kind].filter((resource) => resource.projectName === projectName)])));
+	passed(f.run({ HUB_VERSION: "0.4.12", HUB_PORT: "9191" }));
+	const firstProject = projectAt(f.hub);
+	assert.ok(firstProject && firstProject !== "uberblick-remote");
+	f.config.volumes.find((volume) => volume.projectName === firstProject).data = { claimed: "first-admin", documents: ["first document"] };
+	const firstBefore = resources(firstProject);
+	passed(f.run({ HUB_DIR: other, HUB_VERSION: "0.4.12", HUB_PORT: "9292" }));
+	const secondProject = projectAt(other);
+	assert.ok(secondProject && firstProject !== secondProject);
+	assert.deepEqual(resources(firstProject), firstBefore);
+	f.config.volumes.find((volume) => volume.projectName === secondProject).data = { claimed: "second-admin", documents: ["second document"] };
+	const secondBefore = resources(secondProject);
+	passed(f.run());
+	assert.equal(projectAt(f.hub), firstProject);
+	assert.deepEqual(resources(firstProject), firstBefore);
+	assert.deepEqual(resources(secondProject), secondBefore);
+	passed(f.run({ HUB_DIR: other }));
+	assert.equal(projectAt(other), secondProject);
+	assert.deepEqual(resources(firstProject), firstBefore);
+	assert.deepEqual(resources(secondProject), secondBefore);
+	assertSetting(f.files()[".env"], "LOOPBACK_PORT", "9191");
+	assertSetting(f.files(other)[".env"], "LOOPBACK_PORT", "9292");
+	for (const kind of ["containers", "volumes", "networks"]) {
+		const ids = f.config[kind].map((resource) => resource.id ?? resource.name);
+		assert.equal(new Set(ids).size, ids.length, `${kind} must never share identity`);
+	}
+	const composeCalls = f.calls().filter((call) => call.command === "docker" && call.args[0] === "compose" && (call.args.includes("up") || call.args.includes("pull")));
+	assert.equal(composeCalls.filter((call) => call.cwd === f.hub).length, 4);
+	assert.equal(composeCalls.filter((call) => call.cwd === other).length, 4);
+});
+
+test("legacy and explicitly named deployments retain their volumes when only volumes remain", { timeout: 60_000 }, (t) => {
+	for (const explicitProject of [undefined, "operator-hub"]) {
+		const projectName = explicitProject ?? "uberblick-remote";
+		const volume = { name: `${projectName}_hub-data`, projectName, data: { claimed: "administrator", documents: ["saved"] } };
+		const f = fixture(t, { modelProjects: true, volumes: [structuredClone(volume)] });
+		f.env(`HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\n${explicitProject ? `COMPOSE_PROJECT_NAME=${explicitProject}\n` : ""}`);
+		passed(f.run());
+		assertSetting(f.files()[".env"], "COMPOSE_PROJECT_NAME", projectName);
+		assert.deepEqual(f.config.volumes.find((candidate) => candidate.name === volume.name), volume);
+		assert.ok(f.config.containers.every((container) => container.projectName === projectName));
+		assert.ok(f.config.volumes.every((candidate) => candidate.projectName === projectName));
+	}
+});
+
+test("copied project settings and inherited project changes are refused before touching another hub", { timeout: 60_000 }, (t) => {
+	const f = fixture(t);
+	const other = join(f.scratch, "original-hub");
+	f.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nCOMPOSE_PROJECT_NAME=original-project\n");
+	f.config.foreignContainers = [{ id: "original", projectName: "original-project", service: "hub", workingDir: other, running: true, ports: [] }];
+	const before = f.files();
+	const copied = f.run();
+	failed(copied, /belongs to/);
+	assert.ok((copied.stdout + copied.stderr).includes(other));
+	assert.deepEqual(f.files(), before);
+	noDownloads(f);
+	const inherited = fixture(t);
+	inherited.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\n");
+	const changed = inherited.run({ COMPOSE_PROJECT_NAME: "renamed-project" });
+	failed(changed, /COMPOSE_PROJECT_NAME|project/);
+	noDownloads(inherited);
+	assert.doesNotMatch(inherited.files()[".env"], /renamed-project/);
+	const ambiguous = fixture(t);
+	ambiguous.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\n");
+	ambiguous.config.containers = ["first-project", "second-project"].map((projectName) => ({ id: projectName, projectName, service: "hub", workingDir: ambiguous.hub, running: false, ports: [] }));
+	const ambiguousBefore = ambiguous.files();
+	failed(ambiguous.run(), /multiple projects/);
+	noDownloads(ambiguous);
+	assert.deepEqual(ambiguous.files(), ambiguousBefore);
+	const discovered = fixture(t);
+	discovered.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\n");
+	discovered.config.containers = [{ id: "own-custom", projectName: "own-project", service: "hub", workingDir: discovered.hub, running: false, ports: [] }];
+	discovered.config.volumes = [{ name: "other-project_hub-data", projectName: "other-project" }];
+	const discoveredBefore = discovered.files();
+	failed(discovered.run({ COMPOSE_PROJECT_NAME: "other-project" }), /differs/);
+	noDownloads(discovered);
+	assert.deepEqual(discovered.files(), discoveredBefore);
+});
+
+test("existing custom projects are recovered from running or stopped containers when env has no project name", { timeout: 60_000 }, (t) => {
+	for (const supplied of [false, true]) {
+		const f = fixture(t, { modelProjects: true });
+		f.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nLOOPBACK_PORT=9191\n");
+		f.config.containers = [{ id: "custom-hub", projectName: "custom-project", service: "hub", workingDir: f.hub, running: supplied, ports: [] }];
+		const volume = { name: "custom-project_hub-data", projectName: "custom-project", data: { claimed: "administrator", documents: ["saved"] } };
+		f.config.volumes = [structuredClone(volume)];
+		passed(f.run(supplied ? { COMPOSE_PROJECT_NAME: "custom-project" } : {}));
+		assertSetting(f.files()[".env"], "COMPOSE_PROJECT_NAME", "custom-project");
+		assert.deepEqual(f.config.volumes.find((candidate) => candidate.name === volume.name), volume);
+		passed(f.run());
+		assert.ok(f.config.containers.every((container) => container.projectName === "custom-project"));
+		assert.ok(f.config.volumes.every((candidate) => candidate.projectName === "custom-project"));
+	}
+});
+
+test("fresh projects refuse existing Docker resource names and persist an unused explicit name", { timeout: 60_000 }, (t) => {
+	for (const resources of [
+		{ volumes: [{ name: "chosen_hub-data", projectName: "chosen" }] },
+		{ networks: [{ id: "chosen_default", projectName: "chosen" }] },
+	]) {
+		const f = fixture(t, resources);
+		failed(f.run({ COMPOSE_PROJECT_NAME: "chosen" }), /project|exists|in use/);
+		noDownloads(f);
+		assert.deepEqual(f.files(), {});
+	}
+	const unused = fixture(t);
+	passed(unused.run({ COMPOSE_PROJECT_NAME: "chosen" }));
+	assertSetting(unused.files()[".env"], "COMPOSE_PROJECT_NAME", "chosen");
+});
+
+test("HUB_PORT selects and updates loopback ports while both aliases retain compatibility", { timeout: 60_000 }, (t) => {
+	const f = fixture(t);
+	passed(f.run({ HUB_PORT: "9191", LOOPBACK_PORT: "9191" }));
+	assertSetting(f.files()[".env"], "LOOPBACK_PORT", "9191");
+	const changed = f.run({ HUB_PORT: "9292" });
+	passed(changed);
+	assert.match(changed.stdout, /http:\/\/localhost:9292/);
+	assertSetting(f.files()[".env"], "LOOPBACK_PORT", "9292");
+	passed(f.run({ LOOPBACK_PORT: "9393" }));
+	assertSetting(f.files()[".env"], "LOOPBACK_PORT", "9393");
+	const saved = fixture(t);
+	saved.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nLOOPBACK_PORT=9494\n");
+	passed(saved.run());
+	assertSetting(saved.files()[".env"], "LOOPBACK_PORT", "9494");
+	const savedAlias = fixture(t);
+	savedAlias.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nHUB_PORT=9595\n");
+	passed(savedAlias.run());
+	assertSetting(savedAlias.files()[".env"], "LOOPBACK_PORT", "9595");
+	passed(savedAlias.run({ HUB_PORT: "9696" }));
+	assertSetting(savedAlias.files()[".env"], "LOOPBACK_PORT", "9696");
+	passed(savedAlias.run());
+	assertSetting(savedAlias.files()[".env"], "LOOPBACK_PORT", "9696");
+});
+
+test("conflicting HUB_PORT and LOOPBACK_PORT values name both aliases before mutation", { timeout: 60_000 }, (t) => {
+	for (const saved of [false, true]) {
+		const f = fixture(t);
+		if (saved) f.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nHUB_PORT=9191\nLOOPBACK_PORT=9292\n");
+		const before = f.files();
+		const result = f.run(saved ? {} : { HUB_PORT: "9191", LOOPBACK_PORT: "9292" });
+		failed(result, /HUB_PORT/);
+		assert.match(result.stdout + result.stderr, /LOOPBACK_PORT/);
+		assert.deepEqual(f.files(), before);
+		noDownloads(f);
+	}
+});
+
+test("another hub's loopback publication names its directory even when sockets do not expose Docker", { timeout: 60_000 }, (t) => {
+	const f = fixture(t);
+	const other = join(f.scratch, "other-hub");
+	f.config.foreignContainers = [{ id: "other-caddy", projectName: "other-project", service: "caddy", workingDir: other, running: true, ports: [{ address: "127.0.0.1", port: 9191 }] }];
+	const result = f.run({ HUB_PORT: "9191" });
+	failed(result, /9191/);
+	assert.ok((result.stdout + result.stderr).includes(other));
+	noDownloads(f);
+	assert.deepEqual(f.files(), {});
+});
+
+test("HTTPS hubs reject overlapping 443 bindings and accept a different configured address", { timeout: 60_000 }, (t) => {
+	for (const setting of ["HTTPS_BIND_IP", "TAILSCALE_IP"]) {
+		const f = fixture(t);
+		const other = join(f.scratch, "other-hub");
+		const port = { address: "100.64.0.2", port: 443 };
+		f.config.foreignContainers = [{ id: "other-caddy", projectName: "other-project", service: "caddy", workingDir: other, running: true, ports: [port] }];
+		f.env(`HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml:remote.https.yml${setting === "TAILSCALE_IP" ? ":remote.tailscale.yml" : ""}\nWEB_HOST=${setting === "TAILSCALE_IP" ? "hub.tailnet.ts.net" : "hub.example.com"}\n${setting}=100.64.0.2\n`);
+		const before = f.files();
+		const result = f.run();
+		failed(result, /443/);
+		assert.ok((result.stdout + result.stderr).includes(other));
+		noDownloads(f);
+		assert.deepEqual(f.files(), before);
+		f.env(before[".env"].replace(`${setting}=100.64.0.2`, `${setting}=100.64.0.3`));
+		passed(f.run());
+		assertSetting(f.files()[".env"], setting, "100.64.0.3");
+	}
+	const wildcard = fixture(t, { foreignContainers: [{ id: "other-caddy", projectName: "other-project", service: "caddy", workingDir: "/other-hub", running: true, ports: [{ address: "0.0.0.0", port: 443 }] }] });
+	wildcard.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml:remote.https.yml\nWEB_HOST=hub.example.com\nHTTPS_BIND_IP=192.0.2.4\n");
+	failed(wildcard.run(), /\/other-hub/);
+	noDownloads(wildcard);
 });
 
 test("public HTTPS checks only its selected bind and clears old Tailscale routing", { timeout: 60_000 }, (t) => {
@@ -395,7 +605,7 @@ test("an occupied port is allowed only for this running deployment and missing e
 	passed(f.run());
 	const foreign = fixture(t);
 	foreign.config.containers = [{ id: "hub-foreign", service: "hub", workingDir: join(foreign.scratch, "other"), running: true, ports: [] }];
-	failed(foreign.run(), /existing|already|another|\.env/i);
+	failed(foreign.run({ COMPOSE_PROJECT_NAME: "uberblick-remote" }), /existing|already|another|\.env/i);
 	noDownloads(foreign);
 	assert.deepEqual(foreign.files(), {});
 });
