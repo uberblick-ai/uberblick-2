@@ -1,7 +1,7 @@
 import { expectOpenPages, provePageArrival } from "./settle.js";
 /** GitHub pills change presentation while native links, selection and storage stay intact. */
 import { expect, test } from "@playwright/test";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as Y from "yjs";
@@ -47,12 +47,14 @@ test("workspace GitHub readings reach hub and local readers live, while personal
   await expect(upstreamPills.first().locator("xpath=ancestor::a[1]")).toHaveAccessibleName(initialLabel);
   await expect(upstreamPills.first().locator("xpath=ancestor::a[1]")).toHaveAttribute("title", initialLabel);
   let personal = true;
+  let pendingReading: Route | undefined;
   const local = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     beforeNavigate: async (opened) => {
       await opened.clock.install({ time: now });
-      await opened.route("**/api/github-item-states", (route) => route.fulfill({ json: {
-        states: personal ? { [githubItemKey(first)]: "issue-open" } : {},
-      } }));
+      await opened.route("**/api/github-item-states", async (route) => {
+        if (personal) await route.fulfill({ json: { states: { [githubItemKey(first)]: "issue-open" } } });
+        else pendingReading = route;
+      });
     },
   });
   const localPills = local.locator(".ub-editor .ub-github-pill");
@@ -66,6 +68,10 @@ test("workspace GitHub readings reach hub and local readers live, while personal
   await expect(localPills.first()).toHaveAttribute("data-github-state", "issue-open");
   personal = false;
   await local.clock.fastForward(5 * 60_000);
+  await expect.poll(() => pendingReading !== undefined).toBe(true);
+  await expect(localPills.first()).toHaveAttribute("data-github-state", "issue-open");
+  await expect(localPills.first().locator("xpath=ancestor::a[1]")).toHaveAccessibleName("Issue Example/SharedState#2437 · Open");
+  await pendingReading?.fulfill({ json: { states: {} } });
   await expect(localPills.first()).toHaveAttribute("data-github-state", "issue-not-planned");
   await expect(localPills.first().locator("xpath=ancestor::a[1]"))
     .toHaveAccessibleName("Issue Example/SharedState#2437 · Closed as not planned · seen 2 hours ago");

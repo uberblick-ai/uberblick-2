@@ -48,6 +48,7 @@ export function writeGitHubItemObservation(doc: Y.Doc, key: string, value: GitHu
   if (current !== undefined && (entry.seenAt < current.seenAt ||
     entry.state === current.state && entry.seenAt - current.seenAt < DAY)) return false;
   const entries = doc.getMap<unknown>(OBSERVATIONS);
+  // known limit: daily refreshes retain Yjs tombstones and old writer slot keys; revisit when GitHub metadata approaches workspace storage limits.
   doc.transact(() => {
     // Each writer owns a slot; remove only older slots already observed here.
     for (const [slot, candidate] of entries) {

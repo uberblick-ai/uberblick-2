@@ -416,7 +416,7 @@ function readCorpus(replicas: Replicas): Corpus {
   const missing: { uuid: string; title: string }[] = [];
   const unsettled: string[] = [];
   for (const replica of replicas.attachedReplicas()) {
-    if (!replicas.isRoomQuiet(replica.room)) {
+    if (!replicas.sync.isRoomUnavailable(replica.room) && !replicas.isRoomQuiet(replica.room)) {
       unsettled.push(replica.room);
     }
   }

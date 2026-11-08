@@ -106,7 +106,7 @@ describe("page GitHub state readings", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("shows its fresh cached reading at once and stops claiming it while a refresh is pending", async () => {
+  it("keeps its cached reading while a refresh is pending without a workspace record", async () => {
     vi.useFakeTimers();
     let answer!: (states: GitHubItemStateReadings) => void;
     const read = vi.fn().mockResolvedValueOnce({ states: { [githubItemKey(issue)]: "issue-open" } })
@@ -120,17 +120,47 @@ describe("page GitHub state readings", () => {
     expect(read).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(read).toHaveBeenCalledTimes(2);
-    expect(states.get(issue)).toBeNull();
+    expect(states.get(issue)).toBe("issue-open");
+    expect(changed).toHaveBeenCalledTimes(1);
     answer({ states: { [githubItemKey(issue)]: "issue-completed" } });
     await Promise.resolve();
     expect(states.get(issue)).toBe("issue-completed");
-    expect(changed).toHaveBeenCalledTimes(3);
+    expect(changed).toHaveBeenCalledTimes(2);
     stop();
     const resume = states.subscribe([issue], vi.fn());
     expect(states.get(issue)).toBe("issue-completed");
     await vi.advanceTimersByTimeAsync(hour - 1);
     expect(read).toHaveBeenCalledTimes(2);
     resume();
+  });
+
+  it("keeps a newer personal reading while refreshing until a newer workspace reading arrives", async () => {
+    vi.useFakeTimers();
+    const shared = new Y.Doc();
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-completed", seenAt: Date.now() - hour, isPublic: true });
+    let answer!: (reading: GitHubItemStateReadings) => void;
+    const read = vi.fn().mockResolvedValueOnce({ states: { [githubItemKey(issue)]: "issue-open" } })
+      .mockImplementationOnce(() => new Promise<GitHubItemStateReadings>((resolve) => { answer = resolve; }));
+    const states = createGitHubItemStates(read, shared);
+    const changed = vi.fn(() => states.get(issue));
+    const stop = states.subscribe([issue], changed);
+    await vi.advanceTimersByTimeAsync(fiveMinutes - 60_000);
+    const stopComment = states.subscribe([issue], vi.fn());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(states.get(issue)).toBe("issue-open");
+    expect(states.seenAt?.(issue)).toBeNull();
+    expect(changed.mock.results.map(result => result.value)).toEqual(["issue-open"]);
+    const seenAt = Date.now();
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-not-planned", seenAt, isPublic: true });
+    expect(states.get(issue)).toBe("issue-not-planned");
+    expect(states.seenAt?.(issue)).toBe(seenAt);
+    answer({ states: {} });
+    await Promise.resolve();
+    expect(states.get(issue)).toBe("issue-not-planned");
+    stop();
+    stopComment();
+    shared.destroy();
   });
 
   it("refreshes terminal states after an hour and does not extend them on an open-item batch", async () => {
@@ -166,18 +196,25 @@ describe("page GitHub state readings", () => {
 
   it("uses the server cache's remaining lifetime rather than restarting its full TTL", async () => {
     vi.useFakeTimers();
-    const read = vi.fn(async () => ({
+    const shared = new Y.Doc();
+    const seenAt = Date.now() - fiveMinutes;
+    writeGitHubItemObservation(shared, githubItemKey(issue), { state: "issue-not-planned", seenAt, isPublic: true });
+    const read = vi.fn().mockResolvedValueOnce({
       states: { [githubItemKey(issue)]: "issue-completed" as const },
       refreshAfterMs: { [githubItemKey(issue)]: 1000 },
-    }));
-    const states = createGitHubItemStates(read);
+    }).mockImplementationOnce(() => new Promise<GitHubItemStateReadings>(() => {}));
+    const states = createGitHubItemStates(read, shared);
     const stop = states.subscribe([issue], vi.fn());
     await vi.advanceTimersByTimeAsync(0);
+    expect(states.get(issue)).toBe("issue-completed");
     await vi.advanceTimersByTimeAsync(999);
     expect(read).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(read).toHaveBeenCalledTimes(2);
+    expect(states.get(issue)).toBe("issue-not-planned");
+    expect(states.seenAt?.(issue)).toBe(seenAt);
     stop();
+    shared.destroy();
   });
 
   it("honors a server cooldown even when the reading is unknown", async () => {

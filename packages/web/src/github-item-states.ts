@@ -5,7 +5,7 @@ import type { GitHubItemStateReader, GitHubItemStateReadings } from "./shell/git
 
 export interface GitHubItemStates {
   get(item: GitHubItem): GitHubItemState | null;
-  /** Present only for the workspace's fallback, never a fresh personal reading. */
+  /** Present only for the workspace's fallback, never a personal reading. */
   seenAt?(item: GitHubItem): number | null;
   subscribe(items: readonly GitHubItem[], listener: () => void): () => void;
 }
@@ -16,7 +16,7 @@ interface Subscription {
   shown: Map<string, string>;
 }
 
-/** Fresh personal readings over the live workspace fallback, shared by every pill. */
+/** Fresh personal readings, or newer cached readings during refresh, over the live workspace fallback. */
 export function createGitHubItemStates(read: GitHubItemStateReader | null, shared: Y.Doc | null = null): GitHubItemStates {
   const cache = new Map<string, { state: GitHubItemState | null; expires: number }>();
   const subscriptions = new Set<Subscription>();
@@ -28,8 +28,11 @@ export function createGitHubItemStates(read: GitHubItemStateReader | null, share
   const reading = (key: string): { state: GitHubItemState | null; seenAt: number | null } => {
     if (shared !== null && subscriptions.size === 0) recorded = readGitHubItemObservations(shared);
     const own = cache.get(key);
-    if (own?.state != null && own.expires > Date.now()) return { state: own.state, seenAt: null };
     const fallback = recorded.get(key);
+    if (own?.state != null && (own.expires > Date.now() || subscriptions.size > 0 &&
+      (fallback === undefined || own.expires - githubItemStateTtl(own.state) > fallback.seenAt))) {
+      return { state: own.state, seenAt: null };
+    }
     return { state: fallback?.state ?? null, seenAt: fallback?.seenAt ?? null };
   };
   const signature = (key: string): string => {
