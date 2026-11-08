@@ -66,11 +66,19 @@ it("refuses an invalid explicit web port", async () => {
   expect(refused.stderr).toContain("--port must be an integer in 1..65535");
 });
 
-it("advertises empty workspace creation and what it skips", async () => {
+it("advertises no-starters creation and the guidance it keeps", async () => {
   const group = await dispatch(["workspace"]);
-  expect(group.stdout).toContain("create <name> [--empty]");
+  expect(group.stdout).toContain("create <name> [--no-starters]");
   const create = await dispatch(["workspace", "create", "--help"]);
-  expect(create.stdout).toContain("--empty           skip the starter documents and their sidebar group");
+  expect(create.stdout).toContain("--no-starters");
+  expect(create.stdout).toContain("seed only Writing pages, without a sidebar group");
+});
+
+it("rejects the replaced empty creation flag", async () => {
+  const refused = await dispatch(["workspace", "create", "Project notes", "--empty"]);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout).toBe("");
+  expect(refused.stderr).toContain("Unknown option '--empty'");
 });
 
 /** As much of a `parseArgs` option map as this suite reads. */
@@ -163,14 +171,14 @@ it.each([
     help: `usage: ub workspace [command]
 
 commands:
-  create <name> [--empty]     # create and select a separate local-only workspace
-  fork                        # copy this workspace independently and select the local copy
-  promote <hub>               # upload, verify and connect this local workspace
-  detach <id|prefix>          # make this computer's hub workspace copy local
-  member <command>            # grant workspace access and manage members
-  list [--json]               # workspaces this machine has a database for (alias: ls)
-  use <link|id>               # fetch a shared workspace or select a local replica
-  remove <id|prefix> [--yes]  # delete this computer's copy of a workspace (alias: rm)
+  create <name> [--no-starters]  # create and select a separate local-only workspace
+  fork                           # copy this workspace independently and select the local copy
+  promote <hub>                  # upload, verify and connect this local workspace
+  detach <id|prefix>             # make this computer's hub workspace copy local
+  member <command>               # grant workspace access and manage members
+  list [--json]                  # workspaces this machine has a database for (alias: ls)
+  use <link|id>                  # fetch a shared workspace or select a local replica
+  remove <id|prefix> [--yes]     # delete this computer's copy of a workspace (alias: rm)
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -324,7 +332,7 @@ describe("help before the work", () => {
   }
 
   it.each([
-    ["workspace", "create", "--empty", "--help"],
+    ["workspace", "create", "--no-starters", "--help"],
     ["workspace", "use", "-h", "ws://example.invalid:1234"],
     ["mcp", "install", "claude", "--help"],
   ])("answers help before validation and leaves files untouched: %j", (...argv) => {

@@ -74,14 +74,14 @@ describe("workspace creation and promotion", () => {
     expect(result.stdout).not.toContain("ask for GitHub approval");
   });
 
-  it.each([false, true])("creates a new named workspace without touching parent bindings, old data, credentials or MCP pins (empty: %s)", async empty => {
+  it.each([false, true])("creates a new named workspace without touching parent bindings, old data, credentials or MCP pins (no starters: %s)", async noStarters => {
     const box = await localWorkspace("Original");
     const old = selected(box);
     const before = await syncWorkspace(offline(box));
     const config = createMcpServer(offline(box));
     try {
       expect(getWorkspaceName(config.replicas.settings().doc)).toBe("Original");
-      expect(listDirectory(config.replicas.directory().doc)).toHaveLength(2);
+      expect(listDirectory(config.replicas.directory().doc)).toHaveLength(3);
       expect(readSidebar(config.replicas.sidebar().doc)).toHaveLength(1);
     } finally { await config.close(); }
     const { login } = await hubFor(box);
@@ -93,7 +93,7 @@ describe("workspace creation and promotion", () => {
     const pins = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" } } } });
     writeFileSync(join(child, ".mcp.json"), pins);
     const childBox = { ...box, cwd: child };
-    const result = await runInProcess(["workspace", "create", " New project ", ...(empty ? ["--empty"] : [])], childBox,
+    const result = await runInProcess(["workspace", "create", " New project ", ...(noStarters ? ["--no-starters"] : [])], childBox,
       { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).toContain("environment binding still takes precedence");
@@ -110,19 +110,19 @@ describe("workspace creation and promotion", () => {
     const fresh = createMcpServer(offline(childBox));
     try {
       expect(getWorkspaceName(fresh.replicas.settings().doc)).toBe("New project");
-      expect(listDirectory(fresh.replicas.directory().doc, { includeDeleted: true })).toHaveLength(empty ? 0 : 2);
+      expect(listDirectory(fresh.replicas.directory().doc, { includeDeleted: true })).toHaveLength(noStarters ? 1 : 3);
       const groups = readSidebar(fresh.replicas.sidebar().doc);
-      expect(groups).toHaveLength(empty ? 0 : 1);
-      if (!empty) expect(groups[0]?.name).toBe("Uberblick");
+      expect(groups).toHaveLength(noStarters ? 0 : 1);
+      if (!noStarters) expect(groups[0]?.name).toBe("Uberblick");
     } finally { await fresh.close(); }
   });
 
-  it.each([false, true])("identifies a replaced binding and provides a working switch-back command (empty: %s)", async empty => {
+  it.each([false, true])("identifies a replaced binding and provides a working switch-back command (no starters: %s)", async noStarters => {
     // A complete old binding can exist before this machine has its replica.
     const previous = { workspaceId: randomUUID(), hubUrl: "wss://old.example.test/ws" };
     const box = sandbox({ projectBinding: previous });
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBeUndefined();
-    const result = await runInProcess(["workspace", "create", "Second", ...(empty ? ["--empty"] : [])], box);
+    const result = await runInProcess(["workspace", "create", "Second", ...(noStarters ? ["--no-starters"] : [])], box);
     expect(result.status, result.output).toBe(0);
     expect(selected(box).workspaceId).not.toBe(previous.workspaceId);
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBe(previous.hubUrl);
@@ -140,14 +140,16 @@ describe("workspace creation and promotion", () => {
     expect(selected(box)).toEqual(previous);
   });
 
-  it("promotes a workspace created with --empty with only its project document and no starter sidebar group", async () => {
+  it("promotes a workspace created with --no-starters with its guidance and project document and no starter sidebar group", async () => {
     const box = unboundSandbox();
-    const created = await runInProcess(["workspace", "create", "Project corpus", "--empty"], box);
+    const created = await runInProcess(["workspace", "create", "Project corpus", "--no-starters"], box);
     expect(created.status, created.output).toBe(0);
     const documentId = randomUUID();
     const local = createMcpServer(offline(box));
     try {
-      expect(listDirectory(local.replicas.directory().doc, { includeDeleted: true })).toEqual([]);
+      expect(listDirectory(local.replicas.directory().doc, { includeDeleted: true })).toEqual([
+        expect.objectContaining({ uuid: "5c61b635-0ac1-44a8-8aa3-9895082aae07", title: "Writing pages" }),
+      ]);
       expect(readSidebar(local.replicas.sidebar().doc)).toEqual([]);
       expect(getWorkspaceName(local.replicas.settings().doc)).toBe("Project corpus");
       const doc = local.replicas.replica(documentId).doc;
@@ -164,7 +166,11 @@ describe("workspace creation and promotion", () => {
     expect(remote.complete).toBe(true);
     expect(remote.missing).toEqual([]);
     expect(remote.unsettled).toEqual([]);
-    expect(remote.entries).toEqual([expect.objectContaining({ uuid: documentId, title: "Project architecture", deleted: false })]);
+    expect(remote.entries).toHaveLength(2);
+    expect(remote.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ uuid: documentId, title: "Project architecture", deleted: false }),
+      expect.objectContaining({ uuid: "5c61b635-0ac1-44a8-8aa3-9895082aae07", title: "Writing pages", deleted: false }),
+    ]));
     expect(isIdentical(compareCorpus(expected.entries, remote.entries))).toBe(true);
     expect(isIdentical(compareCorpus(expected.workspace!, remote.workspace!))).toBe(true);
   });

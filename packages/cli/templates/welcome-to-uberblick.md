@@ -4,6 +4,7 @@ title: Welcome to Uberblick
 description: This project's workspace for product intent, decisions and reports, shared by you and your agents. What belongs here, what stays elsewhere, and where to start.
 links:
   - d7ddd0b1-fee9-4ef0-8f1e-42882f925c31
+  - 5c61b635-0ac1-44a8-8aa3-9895082aae07
 ---
 
 This workspace belongs to the project you created it in: the checkout of the
@@ -26,4 +27,5 @@ changes.
 - Meeting notes and company-wide content belong in your team's other tools.
 
 Open **How to Use It** to write your first rule and watch an agent use it.
-Replace both starter pages when the workspace becomes yours.
+**Writing pages** holds the rules agents follow when they write here; change it to fit your project.
+Replace the other two starter pages when the workspace becomes yours.

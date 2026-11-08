@@ -14,17 +14,17 @@ import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 import { useBindingLines } from "./workspace-use-output.js";
 
 export const WORKSPACE_CREATE_OPTIONS = {
-  empty: { type: "boolean", default: false },
+  "no-starters": { type: "boolean", default: false },
 } as const;
 
-export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name> [--empty]
+export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name> [--no-starters]
 
 Create a separate local-only workspace with starter documents, and select it in
 this directory's .uberblick.json. No hub or login is needed. Other workspaces,
 project bindings and MCP registrations stay as they are.
 
 options:
-  --empty           skip the starter documents and their sidebar group
+  --no-starters     seed only Writing pages, without a sidebar group
   -h, --help        show this help
 `;
 
@@ -73,7 +73,7 @@ export async function createWorkspaceCommand({ positionals, values }: CommandArg
       const seedLock = await acquireInitLock(process.env, { path: seedLockPath(), command: "ub workspace create" });
       try {
         storeWorkspaceName(config, name);
-        if (!values.empty) await seedStarterDocs(env, config);
+        await seedStarterDocs(env, config, values["no-starters"]);
         await fillMainRepositoryFromOrigin(uuid, null, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });

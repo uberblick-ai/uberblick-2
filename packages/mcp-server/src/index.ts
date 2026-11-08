@@ -27,7 +27,7 @@ export type {
 } from "./serving-role.js";
 export { bridgeConfig, compareCorpus, inspectRemote, isIdentical, syncWorkspace } from "./remote.js";
 export type { Corpus, CorpusDifference, CorpusDoc } from "./remote.js";
-export { importSeedDir, readSeedDocs } from "./seed.js";
+export { importSeedDir, importWorkspaceSeed, readSeedDocs } from "./seed.js";
 export type { SeedDoc, SeedImport, StarterSeed } from "./seed.js";
 export { fillWorkspaceMainRepository, storeWorkspaceName } from "./workspace-settings.js";
 export { readWorkspaceFork, writeWorkspaceFork } from "./workspace-fork.js";

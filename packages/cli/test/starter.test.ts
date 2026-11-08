@@ -29,9 +29,12 @@ import {
   getMeta,
   importMarkdown,
   isSidebarSeeded,
+  listDirectory,
+  listTagCatalog,
   readSidebar,
   roomForDoc,
   sidebarRoom,
+  settingsRoom,
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
 import * as Y from "yjs";
@@ -63,7 +66,7 @@ function unboundSandbox(files?: SandboxFiles): Sandbox {
   return hubless(anyUnboundSandbox(files));
 }
 
-/** The shipped templates, in the order the sidebar pins them. */
+/** The shipped templates, with the two sidebar pins first. */
 const TEMPLATES = [
   {
     file: "welcome-to-uberblick.md",
@@ -73,13 +76,19 @@ const TEMPLATES = [
     file: "how-to-use-it.md",
     uuid: "d7ddd0b1-fee9-4ef0-8f1e-42882f925c31",
   },
+  {
+    file: "writing-pages.md",
+    uuid: "5c61b635-0ac1-44a8-8aa3-9895082aae07",
+  },
 ].map(template => {
   const source = importMarkdown(readFileSync(join(PACKAGE_ROOT, "templates", template.file), "utf8"));
   return { ...template, title: source.title, description: source.description };
 });
 
 /** The two starter uuids in pin order. */
-const PINS = TEMPLATES.map((template) => template.uuid);
+const PINS = TEMPLATES.slice(0, 2).map((template) => template.uuid);
+const WRITING = TEMPLATES[2]!;
+const GUIDANCE_TAG = "00000000-0000-4000-8000-000000000007";
 
 let box: Sandbox;
 
@@ -197,12 +206,16 @@ it("pins both starter documents into the starter group, in order", () => {
   expect(sidebar.seeded).toBe(true);
 });
 
-it("seeds exactly two untagged starter documents, with their uuids and links", async () => {
+it("seeds three starters with their links and a durable guidance tag", async () => {
   const directory = replayRoom(directoryRoom);
+  const catalog = replayRoom(settingsRoom);
+  expect(listTagCatalog(catalog)).toContainEqual(expect.objectContaining({ id: GUIDANCE_TAG, name: "guidance" }));
+  expect(listDirectory(directory)).toHaveLength(3);
   for (const template of TEMPLATES) {
     const document = replayRoom((id) => roomForDoc(id, template.uuid));
-    expect(getMeta(document).tags).toEqual([]);
-    expect(getDirectoryEntry(directory, template.uuid)?.tags).toEqual([]);
+    const tags = template === WRITING ? [GUIDANCE_TAG] : [];
+    expect(getMeta(document).tags).toEqual(tags);
+    expect(getDirectoryEntry(directory, template.uuid)?.tags).toEqual(tags);
   }
 
   await withTools(async (call) => {
@@ -210,24 +223,19 @@ it("seeds exactly two untagged starter documents, with their uuids and links", a
     expect(docs.map((doc: { title: string }) => doc.title)).toEqual(
       TEMPLATES.map(template => template.title).sort(),
     );
-    expect(docs.every((doc: { tags: unknown[] }) => doc.tags.length === 0)).toBe(
-      true,
-    );
+    const guidance = await call("list_docs", { tag: "guidance" });
+    expect(guidance.docs.map((doc: { uuid: string }) => doc.uuid)).toEqual([WRITING.uuid]);
     for (const template of TEMPLATES) {
       const doc = await call("get_doc", { uuid: template.uuid });
       expect(doc.title).toBe(template.title);
-      expect(doc.tags).toEqual([]);
-      // Each starter document points at the other, by uuid.
-      expect(doc.links).toEqual([
-        PINS.find((uuid) => uuid !== template.uuid),
-      ]);
+      expect(doc.tags.map((tag: { id: string }) => tag.id)).toEqual(template === WRITING ? [GUIDANCE_TAG] : []);
+      expect(doc.links).toEqual(template === WRITING ? [] : template.uuid === PINS[0] ? [PINS[1], WRITING.uuid] : [PINS[0]]);
     }
   });
 });
 
-it("describes both starter documents, in the document and in the stub", () => {
-  // What this pins is the observable contract: from the log alone, both
-  // documents and both stubs are described by the time `ub workspace create` returns.
+it("describes every starter document, in the document and in the stub", () => {
+  // From the log alone, every document and stub is described when create returns.
   // It does not pin which writer put the description in the stub — the seed's
   // own `upsertDirectoryEntry` and `Replicas.repairStub`, which reconciles a
   // stub from `meta.description`, both run inside that one process, and this
@@ -241,6 +249,19 @@ it("describes both starter documents, in the document and in the stub", () => {
       template.description,
     );
   }
+});
+
+it("seeds only durable guidance with no sidebar when starters are skipped", async () => {
+  const target = unboundSandbox();
+  const created = runUb(["workspace", "create", "Writing rules", "--no-starters"], target);
+  expect(created.status, created.output).toBe(0);
+  const directory = replayRoom(directoryRoom, target);
+  expect(listDirectory(directory).map(doc => doc.uuid)).toEqual([WRITING.uuid]);
+  expect(getDirectoryEntry(directory, WRITING.uuid)?.tags).toEqual([GUIDANCE_TAG]);
+  const document = replayRoom(id => roomForDoc(id, WRITING.uuid), target);
+  expect(getMeta(document).tags).toEqual([GUIDANCE_TAG]);
+  expect(listTagCatalog(replayRoom(settingsRoom, target))).toContainEqual(expect.objectContaining({ id: GUIDANCE_TAG, name: "guidance" }));
+  expect(sidebarFromLog(target)).toEqual({ groups: [], seeded: false });
 });
 
 it("leaves a freshly seeded document nothing to backfill", async () => {
@@ -313,7 +334,7 @@ it("is adopted by an MCP server started afterwards, with no second group", async
   });
 });
 
-it("exports both starter documents back to the markdown they came from", async () => {
+it("exports all starter documents back to the markdown they came from", async () => {
   await withTools(async (call) => {
     for (const template of TEMPLATES) {
       const source = importMarkdown(
@@ -363,7 +384,7 @@ it("seeds two complete new workspaces when creates race", async () => {
     ]);
     await withTools(async call => {
       const { docs } = await call("list_docs");
-      expect(docs).toHaveLength(2);
+      expect(docs).toHaveLength(3);
       for (const template of TEMPLATES) {
         const source = importMarkdown(readFileSync(join(PACKAGE_ROOT, "templates", template.file), "utf8"));
         const doc = await call("get_doc", { uuid: source.uuid });
