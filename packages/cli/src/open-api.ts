@@ -13,6 +13,7 @@ import { respond } from "./open-response.js";
 import type { AvailableUpdate } from "./open-update.js";
 import { hasSession, serveSessionRequest, type BrowserAccess } from "./open-session.js";
 import { BrowserReplicaUnavailable, type BrowserReplicas, type ServedWorkspace } from "./open-workspaces.js";
+import { readGitHubItems, type GitHubItemStateLookup } from "./open-github-items.js";
 
 const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
@@ -24,6 +25,7 @@ const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
 const DEVICE_LOGIN_PATH = "/api/device-login";
 const UPDATE_PATH = "/api/update";
+const GITHUB_ITEMS_PATH = "/api/github-item-states";
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
@@ -106,6 +108,7 @@ interface ApiRequestContext {
   replicas: BrowserReplicas;
   statusForWorkspace: (workspace: string) => ServingSyncStatus;
   availableUpdate: () => AvailableUpdate | null;
+  githubItems: GitHubItemStateLookup;
   env: NodeJS.ProcessEnv;
   expectedOrigin: string;
   document: () => string;
@@ -147,7 +150,7 @@ function serveSearch(
 
 async function serveApiRequest(context: ApiRequestContext): Promise<void> {
   const { request, response, target, authenticate, replicas, statusForWorkspace,
-    availableUpdate, env, expectedOrigin, document, access } = context;
+    env, expectedOrigin, document, access } = context;
   const reply = (status: number, body: object, headers?: Record<string, string>) =>
     apiResponse(request, response, status, body, headers);
   if (await serveSessionRequest(access, request, target.pathname, expectedOrigin, reply)) return;
@@ -184,14 +187,7 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
     apiResponse(request, response, 200, requestDeviceLogin({ workspaceId, hubUrl: workspace.binding.hubUrl, env }, rebound));
     return;
   }
-  if (target.pathname === UPDATE_PATH) {
-    if (request.method !== "GET") {
-      apiResponse(request, response, 405, { error: "method_not_allowed" }, { allow: "GET" });
-      return;
-    }
-    apiResponse(request, response, 200, { update: availableUpdate() });
-    return;
-  }
+  if (await serveLocalReading(context, reply)) return;
   let engine: UberblickMcpEngine;
   try { engine = await replicas.prepare(workspaceId); }
   catch (error) {
@@ -290,6 +286,37 @@ async function serveApiRequest(context: ApiRequestContext): Promise<void> {
   }
 
   serveSearch(engine, target, reply);
+}
+
+async function serveLocalReading(
+  context: ApiRequestContext,
+  reply: (status: number, body: object, headers?: Record<string, string>) => void,
+): Promise<boolean> {
+  const { target, request, expectedOrigin } = context;
+  if (target.pathname === UPDATE_PATH) {
+    if (request.method !== "GET") reply(405, { error: "method_not_allowed" }, { allow: "GET" });
+    else reply(200, { update: context.availableUpdate() });
+    return true;
+  }
+  if (target.pathname === GITHUB_ITEMS_PATH) {
+    if (request.method !== "POST") {
+      reply(405, { error: "method_not_allowed" }, { allow: "POST" });
+      return true;
+    }
+    if (request.headers.origin !== expectedOrigin) {
+      reply(403, { error: "origin_refused" });
+      return true;
+    }
+    const items = await readGitHubItems(request);
+    if (items === null) {
+      reply(400, { error: "invalid_request" }, { connection: "close" });
+      request.resume();
+      return true;
+    }
+    reply(200, await context.githubItems.read(items));
+    return true;
+  }
+  return false;
 }
 
 export function serveBoundRequest(context: BoundRequestContext): void {

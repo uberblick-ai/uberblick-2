@@ -8,6 +8,7 @@ import { LocalSessionNotice } from "./shell/ShellNotices.js";
 import { ShellFrame } from "./shell/ShellFrame.js";
 import { useAppShell } from "./shell/use-app-shell.js";
 import { WorkspaceMembersContext } from "./workspace-members.js";
+import { GitHubItemStatesContext } from "./github-item-states.js";
 
 const NO_MEMBERS: readonly string[] = [];
 
@@ -17,6 +18,7 @@ export function App(): ReactElement {
   const { alterDecision, onAlterDecisionOpenChange, closeAlterDecision, onDecisionRecorded } = shell.alter;
   return (
     <WorkspaceMembersContext value={shell.environment.members ?? NO_MEMBERS}>
+    <GitHubItemStatesContext value={shell.environment.githubStates}>
     <Dialog open={alterDecision !== null} onOpenChange={onAlterDecisionOpenChange}>
       {remoteSignIn ? <main className="ub-app">{window.location.pathname === "/connect" ? <ConnectAgent /> : <RemoteHubGuide />}</main>
         : sessionMissing ? <main className="ub-app"><LocalSessionNotice /></main>
@@ -24,6 +26,7 @@ export function App(): ReactElement {
       {alterDecision !== null && <AlterDecisionDialog session={alterDecision} displayName={identity.name}
         docLinks={shell.navigation.docLinks} onClose={closeAlterDecision} onRecorded={onDecisionRecorded} />}
     </Dialog>
+    </GitHubItemStatesContext>
     </WorkspaceMembersContext>
   );
 }

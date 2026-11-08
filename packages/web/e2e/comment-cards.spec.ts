@@ -96,7 +96,7 @@ async function inlineMarkdown(card: Locator): Promise<void> {
   await expect(text.locator("code.ub-inline-code")).toHaveText("ub update");
   await expect(text).toHaveCSS("white-space", "pre-wrap");
   const external = text.getByRole("link", { name: "spec", exact: true });
-  const github = text.getByRole("link", { name: "Issue Example/SomeRepo#12", exact: true });
+  const github = text.getByRole("link", { name: "Issue Example/SomeRepo#12 · State unknown", exact: true });
   for (const [link, address] of [[external, EXTERNAL], [github, GITHUB]] as const) {
     await expect(link).toHaveAttribute("href", address);
     await expect(link).toHaveAttribute("target", "_blank");
@@ -180,7 +180,7 @@ test("comment Markdown links stay native and pills remain readable on resting, h
     const card = page.locator(`#ub-thread-${data.first} .ub-thread`);
     const text = card.locator(".ub-thread-text").first();
     const external = text.getByRole("link", { name: "spec", exact: true });
-    const github = text.getByRole("link", { name: "Issue Example/SomeRepo#12", exact: true });
+    const github = text.getByRole("link", { name: "Issue Example/SomeRepo#12 · State unknown", exact: true });
     const pill = github.locator(".ub-github-pill");
     const outside = page.locator(".ub-editor .ub-paragraph").filter({ hasText: "Outside every comment." });
     await inlineMarkdown(card);
@@ -342,7 +342,7 @@ test("iPad comment drawer renders inline Markdown and follows links without sele
     const card = sheet.locator(`#ub-thread-${data.first} .ub-thread`);
     await inlineMarkdown(card);
     const external = card.getByRole("link", { name: "spec", exact: true });
-    const github = card.getByRole("link", { name: "Issue Example/SomeRepo#12", exact: true });
+    const github = card.getByRole("link", { name: "Issue Example/SomeRepo#12 · State unknown", exact: true });
     await externalPopup(page, EXTERNAL, () => external.tap());
     await expect(card).not.toHaveAttribute("aria-current", "true");
     await externalPopup(page, GITHUB, () => github.tap());

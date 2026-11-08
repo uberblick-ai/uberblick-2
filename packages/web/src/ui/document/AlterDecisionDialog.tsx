@@ -16,6 +16,7 @@ import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { useWorkspaceMembers } from "../workspace-members.js";
+import { useGitHubItemStates } from "../github-item-states.js";
 import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
 import { TableControls } from "../editor-controls/TableControls.js";
@@ -60,6 +61,7 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
   const frame = useRef<HTMLDivElement | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const members = useWorkspaceMembers();
+  const githubStates = useGitHubItemStates();
   useEffect(() => {
     if (editor !== null && !editor.isDestroyed) setEditorMembers(editor, members);
   }, [editor, members]);
@@ -71,6 +73,7 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
       editable: !readOnly, canWrite: () => !readOnly, canNormalize: () => false,
       blockMenuEntries: DECISION_ANSWER_MENU_ENTRIES,
       docLinks, workspaceSettings: session.catalog.ydoc,
+      githubStates,
       onUnbind: () => { setEditor(null); onEditor?.(null); },
     });
     binding.editor?.setOptions({ editorProps: { attributes: { "aria-label": readOnly ? "Current answer" : "New answer" } } });
@@ -85,7 +88,7 @@ function AnswerEditor({ draft, readOnly = false, session, docLinks, displayName,
       element.removeEventListener("click", preventNavigation);
       setEditor(null); onEditor?.(null); binding.destroy();
     };
-  }, [draft, readOnly, session, docLinks, onEditor]);
+  }, [draft, readOnly, session, docLinks, githubStates, onEditor]);
   useEffect(() => { editor?.setEditable(!readOnly && !waiting); }, [editor, readOnly, waiting]);
   return <div className={`ub-alter-answer${readOnly ? " ub-alter-current" : ""}`}>
     <div className="ub-editor-frame" ref={frame}>

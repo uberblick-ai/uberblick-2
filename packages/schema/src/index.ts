@@ -74,6 +74,8 @@ export { EXTERNAL_HREF, isDocId, isExternalHref, readsAsMark } from "./marks.js"
 export { readSyncedDocId } from "./synced-doc-id.js";
 export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
 export type { GitHubItem } from "./github-reference.js";
+export { githubItemKey, githubItemStateTtl, isGitHubItemState } from "./github-item-state.js";
+export type { GitHubItemState } from "./github-item-state.js";
 export { INLINE_ICONS } from "./inline-icons.js";
 export type { InlineIconName } from "./inline-icons.js";
 export { isCalloutIcon, isCalloutVariant } from "./callout.js";

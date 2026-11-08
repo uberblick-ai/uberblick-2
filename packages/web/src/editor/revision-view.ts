@@ -18,6 +18,7 @@ import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
+import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
@@ -484,6 +485,7 @@ export interface CreateRevisionEditorOptions {
   after: Y.Doc;
   docLinks?: DocLinkContext | null;
   workspaceSettings?: Y.Doc | null;
+  githubStates?: GitHubItemStates | null;
   folding?: RevisionFolding;
   onExpand?: (run: number) => void;
 }
@@ -505,7 +507,7 @@ export function createRevisionInline(options: CreateRevisionEditorOptions): Revi
       ...revisionPalette(options.after, options.before), revisionPresentation(model, options.docLinks ?? null),
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
-      GitHubLinks.configure({ settings: options.workspaceSettings ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
+      GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
     ],
     content: model.content,
     editable: false,
