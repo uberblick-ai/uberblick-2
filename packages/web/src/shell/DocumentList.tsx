@@ -491,7 +491,7 @@ export function DocumentList({
                       use this column for their latest stage instead. */}
                   <td className="ub-docs-group-cell">
                     {entry.topicState === undefined
-                      ? <span className="ub-docs-group">{entry.groupName}</span>
+                      ? <span className="ub-docs-group" title={entry.groupName}>{entry.groupName}</span>
                       : <span className="ub-docs-stage" data-stage={topicStage(entry.topicState)}>{STAGE_LABELS[topicStage(entry.topicState)]}</span>}
                   </td>
                   <td className="ub-docs-tags-cell"><RowTags tags={rowTags.get(entry.uuid) ?? []} title={entry.title} onPick={(id) => updateState({ selectedTags: [id] })} /></td>

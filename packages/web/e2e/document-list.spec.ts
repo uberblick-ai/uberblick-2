@@ -360,3 +360,40 @@ test("search results retain focus, scroll and tag disclosure during directory re
   await expect(rows).toHaveCount(24);
   await expect(page.getByRole("dialog", { name: /^All tags for/ })).toBeVisible();
 });
+
+test("every list row stays one line high, clipping a long group name, at desktop and iPad widths", async ({ browser }) => {
+  const writer = agent().open({ name: "one-line-rows-e2e" });
+  const token = docTitle("onelinerows").replaceAll("-", "");
+  const plain = `${token} short`;
+  const grouped = `${token} filed under a sidebar group whose name is far wider than its column`;
+  const tagged = `${token} tagged`;
+  for (const fixture of [
+    { title: plain },
+    { title: grouped, group: "Product requirements and the decisions behind them" },
+    { title: tagged, tags: ["auth", "billing", "mcp", "permissions", "rfc", "sync"] },
+  ]) {
+    const created = await writer.call<{ uuid: string }>("create_doc", {
+      title: fixture.title, description: "A one-line row fixture.",
+      blocks: [{ type: "paragraph", text: "Row height content." }],
+      ...(fixture.tags === undefined ? {} : { tags: fixture.tags }),
+    });
+    if (fixture.group !== undefined) await writer.call("pin_doc", { uuid: created.uuid, group: fixture.group });
+  }
+  const page = await openApp(browser, `/${harness().workspace}/all`, { readySelector: ".ub-docs-heading" });
+  await page.getByRole("searchbox", { name: "Search" }).fill(token);
+  const rows = page.locator(".ub-docs-row");
+  await expect(rows).toHaveCount(3);
+  const group = rows.filter({ hasText: grouped }).locator(".ub-docs-group");
+  await expect(group).toHaveText("Product requirements and the decisions behind them");
+  for (const width of [1440, 1024, 768]) {
+    await page.setViewportSize({ width, height: 800 });
+    // The plain row has nothing that could wrap, so its height is one line.
+    const reference = await rows.filter({ hasText: plain }).evaluate((row) => row.getBoundingClientRect().height);
+    for (const row of await rows.all()) {
+      expect(await row.evaluate((element) => element.getBoundingClientRect().height), `row height at ${width} px`)
+        .toBeCloseTo(reference, 0);
+    }
+    expect(await group.evaluate((element) => element.scrollWidth > element.clientWidth), `group clipped at ${width} px`).toBe(true);
+    await expect(group).toHaveAttribute("title", "Product requirements and the decisions behind them");
+  }
+});

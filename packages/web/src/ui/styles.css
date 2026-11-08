@@ -1002,7 +1002,8 @@ body {
 .ub-group-label,
 .ub-last-updated,
 .ub-peer-overflow-name,
-.ub-docs-title {
+.ub-docs-title,
+.ub-docs-group {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3702,8 +3703,9 @@ h6.ub-heading {
   color: var(--muted-foreground);
 }
 
+/* A block, so the shared truncation clips it; the title carries the name. */
 .ub-docs-group {
-  overflow-wrap: anywhere;
+  display: block;
 }
 
 .ub-docs-age {
