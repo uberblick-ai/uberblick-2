@@ -162,21 +162,26 @@ else if (command === "tailscale") {
 // pty.fork supplies a controlling terminal on both Linux and macOS. The
 // installer still gets detached stdin, as in the hosted bash -c invocation.
 const terminalProgram = String.raw`
-import errno, json, os, pty, select, signal, sys, time
+import errno, json, os, pty, re, select, signal, sys, time
 
 with open(sys.argv[1]) as source:
     script = source.read()
-answer = json.loads(sys.argv[2])
+answers = json.loads(sys.argv[2])
 pid, terminal = pty.fork()
 if pid == 0:
     null = os.open(os.devnull, os.O_RDONLY)
     os.dup2(null, 0)
     if null != 0:
         os.close(null)
-    os.execv("/bin/bash", ["/bin/bash", "-c", script, "setup-hub.sh", *sys.argv[3:]])
+    stdout = os.open(sys.argv[3], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.dup2(stdout, 1)
+    if stdout != 1:
+        os.close(stdout)
+    os.execv("/bin/bash", ["/bin/bash", "-c", script, "setup-hub.sh", *sys.argv[4:]])
 
-output = b""
-answered = False
+pending = b""
+question = re.compile(rb"Serve the hub on [^\r\n]*\? \[y/N\]|HUB_(?:HOST|VERSION|PORT) [^\r\n]*: ")
+answered = 0
 reaped = False
 deadline = time.monotonic() + 45
 try:
@@ -194,12 +199,20 @@ try:
             break
         sys.stdout.buffer.write(chunk)
         sys.stdout.buffer.flush()
-        output += chunk
-        if not answered and b"Serve the hub on" in output and b"[y/N]" in output:
+        pending += chunk
+        while match := question.search(pending):
+            prompt = match.group()
+            name = "offer" if prompt.startswith(b"Serve the hub on") else prompt.split(b" ", 1)[0].decode()
+            if answered >= len(answers) or answers[answered][0] != name:
+                raise AssertionError("unexpected terminal question: " + prompt.decode())
+            answer = answers[answered][1]
             os.write(terminal, b"\x04" if answer is None else (answer + "\n").encode())
-            answered = True
+            answered += 1
+            pending = pending[match.end():]
     _, status = os.waitpid(pid, 0)
     reaped = True
+    if answered != len(answers):
+        raise AssertionError("installer skipped terminal questions: " + repr(answers[answered:]))
     sys.exit(os.waitstatus_to_exitcode(status))
 finally:
     os.close(terminal)
@@ -251,28 +264,30 @@ function fixture(t, overrides = {}) {
 			writeFileSync(join(directory, ".env"), contents, { mode: 0o600 });
 		},
 		files(directory = hub) { return existsSync(directory) ? Object.fromEntries(readdirSync(directory).map((name) => [name, readFileSync(join(directory, name), "utf8")])) : {}; },
-		runTerminal(answer, overrides = {}, args = []) {
-			return this.run(overrides, args, { answer });
+		runTerminal(answers, overrides = {}, args = []) {
+			return this.run(overrides, args, { answers });
 		},
 		run(overrides = {}, args = [], terminal = null) {
 			save();
 			const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HUB_DIR: hub, TEST_SETUP_CONFIG: configPath, TEST_SETUP_LOG: log };
 			for (const name of ["HUB_HOST", "HUB_VERSION", "HUB_PORT", "LOOPBACK_PORT", "HELP", "ALLOW_ROOT", "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "WEB_HOST", "TAILSCALE_HOST", "TAILSCALE_IP", "HTTPS_BIND_IP"]) delete env[name];
 			const command = terminal ? "python3" : "/bin/bash";
+			const terminalStdout = join(scratch, "terminal-stdout");
 			const commandArgs = terminal
-				? ["-c", terminalProgram, join(root, "setup-hub.sh"), JSON.stringify(terminal.answer), ...args]
+				? ["-c", terminalProgram, join(root, "setup-hub.sh"), JSON.stringify(terminal.answers), terminalStdout, ...args]
 				: ["-c", readFileSync(join(root, "setup-hub.sh"), "utf8"), "setup-hub.sh", ...args];
 			const result = spawnSync(command, commandArgs, {
 				cwd: scratch, env: { ...env, ...overrides }, encoding: "utf8", timeout: 55_000, detached: !terminal,
 			});
 			Object.assign(config, JSON.parse(readFileSync(configPath, "utf8")));
-			return result;
+			return terminal ? { ...result, terminal: result.stdout, stdout: existsSync(terminalStdout) ? readFileSync(terminalStdout, "utf8") : "", stderr: result.stderr + result.stdout } : result;
 		},
 	};
 }
 
 function passed(result) {
 	assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}\n${result.error ?? ""}`);
+	assert.doesNotMatch(result.stdout, /Serve the hub on|HUB_(?:HOST|VERSION|PORT) (?:\(|\[)/, "questions belong on the terminal, not stdout");
 }
 
 function failed(result, reason) {
@@ -288,12 +303,20 @@ function assertSetting(env, key, value) {
 	assert.deepEqual(env.split("\n").filter((line) => line.startsWith(`${key}=`)), [`${key}=${value}`]);
 }
 
+function assertCheckInstructions(result, directory) {
+	assert.ok(result.stdout.includes(`Hub directory: ${directory}\n`), result.stdout);
+	assert.match(result.stdout, /Check the hub from that directory:\n {2}docker compose exec hub ub-hub status\n {2}docker compose exec hub ub-hub doctor/);
+}
+
 test("hosted installer help and a truncated transfer perform no work", { timeout: 60_000 }, (t) => {
 	const f = fixture(t, { uid: 0, os: "Unsupported" });
 	for (const [env, args] of [[{ HELP: "1" }, []], [{}, ["--help"]]]) {
 		const result = f.run(env, args);
 		passed(result);
 		for (const variable of ["HUB_HOST", "HUB_VERSION", "HUB_DIR", "HUB_PORT", "LOOPBACK_PORT", "ALLOW_ROOT", "HELP"]) assert.match(result.stdout, new RegExp(variable));
+		assert.match(result.stdout, /terminal, unset HUB_HOST, HUB_VERSION.*\nasked with defaults/i);
+		assert.match(result.stdout, /set variable.*never asked/i);
+		assert.match(result.stdout, /[Ww]ithout a terminal.*nothing is asked/);
 	}
 	assert.equal(f.calls().length, 0);
 	assert.deepEqual(f.files(), {});
@@ -351,6 +374,7 @@ test("fresh loopback install stages all four assets, writes private env, and pri
 	assert.match(result.stdout, /http:\/\/(?:127\.0\.0\.1|localhost):9191/);
 	assert.match(result.stdout, /ub auth login http:\/\//);
 	assert.match(result.stdout, /first.*sign.in.*administrator/i);
+	assertCheckInstructions(result, f.hub);
 	const actions = f.calls().filter((call) => call.command === "docker" && call.args[0] === "compose").map((call) => call.args.join(" "));
 	const config = actions.findIndex((action) => action.includes("config --quiet"));
 	const pull = actions.findIndex((action) => action.includes("pull"));
@@ -644,15 +668,95 @@ test("Tailscale selection requires Linux and a working client and records the cu
 	}
 });
 
+test("terminal questions accept Enter defaults and typed settings with detached installer stdin", { timeout: 60_000 }, (t) => {
+	for (const [answers, variables, compose, port] of [
+		[[["HUB_HOST", ""], ["HUB_PORT", ""], ["HUB_VERSION", ""]], { HUB_HOST: "", HUB_PORT: "8080", HUB_VERSION: "" }, "compose.yml", "8080"],
+		[[["HUB_HOST", ""], ["HUB_PORT", "9191"], ["HUB_VERSION", "0.4.12"]], { HUB_HOST: "", HUB_PORT: "9191", HUB_VERSION: "0.4.12" }, "compose.yml", "9191"],
+		[[["HUB_HOST", "hub.example.com"], ["HUB_VERSION", "0.4.12"]], { HUB_HOST: "hub.example.com", HUB_VERSION: "0.4.12" }, "compose.yml:remote.https.yml", "8080"],
+	]) {
+		const config = { tailscaleState: "Stopped" };
+		const answered = fixture(t, config);
+		const explicit = fixture(t, config);
+		const result = answered.runTerminal(answers, { COMPOSE_PROJECT_NAME: "terminal-settings" });
+		passed(result);
+		passed(explicit.run({ ...variables, COMPOSE_PROJECT_NAME: "terminal-settings" }));
+		assert.equal(answered.files()[".env"], explicit.files()[".env"]);
+		assertSetting(answered.files()[".env"], "COMPOSE_FILE", compose);
+		assertSetting(answered.files()[".env"], "LOOPBACK_PORT", port);
+		assert.match(result.terminal, /HUB_HOST .*\[loopback HTTP\]: /);
+		assert.match(result.terminal, /HUB_VERSION \[latest\]: /);
+		if (!variables.HUB_HOST) assert.match(result.terminal, /HUB_PORT \[8080\]: /);
+		assertCheckInstructions(result, answered.hub);
+	}
+});
+
+test("set terminal variables, including empty values and the port alias, are never asked", { timeout: 60_000 }, (t) => {
+	for (const [variables, port] of [
+		[{ HUB_HOST: "", HUB_VERSION: "", HUB_PORT: "9191" }, "9191"],
+		[{ HUB_HOST: "", HUB_VERSION: "0.4.12", LOOPBACK_PORT: "9292" }, "9292"],
+		[{ HUB_HOST: "public.example.com", HUB_VERSION: "", HUB_PORT: "9393" }, "9393"],
+	]) {
+		const f = fixture(t);
+		const result = f.runTerminal([], variables);
+		passed(result);
+		assert.equal(result.terminal, "");
+		assertSetting(f.files()[".env"], "LOOPBACK_PORT", port);
+	}
+	for (const name of ["HUB_PORT", "LOOPBACK_PORT"]) {
+		const f = fixture(t);
+		failed(f.runTerminal([], { HUB_HOST: "", HUB_VERSION: "", [name]: "" }), /HUB_PORT \/ LOOPBACK_PORT/);
+		noDownloads(f);
+		assert.deepEqual(f.files(), {});
+	}
+});
+
+test("terminal answers fail through the same variable checks before downloads or writes", { timeout: 60_000 }, (t) => {
+	for (const [name, value, answers, variables] of [
+		["HUB_HOST", "https://hub.example.com", [["HUB_HOST", "https://hub.example.com"]], { HUB_PORT: "8080", HUB_VERSION: "0.4.13" }],
+		["HUB_PORT", "not-a-port", [["HUB_PORT", "not-a-port"]], { HUB_HOST: "", HUB_VERSION: "0.4.13" }],
+		["HUB_VERSION", "v0.4.13", [["HUB_VERSION", "v0.4.13"]], { HUB_HOST: "", HUB_PORT: "8080" }],
+	]) {
+		const answered = fixture(t, { tailscaleState: "Stopped" });
+		const explicit = fixture(t, { tailscaleState: "Stopped" });
+		const result = answered.runTerminal(answers, variables);
+		const configured = explicit.run({ ...variables, [name]: value });
+		failed(result, new RegExp(name));
+		failed(configured, new RegExp(name));
+		assert.equal(result.stderr.match(/setup-hub: ([^\r\n]+)/)?.[1], configured.stderr.match(/setup-hub: ([^\r\n]+)/)?.[1]);
+		noDownloads(answered);
+		assert.deepEqual(answered.files(), {});
+	}
+	const busy = fixture(t, { listeners: [{ address: "127.0.0.1", port: 9191 }] });
+	failed(busy.runTerminal([["HUB_PORT", "9191"]], { HUB_HOST: "" }), /127\.0\.0\.1:9191.*in use/);
+	noDownloads(busy);
+	assert.deepEqual(busy.files(), {});
+});
+
+test("answered missing and older releases are refused before asset downloads or file changes", { timeout: 60_000 }, (t) => {
+	for (const installed of [false, true]) {
+		const f = fixture(t);
+		if (installed) {
+			f.env("HUB_VERSION=0.4.13\nCOMPOSE_FILE=compose.yml\nLOOPBACK_PORT=9191\nCUSTOM_VALUE=preserved\n");
+			for (const name of assets) writeFileSync(join(f.hub, name), `old ${name}\n`);
+		}
+		const before = f.files();
+		const version = installed ? "0.4.12" : "0.1.0";
+		const result = f.runTerminal([["HUB_VERSION", version]], installed ? {} : { HUB_HOST: "", HUB_PORT: "8080" });
+		failed(result, installed ? /older|downgrade|rollback/i : /0\.1\.0/);
+		assert.deepEqual(f.files(), before);
+		assert.equal(f.calls().filter((call) => call.command === "curl" && call.args.some((arg) => arg.includes("/releases/download/"))).length, 0);
+	}
+});
+
 test("accepting the terminal tailnet offer matches an explicit HUB_HOST with detached installer stdin", { timeout: 60_000 }, (t) => {
 	const config = { tailscaleIp: "100.100.1.2", listeners: [{ address: "127.0.0.1", port: 8080 }] };
 	const offered = fixture(t, config);
 	const explicit = fixture(t, config);
-	const result = offered.runTerminal("yes", { COMPOSE_PROJECT_NAME: "terminal-offer" });
+	const result = offered.runTerminal([["offer", "yes"], ["HUB_VERSION", ""]], { COMPOSE_PROJECT_NAME: "terminal-offer" });
 	const selected = explicit.run({ HUB_HOST: "hub.tailnet.ts.net", COMPOSE_PROJECT_NAME: "terminal-offer" });
 	passed(result);
 	passed(selected);
-	assert.match(result.stdout, /Serve the hub on https:\/\/hub\.tailnet\.ts\.net\? \[y\/N\]/);
+	assert.match(result.terminal, /Serve the hub on https:\/\/hub\.tailnet\.ts\.net\? \[y\/N\]/);
 	assert.equal(offered.files()[".env"], explicit.files()[".env"]);
 	assertSetting(offered.files()[".env"], "COMPOSE_FILE", "compose.yml:remote.https.yml:remote.tailscale.yml");
 	assertSetting(offered.files()[".env"], "WEB_HOST", "hub.tailnet.ts.net");
@@ -660,17 +764,17 @@ test("accepting the terminal tailnet offer matches an explicit HUB_HOST with det
 	assert.match(result.stdout, /ub auth login https:\/\/hub\.tailnet\.ts\.net/);
 	assert.match(selected.stdout, /ub auth login https:\/\/hub\.tailnet\.ts\.net/);
 	const busy = fixture(t, { listeners: [{ address: "100.64.0.2", port: 443 }] });
-	failed(busy.runTerminal("y"), /100\.64\.0\.2:443/);
+	failed(busy.runTerminal([["offer", "y"]]), /100\.64\.0\.2:443/);
 	noDownloads(busy);
 	assert.deepEqual(busy.files(), {});
 });
 
-test("declining, pressing Enter, or terminal EOF keeps the fresh loopback default", { timeout: 60_000 }, (t) => {
+test("declining, pressing Enter, or terminal EOF is followed by route, port and release questions", { timeout: 60_000 }, (t) => {
 	for (const answer of ["no", "", null]) {
 		const f = fixture(t, { listeners: [{ address: "100.64.0.2", port: 443 }] });
-		const result = f.runTerminal(answer);
+		const result = f.runTerminal([["offer", answer], ["HUB_HOST", ""], ["HUB_PORT", ""], ["HUB_VERSION", ""]]);
 		passed(result);
-		assert.match(result.stdout, /Serve the hub on/);
+		assert.match(result.terminal, /Serve the hub on/);
 		assertSetting(f.files()[".env"], "COMPOSE_FILE", "compose.yml");
 		assertSetting(f.files()[".env"], "WEB_HOST", "");
 		assertSetting(f.files()[".env"], "TAILSCALE_IP", "");
@@ -683,13 +787,14 @@ test("no terminal and explicitly set HUB_HOST values suppress the tailnet offer"
 	const result = unattended.run();
 	passed(result);
 	assert.doesNotMatch(result.stdout, /Serve the hub on/);
+	assert.doesNotMatch(result.stdout + result.stderr, /HUB_(?:HOST|VERSION|PORT) (?:\(|\[)/);
 	assertSetting(unattended.files()[".env"], "COMPOSE_FILE", "compose.yml");
 	assert.equal(unattended.calls().filter((call) => call.command === "tailscale").length, 0);
 	for (const [host, compose] of [["", "compose.yml"], ["public.example.com", "compose.yml:remote.https.yml"], ["chosen.tailnet.ts.net", "compose.yml:remote.https.yml:remote.tailscale.yml"]]) {
 		const f = fixture(t);
-		const configured = f.runTerminal("yes", { HUB_HOST: host });
+		const configured = f.runTerminal(host ? [["HUB_VERSION", ""]] : [["HUB_PORT", ""], ["HUB_VERSION", ""]], { HUB_HOST: host });
 		passed(configured);
-		assert.doesNotMatch(configured.stdout, /Serve the hub on/);
+		assert.doesNotMatch(configured.terminal, /Serve the hub on/);
 		assertSetting(f.files()[".env"], "COMPOSE_FILE", compose);
 		assertSetting(f.files()[".env"], "WEB_HOST", host);
 		assert.equal(f.calls().filter((call) => call.command === "tailscale" && call.args[0] === "status").length, 0);
@@ -704,33 +809,43 @@ test("terminal reruns preserve their recorded route unless HUB_HOST is explicitl
 	]) {
 		const f = fixture(t);
 		f.env(`HUB_VERSION=0.4.12\n${settings}`);
-		const result = f.runTerminal("yes");
+		const result = f.runTerminal([["HUB_VERSION", ""]]);
 		passed(result);
-		assert.doesNotMatch(result.stdout, /Serve the hub on/);
+		assert.doesNotMatch(result.terminal, /Serve the hub on|HUB_HOST|HUB_PORT/);
 		assertSetting(f.files()[".env"], "COMPOSE_FILE", compose);
 		if (host) assertSetting(f.files()[".env"], "WEB_HOST", host);
+		else assertSetting(f.files()[".env"], "LOOPBACK_PORT", "9191");
+		assertSetting(f.files()[".env"], "HUB_VERSION", "0.4.13");
+		assertCheckInstructions(result, f.hub);
 		assert.equal(f.calls().filter((call) => call.command === "tailscale" && call.args[0] === "status").length, 0);
 	}
 	const changed = fixture(t);
 	changed.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\n");
-	const result = changed.runTerminal("yes", { HUB_HOST: "chosen.tailnet.ts.net" });
+	const result = changed.runTerminal([["HUB_VERSION", ""]], { HUB_HOST: "chosen.tailnet.ts.net" });
 	passed(result);
-	assert.doesNotMatch(result.stdout, /Serve the hub on/);
+	assert.doesNotMatch(result.terminal, /Serve the hub on|HUB_HOST|HUB_PORT/);
 	assertSetting(changed.files()[".env"], "WEB_HOST", "chosen.tailnet.ts.net");
+	for (const name of ["HUB_PORT", "LOOPBACK_PORT"]) {
+		const changedPort = fixture(t);
+		changedPort.env("HUB_VERSION=0.4.12\nCOMPOSE_FILE=compose.yml\nLOOPBACK_PORT=9191\n");
+		const result = changedPort.runTerminal([["HUB_VERSION", ""]], { [name]: "9292" });
+		passed(result);
+		assertSetting(changedPort.files()[".env"], "LOOPBACK_PORT", "9292");
+	}
 });
 
 test("unavailable or stopped Tailscale is silently ignored by the terminal offer", { timeout: 60_000 }, (t) => {
 	for (const config of [{ os: "Darwin", arch: "arm64" }, { tailscaleError: "synthetic Tailscale unavailable" }, { tailscaleState: "Stopped" }, { tailscaleState: "NeedsLogin" }]) {
 		const f = fixture(t, config);
-		const result = f.runTerminal("yes");
+		const result = f.runTerminal([["HUB_HOST", ""], ["HUB_PORT", ""], ["HUB_VERSION", ""]]);
 		passed(result);
-		assert.doesNotMatch(result.stdout + result.stderr, /Serve the hub on|synthetic Tailscale unavailable/);
+		assert.doesNotMatch(result.terminal, /Serve the hub on|synthetic Tailscale unavailable/);
 		assertSetting(f.files()[".env"], "COMPOSE_FILE", "compose.yml");
 	}
 	const missing = fixture(t);
-	const result = missing.runTerminal("yes", { PATH: missing.without("tailscale") });
+	const result = missing.runTerminal([["HUB_HOST", ""], ["HUB_PORT", ""], ["HUB_VERSION", ""]], { PATH: missing.without("tailscale") });
 	passed(result);
-	assert.doesNotMatch(result.stdout + result.stderr, /Serve the hub on|tailscale.*(missing|required)/i);
+	assert.doesNotMatch(result.terminal, /Serve the hub on|tailscale.*(missing|required)/i);
 	assertSetting(missing.files()[".env"], "COMPOSE_FILE", "compose.yml");
 });
 
@@ -748,9 +863,9 @@ test("the terminal offer requires a valid local ts.net name and tailnet IPv4 add
 		{ tailscaleStatus: JSON.stringify({ BackendState: "Running", Self: {}, Peer: { other: { DNSName: "peer.tailnet.ts.net." } } }, null, 2) },
 	]) {
 		const f = fixture(t, config);
-		const result = f.runTerminal("yes");
+		const result = f.runTerminal([["HUB_HOST", ""], ["HUB_PORT", ""], ["HUB_VERSION", ""]]);
 		passed(result);
-		assert.doesNotMatch(result.stdout, /Serve the hub on/);
+		assert.doesNotMatch(result.terminal, /Serve the hub on/);
 		assertSetting(f.files()[".env"], "COMPOSE_FILE", "compose.yml");
 	}
 });

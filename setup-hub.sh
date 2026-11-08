@@ -18,6 +18,11 @@ Variables (put them before /bin/bash):
   ALLOW_ROOT=1   Allow an explicit root run; Docker is never installed or updated.
   HELP=1         Print this help without checks or changes (also: --help).
 
+In a terminal, unset HUB_HOST, HUB_VERSION and (for loopback) HUB_PORT are
+asked with defaults; Enter accepts them. A set variable is never asked,
+including an empty value; a set LOOPBACK_PORT also skips the port question.
+Without a terminal, nothing is asked and defaults are used.
+
 A fresh Linux install in a terminal, with HUB_HOST unset, offers the host's
 Tailscale name when up; Enter keeps loopback HTTP.
 
@@ -68,6 +73,14 @@ setup_ip_valid() {
 setup_tail_ip_valid() {
   setup_ip_valid "$1" && [[ $1 =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+$ ]]
 }
+
+setup_ask() (
+  exec 3<>/dev/tty || exit 0
+  [ -t 3 ] || exit 0
+  local reply
+  printf '%s ' "$1" >&3
+  if IFS= read -r reply <&3; then printf '%s\n' "$reply"; fi
+) 2>/dev/null
 
 setup_offer_tailnet() (
   exec 3<>/dev/tty || exit 0
@@ -194,7 +207,7 @@ setup_main() {
   local directory=${HUB_DIR:-$HOME/uberblick-remote}
   local host_given=${HUB_HOST+x} requested_host=${HUB_HOST:-}
   local port_given=${HUB_PORT+x}${LOOPBACK_PORT+x} requested_port=${HUB_PORT-${LOOPBACK_PORT-}}
-  local requested_version=${HUB_VERSION:-} os arch engine compose_version resolved=''
+  local version_given=${HUB_VERSION+x} requested_version=${HUB_VERSION:-} os arch engine compose_version resolved=''
   local web_host='' tail_host='' tail_ip='' https_ip='' loop_port=8080 files='' inferred=0 previous='' old_protocol=''
   local requested_project=${COMPOSE_PROJECT_NAME:-} project='' ids id workdir service running hub_id='' own_bindings='' volumes networks env_port=''
   local project_recorded=0 discovered_project='' container_project candidates
@@ -214,9 +227,6 @@ setup_main() {
   compose_version=$(docker compose version --short) || setup_fail 'Docker Compose 2.24.4+ is required: https://docs.docker.com/compose/install/'
   compose_version=${compose_version#v}
   setup_version_at_least "$compose_version" 2.24.4 || setup_fail "Docker Compose $compose_version is too old; requires 2.24.4+. Update: https://docs.docker.com/compose/install/"
-  if [ -n "$requested_version" ]; then
-    setup_version_valid "$requested_version" || setup_fail 'HUB_VERSION must be X.Y.Z, without hub-v. Choose https://github.com/uberblick-ai/uberblick-2/releases'
-  fi
   case "$directory" in /*) ;; *) directory=$PWD/$directory ;; esac
   if [ -d "$directory" ]; then directory=$(cd "$directory" && pwd -P); fi
   if [ -f "$directory/.env" ]; then
@@ -307,11 +317,20 @@ $(setup_bindings "$id")"
     requested_host=$(setup_offer_tailnet)
     if [ -n "$requested_host" ]; then host_given=x; fi
   fi
+  if [ -z "$host_given" ] && [ ! -f "$directory/.env" ]; then
+    requested_host=$(setup_ask 'HUB_HOST (DNS name for HTTPS; Enter for loopback HTTP) [loopback HTTP]:')
+    host_given=x
+  fi
   if [ -n "$host_given" ]; then
     if [ -z "$requested_host" ] && [ -n "${web_host:-$tail_host}" ]; then
       setup_fail 'route check: switching HTTPS back to loopback is unsupported. Keep HUB_HOST or follow REMOTE.md to change the deployment manually.'
     fi
     web_host=$requested_host; tail_host=''; tail_ip=''; files=''
+  fi
+  if [ -z "$port_given" ] && [ ! -f "$directory/.env" ] && [ -z "${web_host:-$tail_host}" ]; then
+    requested_port=$(setup_ask 'HUB_PORT [8080]:')
+    requested_port=${requested_port:-8080}
+    port_given=x
   fi
   if [ -n "$port_given" ]; then loop_port=$requested_port; fi
   case "$loop_port" in '' | *[!0-9]* | 0* | ??????*) setup_fail 'HUB_PORT / LOOPBACK_PORT must be an integer from 1 to 65535.' ;; esac
@@ -343,6 +362,10 @@ $(setup_bindings "$id")"
   esac
   setup_ip_valid "$bind" || setup_fail 'route check: HTTPS_BIND_IP or TAILSCALE_IP is not an IPv4 bind address. Correct .env or supply HUB_HOST.'
   setup_check_port
+  if [ -z "$version_given" ]; then requested_version=$(setup_ask 'HUB_VERSION [latest]:'); fi
+  if [ -n "$requested_version" ]; then
+    setup_version_valid "$requested_version" || setup_fail 'HUB_VERSION must be X.Y.Z, without hub-v. Choose https://github.com/uberblick-ai/uberblick-2/releases'
+  fi
   step='release selection'; fix='Choose a published hub-vX.Y.Z release and re-run.'
   url=https://github.com/uberblick-ai/uberblick-2/releases
   if [ -n "$requested_version" ]; then
@@ -416,6 +439,7 @@ $(setup_bindings "$id")"
   target=${web_host:-$tail_host}
   if [ -n "$target" ]; then url=https://$target; else url=http://localhost:$loop_port; fi
   printf '\nOpen %s\nClaim a fresh hub with: ub auth login %s\nThe first GitHub sign-in becomes the hub\047s administrator. Sign in now.\n' "$url" "$url"
+  printf '\nHub directory: %s\nCheck the hub from that directory:\n  docker compose exec hub ub-hub status\n  docker compose exec hub ub-hub doctor\n' "$directory"
   setup_cleanup
   trap - EXIT
 }
