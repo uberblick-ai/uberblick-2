@@ -23,9 +23,9 @@ function pull(state = "OPEN", isDraft = false, merged = false) {
   return { __typename: "PullRequest", state, isDraft, merged };
 }
 
-function answer(items: readonly (ReturnType<typeof issue> | ReturnType<typeof pull> | null)[], errors?: unknown[]) {
+function answer(items: readonly (ReturnType<typeof issue> | ReturnType<typeof pull> | null)[], errors?: unknown[], visibility = "PRIVATE") {
   return Response.json({
-    data: Object.fromEntries(items.map((value, index) => [`r${index}`, value === null ? null : { item: value }])),
+    data: Object.fromEntries(items.map((value, index) => [`r${index}`, value === null ? null : { item: value, visibility }])),
     ...(errors === undefined ? {} : { errors }),
   });
 }
@@ -46,6 +46,27 @@ afterEach(async () => {
 });
 
 describe("ub open GitHub item states", () => {
+  it.each(["PUBLIC", "PRIVATE", "INTERNAL"])("shares only known state, original observation time and %s visibility", async visibility => {
+    let now = 1_000;
+    const entry = item(1);
+    const fetchImpl = vi.fn<typeof fetch>(async () => answer([issue()], undefined, visibility));
+    const value = lookup({ fetchImpl, now: () => now });
+    const initial = await value.read([entry]);
+    expect(initial.observations).toEqual({ [githubItemKey(entry)]: { state: "issue-open", seenAt: 1_000, isPublic: visibility === "PUBLIC" } });
+    expect(String(fetchImpl.mock.calls[0]?.[1]?.body)).toContain("visibility");
+    now += MINUTE;
+    expect((await value.read([entry])).observations).toEqual(initial.observations);
+    now += 4 * MINUTE;
+    expect((await value.read([entry])).observations[githubItemKey(entry)]?.seenAt).toBe(now);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not share unknown state or unrecognized visibility", async () => {
+    expect((await lookup({ fetchImpl: async () => answer([null]) }).read([item(1)])).observations).toEqual({});
+    const result = await lookup({ fetchImpl: async () => answer([issue()], undefined, "UNKNOWN") }).read([item(1)]);
+    expect(result.states[githubItemKey(item(1))]).toBe("issue-open");
+    expect(result.observations).toEqual({});
+  });
   it("reads every supported issue and pull state in one private authenticated batch", async () => {
     const items = [item(1), item(2), item(3), item(4), item(5), item(6, "pull-request"),
       item(7, "pull-request"), item(8, "pull-request"), item(9, "pull-request")];

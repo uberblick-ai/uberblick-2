@@ -64,7 +64,7 @@ export function startHistoryRefresher(replicas: Replicas): { close(): Promise<vo
       }
 
       const dataVersion = store.dataVersion();
-      const pendingCanAdvance = sync.state().status === "connected" && store.pendingRooms().length > 0;
+      const pendingCanAdvance = sync.state().status === "connected" && replicas.pendingSyncRooms().length > 0;
       if (dirty || dataVersion !== lastDataVersion || pendingCanAdvance) {
         dirty = false;
         lastDataVersion = dataVersion;

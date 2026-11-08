@@ -20,7 +20,7 @@ it("keeps hub-free settings writes synchronous with a remote URL and device logi
   try {
     expect(workspace.replicas.sync.enabled).toBe(false);
     expect(workspace.replicas.attachedReplicas().map((replica) => replica.awareness.getLocalState()))
-      .toEqual([null, null, null]);
+      .toEqual([null, null, null, null]);
     setWorkspaceName(workspace.replicas.settings().doc, "Offline creation");
     workspace.replicas.assertHealthy();
     expect(workspace.close()).toBeUndefined();

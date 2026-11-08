@@ -20,7 +20,7 @@ import { Server, type Connection, type Hocuspocus, type ServerConfiguration } fr
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
 import * as Y from "yjs";
-import { getWorkspaceName, setWorkspaceName, settingsRoom } from "@uberblick/schema";
+import { getWorkspaceName, setWorkspaceName, settingsRoom, githubItemsRoom, readGitHubItemObservations, writeGitHubItemObservation } from "@uberblick/schema";
 import {
   CredentialAdmission,
   type CredentialContext,
@@ -254,6 +254,28 @@ function nextClientConnection(hocuspocus: Hocuspocus<CredentialContext>) {
 }
 
 describe("credential admission on a composed server", () => {
+  it("lets ordinary members share GitHub observations while read-only connections cannot change them", async () => {
+    const rig = await startServer();
+    const room = githubItemsRoom(WORKSPACE);
+    const member = connect({ port: rig.port, room, token: await credentialToken(issue(rig.registry, "member")) });
+    const observer = connect({ port: rig.port, room, token: await credentialToken(issue(rig.registry, "read-only", [WORKSPACE], "observer"), WORKSPACE, { scope: "read-only" }) });
+    await waitFor("both members' GitHub-state room handshakes", Promise.all([member.synced, observer.synced]));
+    expect(rig.memberships.ownRole(WORKSPACE, "person")).toBe("member");
+    const observed = { state: "issue-open", seenAt: Date.now(), isPublic: false } as const;
+    writeGitHubItemObservation(member.doc, "acme/notes#1:issue", observed);
+    await waitUntil("the member's state to reach a read-only reader", () =>
+      readGitHubItemObservations(observer.doc).get("acme/notes#1:issue")?.state === "issue-open" && !member.provider.hasUnsyncedChanges);
+    const refused = new Promise<void>(resolve => observer.provider.on("message", ({ message }: onMessageParameters) => {
+      message.readVarString();
+      if (message.readVarUint() === MessageType.SyncStatus && message.readVarUint() === 0) resolve();
+    }));
+    writeGitHubItemObservation(observer.doc, "acme/notes#1:issue", { ...observed, state: "issue-completed", seenAt: observed.seenAt + 1 });
+    await waitFor("the read-only observation write to be refused", refused);
+    expect(readGitHubItemObservations(rig.hocuspocus.documents.get(room)!).get("acme/notes#1:issue")).toEqual(observed);
+    expect(readGitHubItemObservations(member.doc).get("acme/notes#1:issue")).toEqual(observed);
+    expect(rig.database.connection.prepare("SELECT COUNT(*) AS count FROM document_revisions").get()).toMatchObject({ count: 0 });
+  });
+
   it.each([
     ["read-only", "read-only", true],
     ["read-only", "read-write", false],

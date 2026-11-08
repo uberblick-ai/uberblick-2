@@ -4,8 +4,10 @@ import {
   appendBlock,
   deleteDirectoryEntry,
   DIRECTORY_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
   getMeta,
   getWorkspaceName,
+  readGitHubItemObservations,
   initDoc,
   listDeletedDirectoryUuids,
   listDirectory,
@@ -16,6 +18,7 @@ import {
   SIDEBAR_SUFFIX,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
+  writeGitHubItemObservation,
 } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
@@ -100,6 +103,9 @@ it("copies snapshot tails, archived content and workspace roots without touching
   sidebar.getMap("groups").set("pinned-group", "Pinned");
   sidebar.getArray("pins:pinned-group").push([{ uuid: LIVE, since: 0 }]);
   persist(store, SIDEBAR_SUFFIX, sidebar);
+  const githubItems = doc();
+  writeGitHubItemObservation(githubItems, "acme/notes#1:issue", { state: "issue-open", seenAt: Date.now(), isPublic: false });
+  persist(store, GITHUB_ITEMS_SUFFIX, githubItems);
   for (const id of [LIVE, ARCHIVED, DELETED, ORPHAN]) {
     const note = doc();
     initDoc(note, { uuid: id, title: id, description: "Content and annotations" });
@@ -121,7 +127,8 @@ it("copies snapshot tails, archived content and workspace roots without touching
   const snapshot = readWorkspaceFork(path, `source-${WORKSPACE}`);
   expect(getWorkspaceName(state(snapshot, SETTINGS_SUFFIX))).toBe("Source");
   expect(snapshot.missing).toEqual([]);
-  expect(snapshot.rooms.map(room => room.id).sort()).toEqual([DIRECTORY_SUFFIX, SETTINGS_SUFFIX, SIDEBAR_SUFFIX, LIVE, ARCHIVED, ORPHAN].sort());
+  expect(snapshot.rooms.map(room => room.id).sort()).toEqual([DIRECTORY_SUFFIX, SETTINGS_SUFFIX, SIDEBAR_SUFFIX, GITHUB_ITEMS_SUFFIX, LIVE, ARCHIVED, ORPHAN].sort());
+  expect(readGitHubItemObservations(state(snapshot, GITHUB_ITEMS_SUFFIX))).toEqual(readGitHubItemObservations(githubItems));
   expect(listDirectory(state(snapshot, DIRECTORY_SUFFIX), { includeDeleted: true }).find(entry => entry.uuid === ARCHIVED)?.deleted).toBe(true);
   expect(listDeletedDirectoryUuids(state(snapshot, DIRECTORY_SUFFIX))).toEqual([DELETED]);
   expect(getMeta(state(snapshot, ARCHIVED)).uuid).toBe(ARCHIVED);
@@ -201,4 +208,24 @@ it("refuses a foreign source claim and a pre-existing destination without changi
   expect(() => readWorkspaceFork(path, FORK)).toThrow("different workspace");
   expect(() => writeWorkspaceFork(path, FORK, { rooms: [], missing: [] })).toThrow("already exists");
   expect(authoritativeState(path)).toEqual(before);
+});
+
+it("forks a complete workspace even when optional observations are corrupt or cannot be copied", () => {
+  const { path, store, directory } = source();
+  directory.getMap("docs").delete(LIVE);
+  persist(store, DIRECTORY_SUFFIX, directory);
+  store.appendUpdate(roomForDoc(WORKSPACE, GITHUB_ITEMS_SUFFIX), new Uint8Array([255]), "remote");
+  const snapshot = readWorkspaceFork(path, WORKSPACE);
+  expect(snapshot.missing).toEqual([]);
+  expect(snapshot.rooms.some(room => room.id === GITHUB_ITEMS_SUFFIX)).toBe(false);
+  const destination = tempDatabasePath();
+  const original = MirrorStore.prototype.appendUpdate;
+  vi.spyOn(MirrorStore.prototype, "appendUpdate").mockImplementation(function(this: MirrorStore, room, ...args) {
+    if (room === roomForDoc(FORK, GITHUB_ITEMS_SUFFIX)) throw new Error("optional room copy failed");
+    return original.call(this, room, ...args);
+  });
+  expect(() => writeWorkspaceFork(destination, FORK, { ...snapshot,
+    rooms: [...snapshot.rooms, { id: GITHUB_ITEMS_SUFFIX, state: new Uint8Array() }],
+  })).not.toThrow();
+  expect(readWorkspaceFork(destination, FORK).missing).toEqual([]);
 });

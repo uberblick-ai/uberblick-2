@@ -120,7 +120,7 @@ export async function createMcpEngine(
       const dataVersion = store.dataVersion();
       const pendingCanAdvance =
         replicas.sync.state().status === "connected" &&
-        store.pendingRooms().length > 0;
+        replicas.pendingSyncRooms().length > 0;
       if (!dirty && dataVersion === lastDataVersion && !pendingCanAdvance) {
         // An idle connected replica still renews its acknowledgement time.
         // The replica paces metadata writes; no hub wait or refresh is needed.

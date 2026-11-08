@@ -30,7 +30,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import type { Hub } from "@uberblick/hub";
 import { DOC_DELETED_REASON, STORE_BUSY_REASON, STORE_REFUSED_REASON, wrapToken } from "@uberblick/schema/protocol";
-import { deleteDirectoryEntry, directoryRoom, getBlocks, getDirectoryMap, getWorkspaceName, initDoc, insertBlock, isDirectoryEntryDeleted, setWorkspaceName, settingsRoom, upsertDirectoryEntry } from "@uberblick/schema";
+import { deleteDirectoryEntry, directoryRoom, getBlocks, getDirectoryMap, getWorkspaceName, githubItemsRoom, initDoc, insertBlock, isDirectoryEntryDeleted, setWorkspaceName, settingsRoom, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -372,6 +372,33 @@ it("redials after a busy store close and republishes the last local write", asyn
   await waitFor("the pre-close write to reach the hub", () =>
     getBlocks(observer.doc).some((block) => block.text === "before the busy close"),
   );
+}, TEST_TIMEOUT_MS);
+
+it("silently detaches the optional GitHub record on an older hub refusal and keeps other rooms live", async () => {
+  const hub = await startHub(0, databasePath());
+  const otherUuid = randomUUID();
+  const otherRoom = `${WORKSPACE}/${otherUuid}`;
+  const other = await openTab(otherRoom, hub.port);
+  const optionalRoom = githubItemsRoom(WORKSPACE);
+  const optional = await openTab(optionalRoom, hub.port);
+  teardown.push(() => sharedSocket(other.connection).destroy());
+  await seedDocument(other, otherUuid);
+  await waitFor("the GitHub room to join", () => optional.latest().synced);
+  for (const connection of hub.hocuspocus.documents.get(optionalRoom)!.getConnections()) {
+    connection.send(wireFrame(optionalRoom, MessageType.Auth, 1, ...wireString("room-name-invalid")));
+  }
+  await waitFor("the optional room to become unavailable", () => optional.latest().unavailable === true);
+  expect(optional.history.some((status) => status.authFailed)).toBe(false);
+  expect(optional.latest()).toMatchObject({ hasAnswered: true, writable: false, unsyncedChanges: 0 });
+  expect(optional.connection.provider.isAttached).toBe(false);
+  await expectLiveWrite(other, hub.port, otherRoom, "other rooms still sync after the optional refusal");
+  expect(other.latest().synced).toBe(true);
+  optional.release();
+  const reopened = await openTab(optionalRoom, hub.port);
+  expect(reopened.latest().unavailable).toBe(true);
+  expect(reopened.latest().authFailed).toBe(false);
+  expect(reopened.connection.provider.isAttached).toBe(false);
+  expect(injected.notices).toEqual([]);
 }, TEST_TIMEOUT_MS);
 
 it("keeps a store-refused room read-only across reacquire without dropping peers", async () => {

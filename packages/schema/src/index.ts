@@ -76,6 +76,8 @@ export { githubItemUrl, githubReference, githubRepository } from "./github-refer
 export type { GitHubItem } from "./github-reference.js";
 export { githubItemKey, githubItemStateTtl, isGitHubItemState } from "./github-item-state.js";
 export type { GitHubItemState } from "./github-item-state.js";
+export { readGitHubItemObservations, writeGitHubItemObservation } from "./github-item-observations.js";
+export type { GitHubItemObservation } from "./github-item-observations.js";
 export { INLINE_ICONS } from "./inline-icons.js";
 export type { InlineIconName } from "./inline-icons.js";
 export { isCalloutIcon, isCalloutVariant } from "./callout.js";
@@ -153,11 +155,13 @@ export type {
 
 export {
   DIRECTORY_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
   MAX_ROOM_NAME_LENGTH,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   canonicalDocumentUuid,
   directoryRoom,
+  githubItemsRoom,
   isCanonicalRoom,
   isRoomNameWithinBounds,
   parseRoom,

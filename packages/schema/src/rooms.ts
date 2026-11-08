@@ -12,6 +12,8 @@ export const SIDEBAR_SUFFIX = "_sidebar";
 
 export const SETTINGS_SUFFIX = "_settings";
 
+export const GITHUB_ITEMS_SUFFIX = "_github_items";
+
 const SEPARATOR = "/";
 
 /** Transport admission bound, independent of the structural and canonical grammars. */
@@ -55,6 +57,10 @@ export function settingsRoom(workspaceId: string): string {
   return roomForDoc(workspaceId, SETTINGS_SUFFIX);
 }
 
+export function githubItemsRoom(workspaceId: string): string {
+  return roomForDoc(workspaceId, GITHUB_ITEMS_SUFFIX);
+}
+
 export interface ParsedRoom {
   /** The workspace's uuid, never a decorated spelling of it. */
   workspaceId: string;
@@ -94,6 +100,7 @@ const CANONICAL_DOCUMENT_IDS: ReadonlySet<string> = new Set([
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
   SETTINGS_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
 ]);
 
 /**

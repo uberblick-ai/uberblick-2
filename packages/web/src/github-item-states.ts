@@ -1,23 +1,59 @@
-import { githubItemKey, githubItemStateTtl } from "@uberblick/schema";
-import type { GitHubItem, GitHubItemState } from "@uberblick/schema";
+import { githubItemKey, githubItemStateTtl, readGitHubItemObservations } from "@uberblick/schema";
+import type { GitHubItem, GitHubItemState, GitHubItemObservation } from "@uberblick/schema";
+import type * as Y from "yjs";
 import type { GitHubItemStateReader, GitHubItemStateReadings } from "./shell/github-item-states.js";
 
 export interface GitHubItemStates {
   get(item: GitHubItem): GitHubItemState | null;
+  /** Present only for the workspace's fallback, never a personal reading. */
+  seenAt?(item: GitHubItem): number | null;
   subscribe(items: readonly GitHubItem[], listener: () => void): () => void;
 }
 
 interface Subscription {
   items: ReadonlyMap<string, GitHubItem>;
   listener: () => void;
+  shown: Map<string, string>;
 }
 
-/** A workspace's transient readings, shared by all pills on the rendered page. */
-export function createGitHubItemStates(read: GitHubItemStateReader): GitHubItemStates {
+/** Fresh personal readings, or newer cached readings during refresh, over the live workspace fallback. */
+export function createGitHubItemStates(read: GitHubItemStateReader | null, shared: Y.Doc | null = null): GitHubItemStates {
   const cache = new Map<string, { state: GitHubItemState | null; expires: number }>();
   const subscriptions = new Set<Subscription>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: AbortController | null = null;
+  let clock: ReturnType<typeof setInterval> | null = null;
+  let recorded = shared === null ? new Map<string, GitHubItemObservation>() : readGitHubItemObservations(shared);
+
+  const reading = (key: string): { state: GitHubItemState | null; seenAt: number | null } => {
+    if (shared !== null && subscriptions.size === 0) recorded = readGitHubItemObservations(shared);
+    const own = cache.get(key);
+    const fallback = recorded.get(key);
+    if (own?.state != null && (own.expires > Date.now() || subscriptions.size > 0 &&
+      (fallback === undefined || own.expires - githubItemStateTtl(own.state) > fallback.seenAt))) {
+      return { state: own.state, seenAt: null };
+    }
+    return { state: fallback?.state ?? null, seenAt: fallback?.seenAt ?? null };
+  };
+  const signature = (key: string): string => {
+    const { state, seenAt } = reading(key);
+    return JSON.stringify([state, seenAt, seenAt === null ? null : Math.floor(Math.max(0, Date.now() - seenAt) / 60_000)]);
+  };
+  const notify = (): void => {
+    for (const subscription of [...subscriptions]) {
+      let changed = false;
+      for (const key of subscription.items.keys()) {
+        const next = signature(key);
+        if (subscription.shown.get(key) !== next) changed = true;
+        subscription.shown.set(key, next);
+      }
+      if (changed) subscription.listener();
+    }
+  };
+  const sharedChanged = (): void => {
+    if (shared !== null) recorded = readGitHubItemObservations(shared);
+    notify();
+  };
 
   const activeItems = (): Map<string, GitHubItem> => {
     const active = new Map<string, GitHubItem>();
@@ -32,7 +68,7 @@ export function createGitHubItemStates(read: GitHubItemStateReader): GitHubItemS
   };
   const schedule = (): void => {
     cancelTimer();
-    if (pending !== null) return;
+    if (pending !== null || read === null) return;
     const active = activeItems();
     if (active.size === 0) return;
     let expires = Infinity;
@@ -42,7 +78,8 @@ export function createGitHubItemStates(read: GitHubItemStateReader): GitHubItemS
   };
   const refresh = async (): Promise<void> => {
     const items = activeItems();
-    if (items.size === 0 || pending !== null) return;
+    if (items.size === 0 || pending !== null || read === null) return;
+    notify();
     const controller = new AbortController();
     pending = controller;
     let answer: GitHubItemStateReadings = { states: {} };
@@ -50,11 +87,9 @@ export function createGitHubItemStates(read: GitHubItemStateReader): GitHubItemS
     catch { /* A failed optional reading has the same presentation as no answer. */ }
     if (pending !== controller) return;
     pending = null;
-    const changed = new Set<string>();
     for (const key of items.keys()) {
       const state = answer.states[key] ?? null;
       const previous = cache.get(key);
-      if ((previous?.state ?? null) !== state) changed.add(key);
       const remaining = answer.refreshAfterMs?.[key];
       const expires = remaining !== undefined
         ? Date.now() + remaining
@@ -62,17 +97,22 @@ export function createGitHubItemStates(read: GitHubItemStateReader): GitHubItemS
           ? previous.expires : Date.now() + githubItemStateTtl(state);
       cache.set(key, { state, expires });
     }
-    for (const subscription of [...subscriptions]) {
-      if ([...subscription.items.keys()].some((key) => changed.has(key))) subscription.listener();
-    }
+    notify();
     schedule();
   };
 
   return {
-    get: (item) => cache.get(githubItemKey(item))?.state ?? null,
+    get: (item) => reading(githubItemKey(item)).state,
+    seenAt: (item) => reading(githubItemKey(item)).seenAt,
     subscribe: (items, listener) => {
       if (items.length === 0) return () => {};
-      const subscription = { items: new Map(items.map((item) => [githubItemKey(item), item])), listener };
+      if (subscriptions.size === 0 && shared !== null) {
+        recorded = readGitHubItemObservations(shared);
+        shared.on("update", sharedChanged);
+        clock = setInterval(notify, 60_000);
+      }
+      const subscription = { items: new Map(items.map((item) => [githubItemKey(item), item])), listener,
+        shown: new Map(items.map((item) => [githubItemKey(item), signature(githubItemKey(item))])) };
       subscriptions.add(subscription);
       schedule();
       return () => {
@@ -81,6 +121,9 @@ export function createGitHubItemStates(read: GitHubItemStateReader): GitHubItemS
           cancelTimer();
           pending?.abort();
           pending = null;
+          shared?.off("update", sharedChanged);
+          if (clock !== null) clearInterval(clock);
+          clock = null;
         } else schedule();
       };
     },

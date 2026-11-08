@@ -69,7 +69,7 @@ describe("the status replica reading", () => {
       });
       expect(status.hub.status).toBe("disabled");
       expect(status.rooms.map(({ room }) => room).sort()).toEqual([
-        `${WORKSPACE}/_directory`, `${WORKSPACE}/_settings`, `${WORKSPACE}/_sidebar`,
+        `${WORKSPACE}/_directory`, `${WORKSPACE}/_github_items`, `${WORKSPACE}/_settings`, `${WORKSPACE}/_sidebar`,
       ]);
       expect(server).not.toHaveBeenCalled();
       expect(engine).not.toHaveBeenCalled();

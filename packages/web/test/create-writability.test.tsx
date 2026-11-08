@@ -6,11 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   directoryRoom,
+  canonicalDocumentUuid,
   getDirectoryEntry,
   getMeta,
   parseRoom,
   sidebarRoom,
-  settingsRoom,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { acquireRoom } from "../src/collab/rooms.js";
@@ -116,10 +116,7 @@ it.each(["sidebar", "palette"] as const)("writes neither room until a new room c
   await act(async () => create.click());
 
   const pending = [...rooms.values()].find(
-    ({ connection }) =>
-      connection.room !== directoryRoom(WORKSPACE) &&
-      connection.room !== sidebarRoom(WORKSPACE) &&
-      connection.room !== settingsRoom(WORKSPACE),
+    ({ connection }) => canonicalDocumentUuid(parseRoom(connection.room).uuid) !== null,
   );
   if (pending === undefined) throw new Error("new room was not acquired");
   const uuid = parseRoom(pending.connection.room).uuid;
@@ -153,9 +150,7 @@ it("holds an already admitted create until the page acquires its room", async ()
   admitNewRooms = true;
   await act(async () => within(host).getByRole("button", { name: "+ New page" }).click());
   const pending = [...rooms.values()].find(
-    ({ connection }) => connection.room !== directoryRoom(WORKSPACE) &&
-      connection.room !== sidebarRoom(WORKSPACE) &&
-      connection.room !== settingsRoom(WORKSPACE),
+    ({ connection }) => canonicalDocumentUuid(parseRoom(connection.room).uuid) !== null,
   );
   if (pending === undefined) throw new Error("new room was not acquired");
   const release = creationRelease(pending.connection.room);
@@ -204,10 +199,7 @@ it("cancels a deferred create when the reader leaves its room", async () => {
   const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" });
   await act(async () => create?.click());
   const pending = [...rooms.values()].find(
-    ({ connection }) =>
-      connection.room !== directoryRoom(WORKSPACE) &&
-      connection.room !== sidebarRoom(WORKSPACE) &&
-      connection.room !== settingsRoom(WORKSPACE),
+    ({ connection }) => canonicalDocumentUuid(parseRoom(connection.room).uuid) !== null,
   );
   if (pending === undefined) throw new Error("new room was not acquired");
   const uuid = parseRoom(pending.connection.room).uuid;
@@ -245,10 +237,7 @@ it.each([
     await act(async () => create?.click());
     const directory = room(directoryRoom(WORKSPACE));
     const pending = [...rooms.values()].find(
-      ({ connection }) =>
-        connection.room !== directoryRoom(WORKSPACE) &&
-        connection.room !== sidebarRoom(WORKSPACE) &&
-        connection.room !== settingsRoom(WORKSPACE),
+      ({ connection }) => canonicalDocumentUuid(parseRoom(connection.room).uuid) !== null,
     );
     if (pending === undefined) throw new Error("new room was not acquired");
     const uuid = parseRoom(pending.connection.room).uuid;

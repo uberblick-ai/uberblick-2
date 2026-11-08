@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createTeamHub } from "@uberblick/hub/team";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
-import { getMeta, isDirectoryEntryArchived, roomForDoc } from "@uberblick/schema";
+import { getMeta, isDirectoryEntryArchived, roomForDoc, githubItemsRoom, writeGitHubItemObservation } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { writeHubLogin } from "../src/auth-store.js";
@@ -12,6 +12,7 @@ import { tryAcquireHistoryRefresherRole } from "../src/history-refresher-role.js
 import { acquireInitLock } from "../src/init-lock.js";
 import { mutateDocumentRevision, readDocumentHistory, readDocumentRevision } from "../src/revision-client.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
+import { MirrorStore } from "../src/store.js";
 import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startServer, tempDir, testConfig, waitUntil, WORKSPACE } from "./helpers.js";
 
 const clients: Array<() => unknown> = [];
@@ -61,6 +62,37 @@ async function historyWorkspace() {
   return { hub, credentials: hub.credentials, principals: hub.principals, memberships: hub.memberships,
     principal, issued, env, endpoint, config };
 }
+
+it("mirrors document history with a pending optional room an older hub does not know", async () => {
+  const { hub, config } = await historyWorkspace();
+  const author = await startServer(config());
+  clients.push(() => author.close());
+  const live = await author.ok("create_doc", { title: "History on an older hub", description: "Optional GitHub observations cannot hold up document history.",
+    blocks: [{ type: "paragraph", text: "Ordinary document content" }] });
+  expect(await author.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+  const revision = (await author.ok("name_revision", { uuid: live.uuid, name: "Recorded" })).revision;
+  const optional = githubItemsRoom(WORKSPACE);
+  hub.hocuspocus.configuration.extensions.unshift({ onAuthenticate: async ({ documentName }) => {
+    if (documentName === optional) throw Object.assign(new Error("unsupported optional room"), { reason: "room-name-invalid" });
+  } });
+  const readerConfig = config();
+  const store = new MirrorStore(readerConfig.databasePath, WORKSPACE);
+  const observations = new Y.Doc();
+  try {
+    writeGitHubItemObservation(observations, "acme/notes#1:issue", { state: "issue-open", seenAt: Date.now(), isPublic: true });
+    store.appendUpdate(optional, Y.encodeStateAsUpdate(observations), "local");
+  } finally { observations.destroy(); store.close(); }
+  const reader = await startServer(readerConfig);
+  clients.push(() => reader.close());
+  const cache = new HistoryCache(readerConfig.databasePath, WORKSPACE, readerConfig.deviceLogin.env);
+  clients.push(() => cache.close());
+  const token = ready(cache.open({ hub: readerConfig.hubUrl, workspace: WORKSPACE, account: "12345" }));
+  await waitUntil("ordinary document history despite the unsupported record", () => ready(cache.readSnapshot(token, live.uuid, revision.id)) !== null);
+  expect(await reader.ok("sync_status")).toMatchObject({ caughtUp: true, unsyncedChanges: 0, hub: { status: "connected" } });
+  expect(reader.instance.replicas.sync.state().authRecovery).toBeUndefined();
+  expect(reader.instance.store.pendingRooms().map(room => room.room)).toContain(optional);
+  expect(reader.instance.replicas.pendingSyncRooms()).toEqual([]);
+});
 
 it("mirrors from an idle MCP server, hands cached history to a browser contender and retains it through device refusal", async () => {
   const { hub, credentials, issued, env, endpoint, config } = await historyWorkspace();

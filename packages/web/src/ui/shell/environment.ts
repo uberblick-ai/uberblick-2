@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { githubItemsRoom } from "@uberblick/schema";
 import { browserSignInRequired, configuredWorkspaces, defaultPresenceName, endpointLabel, hubEndpoint, localServing, servedWorkspaceNames } from "../../config.js";
 import type { HubEndpoint } from "../../config.js";
 import { randomIdentity } from "../../collab/identity.js";
@@ -7,7 +8,7 @@ import { createDocumentSearchClient } from "../../shell/document-search.js";
 import { createDocumentRevisionsClient } from "../../shell/document-revisions.js";
 import { createGitHubItemStateClient } from "../../shell/github-item-states.js";
 import { createGitHubItemStates } from "../../github-item-states.js";
-import { useHubEndpoint, useIdentity, useLocalSessionMissing, useSetting } from "../hooks.js";
+import { useHubEndpoint, useIdentity, useLocalSessionMissing, useRoom, useSetting } from "../hooks.js";
 import { parseRoute } from "../route.js";
 import { useServingAccount } from "../status/serving-account.js";
 import { useAccessReading, useHubAdministration } from "../settings/hub-administration.js";
@@ -67,11 +68,11 @@ export function useShellEnvironment(path: string) {
       : createAccountClient(workspaceUuid, identity.name),
     [identity.name, serving, workspaceUuid],
   );
+  const githubItems = useRoom(roomReady && workspaceUuid !== null ? githubItemsRoom(workspaceUuid) : null, defaultIdentity, false);
   const githubStates = useMemo(
-    () => serving === null || workspaceUuid === null
-      ? null
-      : createGitHubItemStates(createGitHubItemStateClient(workspaceUuid, identity.name)),
-    [identity.name, serving, workspaceUuid],
+    () => workspaceUuid === null ? null : createGitHubItemStates(
+      serving === null ? null : createGitHubItemStateClient(workspaceUuid, identity.name), githubItems?.ydoc ?? null),
+    [githubItems, identity.name, serving, workspaceUuid],
   );
   const account = useServingAccount(accountClient);
   const memberReading = useAccessReading(workspaceUuid, serving, identity.name, path,

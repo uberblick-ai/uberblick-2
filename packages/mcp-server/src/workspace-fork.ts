@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   canonicalDocumentUuid,
   DIRECTORY_SUFFIX,
+  GITHUB_ITEMS_SUFFIX,
   getMeta,
   listDeletedDirectoryUuids,
   listDirectory,
@@ -102,6 +103,16 @@ function readForkSnapshot(db: DatabaseSync, workspaceId: string): WorkspaceForkS
       doc.destroy();
     }
   }
+  try {
+    const doc = read(GITHUB_ITEMS_SUFFIX);
+    try {
+      rooms.push({ id: GITHUB_ITEMS_SUFFIX, state: Y.encodeStateAsUpdate(doc) });
+    } finally {
+      doc.destroy();
+    }
+  } catch {
+    // Optional observations must never make an otherwise complete fork fail.
+  }
   return { rooms, missing };
 }
 
@@ -112,7 +123,13 @@ export function writeWorkspaceFork(databasePath: string, workspaceId: string, sn
   const uuid = parseWorkspaceId(workspaceId).uuid;
   const store = new MirrorStore(databasePath, uuid);
   try {
-    for (const room of snapshot.rooms) store.appendUpdate(roomForDoc(uuid, room.id), room.state, "local");
+    for (const room of snapshot.rooms) {
+      try {
+        store.appendUpdate(roomForDoc(uuid, room.id), room.state, "local");
+      } catch (error) {
+        if (room.id !== GITHUB_ITEMS_SUFFIX) throw error;
+      }
+    }
   } finally {
     store.close();
   }

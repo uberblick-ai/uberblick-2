@@ -49,6 +49,7 @@ function fakeEngine(
         status: controls.connected ? "connected" : "hub-down",
       }),
       isDraining: () => controls.draining,
+      isRoomUnavailable: () => false,
     },
   } as unknown as Replicas;
   const engine = {

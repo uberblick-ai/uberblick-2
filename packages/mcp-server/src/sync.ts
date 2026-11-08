@@ -25,7 +25,7 @@ import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { hubTransportProblem, isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
-import { settingsRoom } from "@uberblick/schema";
+import { githubItemsRoom, settingsRoom } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { HubConnection } from "./hub-connection.js";
@@ -472,6 +472,8 @@ export class HubSync {
   private readonly providers = new Map<string, AdmittedHocuspocusProvider>();
 
   private readonly deletedRooms = new Set<string>();
+
+  private readonly unavailableRooms = new Set<string>();
 
   private readonly onDocDeleted: ((room: string) => void) | undefined;
 
@@ -992,7 +994,7 @@ export class HubSync {
    * Disabled and terminal clients attach nothing.
    */
   attach({ room, doc, awareness }: AttachOptions): void {
-    if (this.socket === null || this.stopped || this.providers.has(room) || this.deletedRooms.has(room)) {
+    if (this.socket === null || this.stopped || this.providers.has(room) || this.deletedRooms.has(room) || this.unavailableRooms.has(room)) {
       return;
     }
 
@@ -1084,6 +1086,12 @@ export class HubSync {
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
         const authenticated = provider.hasCurrentSync();
         provider.blockUntilToken();
+        if (reason === "room-name-invalid" && room === githubItemsRoom(this.config.workspaceId)) {
+          this.unavailableRooms.add(room);
+          this.releaseRoom(room);
+          this.stateChanged();
+          return;
+        }
         if (isDocDeletedReason(reason)) {
           this.detach(room);
           if (authenticated) this.onDocDeleted?.(room);
@@ -1137,7 +1145,7 @@ export class HubSync {
         }
         // A closed room releases its slot even without an auth answer.
         this.roomAnswered(room);
-        if (this.deletedRooms.has(room)) return;
+        if (this.deletedRooms.has(room) || this.unavailableRooms.has(room)) return;
         // Rebuild only for a room close; hubDisownedRoom ignores socket loss.
         this.hubDisownedRoom();
       },
@@ -1409,6 +1417,11 @@ export class HubSync {
   /** Current hub admission, after the authoritative room has arrived. */
   canWriteRoom(room: string): boolean {
     return this.isRoomQuiet(room) && this.providers.get(room)?.authorizedScope === "read-write";
+  }
+
+  /** An older hub can lack optional workspace metadata without blocking documents. */
+  isRoomUnavailable(room: string): boolean {
+    return this.unavailableRooms.has(room);
   }
 
   /** Bind downloaded history to the account offered on this room's current admission. */

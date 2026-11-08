@@ -84,7 +84,7 @@ export function CommentText({ text, docLinks, mainRepository = null }: {
     if (href !== undefined) {
       const item = githubItemUrl(href);
       const pill = item !== null && githubLinkNamesItem(group.map((part) => part.text).join(""), href, item)
-        ? githubPillPresentation(item, mainRepository, states?.get(item) ?? null) : null;
+        ? githubPillPresentation(item, mainRepository, states?.get(item) ?? null, states?.seenAt?.(item) ?? null) : null;
       result.push(<a key={key} className="ub-link" href={href} target="_blank" rel="noopener noreferrer nofollow"
         aria-label={pill?.label} title={pill?.label} onClick={(event) => event.stopPropagation()}>
         {pill === null ? content : <span className="ub-github-pill" data-github-state={pill.state}>

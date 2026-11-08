@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
-import { githubItemKey, githubItemStateTtl, githubItemUrl, type GitHubItem, type GitHubItemState } from "@uberblick/schema";
+import { githubItemKey, githubItemStateTtl, githubItemUrl, type GitHubItem, type GitHubItemState, type GitHubItemObservation } from "@uberblick/schema";
 import { readJsonObject } from "./open-access.js";
 
 const runFile = promisify(execFile);
@@ -18,10 +18,12 @@ export interface GitHubItemStateLookup {
 export interface GitHubItemStateReading {
   states: Record<string, GitHubItemState | null>;
   refreshAfterMs: Record<string, number>;
+  observations: Record<string, GitHubItemObservation>;
 }
 
 function unknownReading(items: readonly GitHubItem[]): GitHubItemStateReading {
   return {
+    observations: {},
     states: Object.fromEntries(items.map(item => [githubItemKey(item), null])),
     refreshAfterMs: Object.fromEntries(items.map(item => [githubItemKey(item), githubItemStateTtl(null)])),
   };
@@ -86,7 +88,7 @@ function stateOf(item: GitHubItem, value: unknown): GitHubItemState | null {
 
 function queryFor(items: readonly GitHubItem[]): string {
   return `query { ${items.map((item, index) =>
-    `r${index}:repository(owner:${JSON.stringify(item.owner)},name:${JSON.stringify(item.repo)}) { item:issueOrPullRequest(number:${item.number}) { __typename ... on Issue { state stateReason } ... on PullRequest { state isDraft merged } } }`,
+    `r${index}:repository(owner:${JSON.stringify(item.owner)},name:${JSON.stringify(item.repo)}) { visibility item:issueOrPullRequest(number:${item.number}) { __typename ... on Issue { state stateReason } ... on PullRequest { state isDraft merged } } }`,
   ).join(" ")} }`;
 }
 
@@ -106,13 +108,13 @@ interface LookupOptions {
   now?: () => number;
 }
 
-/** One serving run, with no credential or state written to the workspace. */
+/** One serving run; only state, observation time and public visibility may be shared. */
 export function createGitHubItemStateLookup(env: NodeJS.ProcessEnv, options: LookupOptions = {}): GitHubItemStateLookup {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const credential = options.credential ?? (signal => readGitHubToken(env, signal));
   const now = options.now ?? Date.now;
   const lifetime = new AbortController();
-  const cache = new Map<string, { state: GitHubItemState | null; until: number }>();
+  const cache = new Map<string, { state: GitHubItemState | null; until: number; observation: GitHubItemObservation | null }>();
   let login: string | null = null;
   let blockedUntil = 0;
   let pending: Promise<unknown> = Promise.resolve();
@@ -136,8 +138,15 @@ export function createGitHubItemStateLookup(env: NodeJS.ProcessEnv, options: Loo
       }
     } catch { /* Offline, slow or malformed answers are silent unknown readings. */ }
     for (const [index, item] of items.entries()) {
-      const state = stateOf(item, object(data?.[`r${index}`])?.item);
-      cache.set(githubItemKey(item), { state, until: now() + githubItemStateTtl(state) });
+      const repository = object(data?.[`r${index}`]);
+      const state = stateOf(item, repository?.item);
+      const visibility = repository?.visibility;
+      const seenAt = now();
+      cache.set(githubItemKey(item), {
+        state, until: seenAt + githubItemStateTtl(state),
+        observation: state !== null && (visibility === "PUBLIC" || visibility === "PRIVATE" || visibility === "INTERNAL")
+          ? { state, seenAt, isPublic: visibility === "PUBLIC" } : null,
+      });
     }
     while (cache.size > MAX_CACHE_ITEMS) {
       const first = cache.keys().next().value;
@@ -160,6 +169,10 @@ export function createGitHubItemStateLookup(env: NodeJS.ProcessEnv, options: Loo
     if (eligible.length > 0 && now() >= blockedUntil) await refresh(eligible, token);
     const keys = [...unique.keys()];
     return {
+      observations: Object.fromEntries(keys.flatMap(key => {
+        const entry = cache.get(key);
+        return entry !== undefined && entry.until > now() && entry.observation !== null ? [[key, entry.observation]] : [];
+      })),
       states: Object.fromEntries(keys.map(key => {
         const entry = cache.get(key);
         return [key, entry !== undefined && entry.until > now() ? entry.state : null];

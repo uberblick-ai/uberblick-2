@@ -79,7 +79,7 @@ export function collectReplicaSyncState(replicas: Replicas): {
   const store = replicas.store.syncSnapshot(
     attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
   );
-  const pending = new Set(store.pendingRooms.map(({ room }) => room));
+  const pending = new Set(store.pendingRooms.filter(({ room }) => !replicas.sync.isRoomUnavailable(room)).map(({ room }) => room));
   const hub = replicas.sync.state();
   const connected = hub.status === "connected";
   const acknowledged = new Map(
@@ -97,8 +97,8 @@ export function collectReplicaSyncState(replicas: Replicas): {
     caughtUp:
       connected &&
       !replicas.sync.isDraining() &&
-      store.pendingRooms.length === 0 &&
-      attached.every((replica) => acknowledged.get(replica.room) === true),
+      pending.size === 0 &&
+      attached.every((replica) => replicas.sync.isRoomUnavailable(replica.room) || acknowledged.get(replica.room) === true),
   };
 }
 
@@ -123,7 +123,7 @@ export function collectServingSyncStatus(
     notSharedReason: hub.status === "disabled" ? "no-hub-credentials" : hub.authRecovery ?? null,
     caughtUp:
       caughtUp &&
-      servedRooms.every((room) => acknowledged.get(room) === true),
+      servedRooms.every((room) => engine.replicas.sync.isRoomUnavailable(room) || acknowledged.get(room) === true),
     rooms: served,
   };
 }
@@ -139,7 +139,7 @@ export async function collectSyncStatus(
 ): Promise<SyncStatus> {
   await replicas.settle({ requireHealthy: false });
   const local = replicas.config.localWorkspace === true;
-  const pending = local ? [] : replicas.store.pendingRooms();
+  const pending = local ? [] : replicas.pendingSyncRooms();
 
   return {
     session: replicas.config.sessionId,
