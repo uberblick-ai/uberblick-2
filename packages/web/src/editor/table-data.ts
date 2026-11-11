@@ -3,7 +3,7 @@ import { chartDate, isExternalHref } from "@uberblick/schema";
 import type { ChartProjection, DataRecord, TableColumnMapping, TableConfig, TableProjection } from "@uberblick/schema";
 import { chartDateFormatter, chartNumberFormatter } from "./chart-data.js";
 export { parseTableConfig, prepareTable, sortTableRows } from "@uberblick/schema";
-export type { TableColumnMapping, TableConfig, TableProjection, TableReady } from "@uberblick/schema";
+export type { TableBarScale, TableColumnMapping, TableConfig, TableProjection, TableReady } from "@uberblick/schema";
 
 function storedText(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
 function numeric(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
@@ -12,6 +12,7 @@ export interface TableCell {
   state: "valid" | "absent" | "null" | "invalid";
   text: string;
   href?: string;
+  barValue?: number;
 }
 
 /**
@@ -31,7 +32,8 @@ export function tableCellFormatter(column: TableColumnMapping, locale?: string):
         if (!numeric(value)) break;
         number ??= column.decimals === undefined ? chartNumberFormatter(locale)
           : new Intl.NumberFormat(locale, { minimumFractionDigits: column.decimals, maximumFractionDigits: column.decimals }).format;
-        return { state: "valid", text: `${number(value)}${column.unit ? ` ${column.unit}` : ""}` };
+        return { state: "valid", text: `${number(value)}${column.unit ? ` ${column.unit}` : ""}`,
+          ...(column.bar === undefined ? {} : { barValue: value }) };
       }
       case "date": {
         const instant = chartDate(value);

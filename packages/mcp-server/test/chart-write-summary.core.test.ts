@@ -209,6 +209,48 @@ describe("chart source write summaries", () => {
     });
   });
 
+  it("keeps table summaries identical with automatic or fixed in-cell bars across all chart writes", async () => {
+    const rig = await local();
+    const mappings = [table, { ...table, columns: [{ field: "count", format: "number", bar: true }] },
+      { ...table, columns: [{ field: "count", format: "number", bar: { max: 100 } }] }];
+    const sources = mappings.map(mapping => JSON.stringify({ ...mapping, limit: 2 }));
+    const created = await rig.ok("create_doc", {
+      title: "Table bar feedback", description: "Decorative bars do not add values or scale details to summaries.",
+      blocks: sources.map(text => ({ type: "chart", text })),
+    });
+    const absent = {
+      status: "collection-absent", message: "Table collection “observations” is absent.",
+      collections: [], warnings: [expect.any(String)],
+    };
+    for (const block of created.blocks) expect(block.chart).toEqual(absent);
+
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: { type: "object" } },
+      upsert: [{ id: "private-a", value: { count: 42424242 } }, { id: "private-b", value: { count: -31313131 } },
+        { id: "private-c", value: { count: null } }],
+    }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    doc.getMap(DATA_KEY).set(JSON.stringify(["record", "observations", "private-invalid"]), "PRIVATE_INVALID_RECORD");
+    const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
+    const expected = { status: "ready", recordCount: 4, rowCount: 2, invalidRecordCount: 1, warnings: [] };
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid,
+      blocks: sources.map(text => ({ type: "chart", text })),
+    });
+    for (const block of inserted.blocks) expect(block.chart).toEqual(expected);
+
+    let block = inserted.blocks[0];
+    let oldText = sources[0];
+    for (const newText of [sources[1], sources[2], sources[0]]) {
+      const edited = await rig.ok("edit_block", {
+        uuid: created.uuid, block_id: block.id, rev: block.rev, old_text: oldText, new_text: newText,
+      });
+      expect(edited.block.chart).toEqual(expected);
+      block = edited.block;
+      oldText = newText;
+    }
+    expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
+  });
+
   it("summarizes scatter seeds, inserted points and edited groups from the shared projection without record values", async () => {
     const rig = await local();
     const source = JSON.stringify(scatter);

@@ -99,6 +99,29 @@ describe("table mapping", () => {
     }
     expect(parseTableConfig(JSON.stringify({ ...mapping, columns: [{ field: "value", format: "number", decimals: 0 }] }))).toMatchObject({ ok: true });
   });
+
+  it.each([true, { max: 100 }, { max: Number.MIN_VALUE }, { max: Number.MAX_VALUE }])("accepts number-column bars %j without changing their options", (bar) => {
+    const column = { field: "value", format: "number", unit: "%", decimals: 0, bar };
+    expect(parseTableConfig(JSON.stringify({ ...mapping, columns: [column] }))).toEqual({
+      ok: true, config: { ...mapping, columns: [column] },
+    });
+  });
+
+  it.each([false, null, {}, { max: 0 }, { max: -1 }, { max: "100" }, { max: null }, { max: true }, { max: 1, min: 0 }, { other: 1 }, 1, "true", []])("refuses unsupported number-column bars %j", (bar) => {
+    expect(prepareTable(JSON.stringify({ ...mapping, columns: [{ field: "value", format: "number", bar }] }), null)).toMatchObject({
+      status: "invalid-configuration", message: expect.stringContaining("Invalid table configuration"),
+    });
+  });
+
+  it.each([undefined, "text", "date", "link"])("refuses bars on format %s", (format) => {
+    for (const bar of [true, { max: 100 }]) {
+      expect(prepareTable(JSON.stringify({ ...mapping, columns: [{ field: "value", format, bar }] }), null).status).toBe("invalid-configuration");
+    }
+  });
+
+  it("refuses a nonfinite bar maximum even when JSON parses it as a number", () => {
+    expect(parseTableConfig('{"version":1,"type":"table","collection":"observations","columns":[{"field":"value","format":"number","bar":{"max":1e309}}]}').ok).toBe(false);
+  });
 });
 
 const formatTableCell = (column: TableColumnMapping, record: DataRecord, locale?: string) =>
@@ -123,6 +146,18 @@ describe("table cell values", () => {
     expect(formatTableCell({ field: "day", format: "date" }, value, "en-US").text).toBe(formatChartX(Date.parse("2026-10-08T00:00:00Z"), "date", "en-US"));
     expect(formatTableCell({ field: "instant", format: "date" }, value, "de-DE").text).toBe(formatChartX(Date.parse("2026-10-08T10:30:00Z"), "date", "de-DE"));
     expect(formatTableCell({ field: "value", format: "number", decimals: 10 }, { id: "zero", value: { value: 0 } }, "en-US").text).toBe("0.0000000000");
+  });
+
+  it("keeps number text and absent/null/invalid markers unchanged when bars are mapped", () => {
+    const column: TableColumnMapping = { field: "value", format: "number", unit: "%", decimals: 1 };
+    for (const value of [{}, { value: null }, { value: "12" }, { value: 0 }, { value: -1234.56 }]) {
+      const record: DataRecord = { id: "row", value };
+      for (const bar of [true, { max: 100 }] as const) {
+        const cell = formatTableCell({ ...column, bar }, record, "de-DE");
+        expect(cell).toMatchObject(formatTableCell(column, record, "de-DE"));
+        expect(cell.barValue).toBe(typeof value.value === "number" ? value.value : undefined);
+      }
+    }
   });
 
   it.each(["en-US", "de-DE"])("keeps every date shape's chart semantics when reusing a %s column formatter", (locale) => {
@@ -163,6 +198,56 @@ describe("table cell values", () => {
 });
 
 describe("table projection and ordering", () => {
+  it("scales bars from the mapping window and updates every column's shared scale with live data", () => {
+    const config: TableConfig = { ...mapping, limit: 2, columns: [
+      { field: "value", format: "number" },
+      { field: "value", format: "number", bar: true },
+      { field: "value", format: "number", bar: { max: 4 } },
+    ] };
+    const { doc, data } = fixture([
+      { id: "a", value: { value: 2 } }, { id: "b", value: { value: -8 } }, { id: "z-hidden", value: { value: -100 } },
+    ]);
+    const before = getDocDataEntries(doc);
+    const table = frozen(ready(frozen(data), config));
+    expect(table.barScales).toEqual([null, { max: 8, signed: true }, { max: 4, signed: true }]);
+    expect(table.rows.map(({ value }) => value.value)).toEqual([2, -8]);
+    const column = config.columns[1]!;
+    expect(sortTableRows(table.rows, column, "asc").map(({ id }) => id)).toEqual(["b", "a"]);
+    expect(sortTableRows(table.rows, column, "desc").map(({ id }) => id)).toEqual(["a", "b"]);
+    expect(table.barScales).toEqual([null, { max: 8, signed: true }, { max: 4, signed: true }]);
+    expect(getDocDataEntries(doc)).toEqual(before);
+    expect(ready(data, { ...config, limit: 3 }).barScales).toEqual([null, { max: 100, signed: true }, { max: 4, signed: true }]);
+
+    applyDocData(doc, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "b", value: { value: 3 } }] }]);
+    const updated = readDocData(doc);
+    if (updated === null) throw new Error("Updated data is absent");
+    expect(ready(updated, config).barScales).toEqual([null, { max: 3, signed: false }, { max: 4, signed: false }]);
+    applyDocData(doc, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "0-new", value: { value: -20 } }] }]);
+    const shifted = readDocData(doc);
+    if (shifted === null) throw new Error("Updated data is absent");
+    expect(ready(shifted, config)).toMatchObject({
+      rows: [{ id: "0-new" }, { id: "a" }],
+      barScales: [null, { max: 20, signed: true }, { max: 4, signed: true }],
+    });
+  });
+
+  it("ignores nonnumeric cells and keeps zero-only columns at zero scale", () => {
+    const config: TableConfig = { ...mapping, columns: [
+      { field: "value", format: "number", bar: true },
+      { field: "missing", format: "number", bar: true },
+      { field: "missing", format: "number", bar: { max: 100 } },
+    ] };
+    const { data } = fixture([
+      { id: "absent", value: {} }, { id: "null", value: { value: null } },
+      { id: "invalid", value: { value: "-100" } }, { id: "zero", value: { value: 0 } },
+    ]);
+    expect(ready(data, config).barScales).toEqual([{ max: 0, signed: false }, { max: 0, signed: false }, { max: 100, signed: false }]);
+    expect(prepareTable(JSON.stringify(config), fixture([]).data)).toMatchObject({
+      status: "no-records", rows: [],
+      barScales: [{ max: 0, signed: false }, { max: 0, signed: false }, { max: 100, signed: false }],
+    });
+  });
+
   it.each([undefined, "asc", "desc"] as const)("recomputes the first valid rows in %s order without changing source or data", (direction) => {
     const config: TableConfig = { ...mapping, limit: 2, pageSize: 1, columns: [{ field: "value", format: "number" }],
       ...(direction === undefined ? {} : { sort: { field: "value", direction } }) };

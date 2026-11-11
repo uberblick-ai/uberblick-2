@@ -68,4 +68,31 @@ describe("shared chart-block projection", () => {
       type: "table", projection: { status: "no-records", recordCount: 3, invalidSchema: 3, rows: [] },
     });
   });
+
+  it.each([true, { max: 100 }, false, null])("keeps table-only bars %j invalid in scatter details", (bar) => {
+    const source = JSON.stringify({
+      version: 1, type: "scatter", collection: "observations",
+      x: { field: "x" }, y: { field: "y" }, label: "label",
+      details: [{ field: "x", format: "number", bar }],
+    });
+    expect(prepareChartView(source, snapshot())).toMatchObject({
+      type: "scatter", projection: { status: "invalid-configuration", message: expect.stringContaining("Invalid scatter configuration") },
+    });
+  });
+
+  it("dispatches table bars through the shared projection and excludes schema-invalid rows from scale", () => {
+    const source = JSON.stringify({
+      version: 1, type: "table", collection: "observations", columns: [{ field: "x", format: "number", bar: true }],
+    });
+    const data = snapshot();
+    expect(prepareChartView(source, data)).toMatchObject({
+      type: "table", projection: {
+        status: "ready", recordCount: 3, invalidSchema: 1, rows: [{ id: "a" }, { id: "b" }], barScales: [{ max: 2, signed: false }],
+      },
+    });
+    data.collections[0]!.invalidRecordIds = ["a", "b", "invalid"];
+    expect(prepareChartView(source, data)).toMatchObject({
+      type: "table", projection: { status: "no-records", barScales: [{ max: 0, signed: false }] },
+    });
+  });
 });
