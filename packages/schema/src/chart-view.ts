@@ -6,16 +6,19 @@ import { prepareTable } from "./table-data.js";
 import type { TableProjection } from "./table-data.js";
 import { prepareScatter } from "./scatter-data.js";
 import type { ScatterProjection } from "./scatter-data.js";
+import { prepareBar } from "./bar-data.js";
+import type { BarProjection } from "./bar-data.js";
 
 export type ChartView =
   { type: "line"; projection: ChartProjection } |
   { type: "table"; projection: TableProjection } |
+  { type: "bar"; projection: BarProjection } |
   { type: "scatter"; projection: ScatterProjection };
 
-export function chartViewType(source: string): "line" | "table" | "scatter" {
+export function chartViewType(source: string): "line" | "table" | "scatter" | "bar" {
   try {
     const type = JSON.parse(source)?.type;
-    return type === "table" || type === "scatter" ? type : "line";
+    return type === "table" || type === "scatter" || type === "bar" ? type : "line";
   }
   catch { return "line"; }
 }
@@ -24,6 +27,7 @@ export function prepareChartView(source: string, data: DocData | null): ChartVie
   switch (chartViewType(source)) {
     case "table": return { type: "table", projection: prepareTable(source, data) };
     case "scatter": return { type: "scatter", projection: prepareScatter(source, data) };
+    case "bar": return { type: "bar", projection: prepareBar(source, data) };
     case "line": return { type: "line", projection: prepareChart(source, data) };
   }
 }

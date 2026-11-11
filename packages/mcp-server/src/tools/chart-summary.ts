@@ -29,13 +29,13 @@ function summarize(source: string, data: DocData | null): ChartWriteSummary {
             firstX: xEndpoint(chart.firstX, chart.config.x.type), lastX: xEndpoint(chart.lastX, chart.config.x.type) }
         : { status: chart.status, message: chart.message, warnings, ...counts };
     }
-  } else if (view.type === "scatter") {
-    const scatter = view.projection;
-    if (scatter.status === "ready" || scatter.status === "no-records") {
-      warnings.push(...scatter.warnings);
-      const counts = { recordCount: scatter.recordCount, plottedCount: scatter.plottedCount };
-      return scatter.status === "ready" ? { status: scatter.status, warnings, ...counts }
-        : { status: scatter.status, message: scatter.message, warnings, ...counts };
+  } else if (view.type === "scatter" || view.type === "bar") {
+    const chart = view.projection;
+    if (chart.status === "ready" || chart.status === "no-records") {
+      warnings.push(...chart.warnings);
+      const counts = { recordCount: chart.recordCount, plottedCount: chart.plottedCount };
+      return chart.status === "ready" ? { status: chart.status, warnings, ...counts }
+        : { status: chart.status, message: chart.message, warnings, ...counts };
     }
   } else {
     const table = view.projection;

@@ -13,6 +13,7 @@ import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { setNativeSelection } from "./native-selection.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 import { renderedText, strokeSeparation } from "./contrast-helpers.js";
 import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 
@@ -100,6 +101,32 @@ const SCHEMA = {
     required: ["day"],
   },
 };
+
+const CATEGORY_MAPPING = {
+  version: 1, type: "bar", collection: "teams", title: "Service comparisons",
+  category: { field: "name", label: "Service" },
+  y: [
+    { field: "a", label: "EU open", unit: "ms", stack: "eu", range: [-10, 40], reference: 37 },
+    { field: "b", label: "EU closed", unit: "ms", stack: "eu" },
+    { field: "c", label: "US open", unit: "ms", stack: "us" },
+    { field: "d", label: "US closed", unit: "ms", stack: "us" },
+    { field: "e", label: "Independent", unit: "ms" },
+  ],
+};
+const LONG_CATEGORY = "Search with a very long service name that must remain readable in full";
+const CATEGORY_RECORDS = [
+  { id: "a", value: { name: "Payments", a: 20, b: 30, c: 10, d: -15, e: 0 } },
+  { id: "b", value: { name: LONG_CATEGORY, a: 10, b: 20, c: -8, d: -12, e: 5 } },
+  { id: "c", value: { name: "Payments", a: 5, b: 5, c: 2, d: 3, e: 4 } },
+  { id: "d", value: { name: "Empty" } },
+  { id: "e", value: { name: null, a: 80 } },
+];
+
+async function categoryRecords(session: McpSession, uuid: string, records: unknown[] = CATEGORY_RECORDS): Promise<void> {
+  await session.call("update_data", { uuid, operations: [{ collection: "teams",
+    schema: { version: 1, schema: { type: "object" } }, replaceRecords: records,
+  }] });
+}
 
 interface PaintedText { canvas: number; text: string; color: string; x: number; y: number; width: number; left: number; right: number; font: string; rotated: boolean }
 interface PaintedPoint { canvas: number; x: number; y: number; radius: number; color: string }
@@ -345,6 +372,230 @@ async function expectReady(page: Page, session: McpSession, uuid: string): Promi
   await waitForDocumentDraw(page, session, uuid);
   await expect(page.getByRole("img", { name: "API latency", exact: true })).toBeVisible();
 }
+
+async function categoryReferenceInk(page: Page, horizontal: boolean, bounds: PaintedRectangle): Promise<number> {
+  return page.evaluate(({ horizontal, bounds }) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(".ub-chart canvas");
+    const colourProbe = document.querySelector(".ub-chart-probe");
+    if (canvas === null || colourProbe === null) throw new Error("e2e: category reference canvas is absent");
+    const ticks = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
+      .filter(entry => /^-?\d+(?:\.\d+)? ms$/.test(entry.text))
+      .map(entry => ({ position: horizontal ? entry.x : entry.y, value: Number(entry.text.slice(0, -3)) }))
+      .sort((a, b) => a.value - b.value);
+    const first = ticks[0], last = ticks.at(-1);
+    if (first === undefined || last === undefined || first.value === last.value) throw new Error("e2e: category value ticks absent");
+    const position = first.position + (37 - first.value) / (last.value - first.value) * (last.position - first.position);
+    const box = canvas.getBoundingClientRect(), scaleX = canvas.width / box.width, scaleY = canvas.height / box.height;
+    const context = canvas.getContext("2d"), sample = document.createElement("canvas").getContext("2d");
+    if (context === null || sample === null) throw new Error("e2e: category pixels unavailable");
+    sample.fillStyle = getComputedStyle(colourProbe).color;
+    sample.fillRect(0, 0, 1, 1);
+    const neutral = sample.getImageData(0, 0, 1, 1).data;
+    let coverage = 0;
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const start = horizontal ? Math.ceil((bounds.top + 4) * scaleY) : Math.ceil((bounds.left + 4) * scaleX);
+      const end = horizontal ? Math.floor((bounds.bottom - 4) * scaleY) : Math.floor((bounds.right - 4) * scaleX);
+      const pixels = horizontal
+        ? context.getImageData(Math.round(position * scaleX) + offset, start, 1, end - start).data
+        : context.getImageData(start, Math.round(position * scaleY) + offset, end - start, 1).data;
+      let matching = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if ((pixels[index + 3] ?? 0) >= 100 && [0, 1, 2].every(channel =>
+          Math.abs((pixels[index + channel] ?? 0) - (neutral[channel] ?? 0)) < 20)) matching += 1;
+      }
+      coverage = Math.max(coverage, matching / (end - start));
+    }
+    return coverage;
+  }, { horizontal, bounds });
+}
+
+for (const orientation of ["vertical", "horizontal"] as const) {
+  test(`category bars paint grouped positive and negative stacks ${orientation}`, { tag: "@webkit" }, async ({ browser }, info) => {
+    const session = writer(), mapping = { ...CATEGORY_MAPPING, orientation };
+    const uuid = await chartDoc(session, "Category stacks", mapping);
+    await categoryRecords(session, uuid);
+    const touch = info.project.use.hasTouch === true;
+    for (const appearance of ["light", "dark"] as const) {
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        beforeNavigate: async page => { await installProbe(page, uuid); await installBarProbe(page); },
+        contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false }),
+          locale: "en-US", colorScheme: appearance },
+      });
+      await waitForDocumentDraw(page, session, uuid);
+      await expect(page.getByRole("img", { name: mapping.title, exact: true })).toBeVisible();
+      const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+      await expect(selector.locator("option[value]:not([value=''])")).toHaveCount(4);
+      const bars = await barGeometry(page);
+      expect(bars).toHaveLength(14);
+      expectContainedBars(bars);
+      expect(new Set(bars.map(bar => bar.color)).size).toBe(5);
+      const horizontal = orientation === "horizontal";
+      const sameSlot = (a: PaintedBar, b: PaintedBar): boolean => horizontal
+        ? Math.abs(a.top - b.top) < 0.1 && Math.abs(a.bottom - b.bottom) < 0.1
+        : Math.abs(a.left - b.left) < 0.1 && Math.abs(a.right - b.right) < 0.1;
+      expect(bars.some(a => bars.some(b => a !== b && sameSlot(a, b) && (horizontal
+        ? Math.abs(a.right - b.left) < 1 || Math.abs(b.right - a.left) < 1
+        : Math.abs(a.bottom - b.top) < 1 || Math.abs(b.bottom - a.top) < 1)))).toBe(true);
+      const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+      expect(probe.ink.map(entry => entry.text)).toEqual(expect.arrayContaining(["Payments", ...mapping.y.map(series => series.label)]));
+      if (horizontal) expect(probe.ink.map(entry => entry.text)).toContain("Empty");
+      const zero = probe.ink.find(entry => entry.text === "0 ms");
+      if (zero === undefined) throw new Error("e2e: category zero tick absent");
+      expect(bars.some(bar => horizontal ? bar.right < zero.x - 1 : bar.top > zero.y + 1)).toBe(true);
+      expect(bars.some(bar => horizontal ? bar.left > zero.x + 1 : bar.bottom < zero.y - 1)).toBe(true);
+      const bounds = bars[0]?.clip;
+      if (bounds === null || bounds === undefined) throw new Error("e2e: category plot clip absent");
+      expect(await categoryReferenceInk(page, horizontal, bounds)).toBeGreaterThan(0.75);
+      const canvas = page.locator(".ub-chart-screen canvas"), box = await canvas.boundingBox();
+      if (box === null) throw new Error("e2e: category canvas absent");
+      const longLabel = probe.ink.find(entry => entry.text.startsWith("Search"));
+      if (horizontal && longLabel === undefined) throw new Error("e2e: category label absent");
+      if (longLabel !== undefined) {
+        expect(longLabel.text.length).toBeLessThan(LONG_CATEGORY.length);
+        expect(longLabel.left).toBeGreaterThanOrEqual(-1);
+        expect(longLabel.right).toBeLessThanOrEqual(box.width + 1);
+      }
+      const categoryAnchor = horizontal ? bounds.top + (bounds.bottom - bounds.top) * 3 / 8 : bounds.left + (bounds.right - bounds.left) * 3 / 8;
+      const target = bars.toSorted((a, b) => Math.abs(categoryAnchor - (horizontal ? (a.top + a.bottom) / 2 : (a.left + a.right) / 2))
+        - Math.abs(categoryAnchor - (horizontal ? (b.top + b.bottom) / 2 : (b.left + b.right) / 2)))[0];
+      if (target === undefined) throw new Error("e2e: long category bar absent");
+      const x = box.x + (target.left + target.right) / 2, y = box.y + (target.top + target.bottom) / 2;
+      if (touch) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y);
+      await expect(selector).toHaveValue("b");
+      await expect(page.locator(".ub-chart-source")).toBeHidden();
+      await expect(page.locator(".ub-bar-details")).toContainText(LONG_CATEGORY);
+      await expect(page.locator(".ub-bar-details dt")).toHaveText(["Service", ...mapping.y.map(series => series.label)]);
+      await expect(page.locator(".ub-bar-details")).toContainText("-12 ms");
+      if (!touch) {
+        await expect.poll(async () => (await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe)).texts.join(""))
+          .toContain(LONG_CATEGORY);
+      }
+      await canvasEvidence(page.locator(".ub-chart"), info, `chart-category-${orientation}-${touch ? "ipad" : "desktop"}-${appearance}`);
+      if (!touch) {
+        const emptyCount = probe.ink.filter(entry => entry.text === "Empty").length;
+        await page.mouse.move(box.x + (horizontal ? bounds.left + 8 : bounds.left + (bounds.right - bounds.left) * 7 / 8),
+          box.y + (horizontal ? bounds.top + (bounds.bottom - bounds.top) * 7 / 8 : bounds.top + 8));
+        await expect.poll(async () => (await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe)).texts
+          .filter(text => text === "Empty").length).toBeGreaterThan(emptyCount);
+      }
+      await page.context().close();
+    }
+  });
+}
+
+test("category keyboard, height, live windows and locked source controls retain native input", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer(), mapping = { ...CATEGORY_MAPPING, orientation: "horizontal", height: 300 };
+  const uuid = await chartDoc(session, "Category controls", mapping);
+  await categoryRecords(session, uuid);
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async page => { await installProbe(page, uuid); await installBarProbe(page); },
+    contextOptions: touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false },
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+  await editor(page).locator(":scope > p").first().click();
+  for (let count = 0; count < 30 && !(await selector.evaluate(element => element === document.activeElement)); count += 1) {
+    await page.keyboard.press(process.platform === "darwin" && info.project.name === "webkit-ipad" ? "Alt+Tab" : "Tab");
+  }
+  await expect(selector).toBeFocused();
+  await page.keyboard.press("Home");
+  for (const id of ["a", "b", "c", "d"]) {
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(selector).toHaveValue(id);
+    await expect(page.locator(".ub-chart-source")).toBeHidden();
+  }
+  await expect(page.locator(".ub-bar-details")).toContainText("Empty");
+  await page.keyboard.press("Tab");
+  await expect(selector).not.toBeFocused();
+  await proveMcpArrival(page, session, uuid, { path: "upstream", restore: true });
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+    expect(doc.blocks.find(block => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
+  });
+  if (touch) {
+    await page.getByRole("button", { name: "Open chart source", exact: true }).tap();
+    await page.getByRole("textbox", { name: "Height", exact: true }).fill("340");
+    await page.getByRole("textbox", { name: "Height", exact: true }).press("Enter");
+    await editor(page).locator(":scope > p").first().tap();
+  } else {
+    await page.locator(".ub-chart").hover();
+    const box = await page.getByRole("button", { name: "Resize chart", exact: true }).boundingBox();
+    if (box === null) throw new Error("e2e: category resize handle absent");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 40, { steps: 4 });
+    await page.mouse.up();
+  }
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+    expect(JSON.parse(doc.blocks.find(block => block.type === "chart")?.text ?? "{}").height).toBe(340);
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  await expect.poll(() => page.locator(".ub-chart-screen").evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(340);
+  await editMapping(session, uuid, JSON.stringify({ ...mapping, sort: { field: "a", direction: "desc" }, limit: 2 }));
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(selector.locator("option[value]:not([value=''])")).toHaveText(["Payments · a", `${LONG_CATEGORY} · b`]);
+  await expect(page.locator(".ub-chart-notice")).toContainText("Showing 2 of 4 records");
+  await categoryRecords(session, uuid, CATEGORY_RECORDS.map(record => record.id === "c" ? { ...record, value: { ...record.value, a: 100 } } : record));
+  await waitForDocumentDraw(page, session, uuid);
+  await expect.poll(() => selector.locator("option[value]:not([value=''])").evaluateAll(options =>
+    options.map(option => (option as HTMLOptionElement).value))).toEqual(["c", "a"]);
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  try {
+    peer.decide("decided");
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await selector.selectOption("a");
+    await expect(page.locator(".ub-bar-details")).toContainText("Payments");
+    await page.keyboard.press("Tab");
+    await expect(selector).not.toBeFocused();
+    const bars = await barGeometry(page), bar = bars[0], box = await page.locator(".ub-chart canvas").boundingBox();
+    if (bar === undefined || box === null) throw new Error("e2e: locked category bars absent");
+    if (touch) await page.touchscreen.tap(box.x + (bar.left + bar.right) / 2, box.y + (bar.top + bar.bottom) / 2);
+    else await page.mouse.click(box.x + (bar.left + bar.right) / 2, box.y + (bar.top + bar.bottom) / 2);
+    await expect(page.locator(".ub-chart-source")).toBeHidden();
+    if (touch) await page.touchscreen.tap(box.x + box.width - 3, box.y + box.height - 3);
+    else await page.mouse.click(box.x + box.width - 3, box.y + box.height - 3);
+    await expect(page.locator(".ub-chart-source")).toBeVisible();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await editor(page).locator(":scope > p").first().click();
+    await page.getByRole("button", { name: "Open chart source", exact: true }).click();
+    await expect(page.locator(".ub-chart-source")).toBeVisible();
+  } finally { peer.close(); }
+});
+
+test("horizontal category defaults fit labels beside a wrapped legend before skipping at the cap", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const mapping = { ...CATEGORY_MAPPING, orientation: "horizontal", y: Array.from({ length: 8 }, (_, index) => ({
+    field: `value${index}`, label: `Long numeric series ${index} with a name`,
+  })) };
+  const uuid = await chartDoc(session, "Category height and crowding", mapping);
+  const records = Array.from({ length: 40 }, (_, index) => ({ id: String(index).padStart(2, "0"), value: {
+    name: `Category ${index}`, ...Object.fromEntries(mapping.y.map(series => [series.field, index + 1])),
+  } }));
+  await categoryRecords(session, uuid, records.slice(0, 6));
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: page => installProbe(page, uuid),
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  await page.locator(".ub-chart").evaluate(element => { (element as HTMLElement).style.width = "320px"; });
+  await expect.poll(async () => {
+    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+    return ink.filter(entry => /^Category \d+$/.test(entry.text)).map(entry => entry.text);
+  }).toEqual(records.slice(0, 6).map(record => record.value.name));
+  await categoryRecords(session, uuid, records);
+  await waitForDocumentDraw(page, session, uuid);
+  await expect.poll(() => page.locator(".ub-chart-screen").evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(600);
+  const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+  expect(ink.filter(entry => /^Category \d+$/.test(entry.text)).length).toBeLessThan(40);
+  const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+  await expect(selector.locator("option[value]:not([value=''])")).toHaveCount(40);
+  await selector.focus();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await expect(selector).toHaveValue("39");
+  await expect(page.locator(".ub-bar-details")).toContainText("Category 39");
+  await expect(page.locator(".ub-bar-details dt")).toHaveText(["Service", ...mapping.y.map(series => series.label)]);
+});
 
 /**
  * Read Tiptap's existing editor reference and y-sync plugin, never a product

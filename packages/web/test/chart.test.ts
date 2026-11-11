@@ -48,7 +48,7 @@ vi.mock("chart.js", () => {
     draw() {}
     destroy() { this.destroyed = true; }
   }
-  return { Chart, ScatterController: {}, LineController: {}, LineElement: {}, PointElement: {}, BarController: {}, BarElement: {}, LinearScale: {}, Legend: {}, Tooltip: {} };
+  return { Chart, ScatterController: {}, CategoryScale: {}, LineController: {}, LineElement: {}, PointElement: {}, BarController: {}, BarElement: {}, LinearScale: {}, Legend: {}, Tooltip: {} };
 });
 
 const mapping = JSON.stringify({ version: 1, type: "line", collection: "trend", x: { field: "day", type: "number" }, y: [{ field: "value", label: "Delivery", unit: "issues" }] });
@@ -273,6 +273,78 @@ describe("chart height controls", () => {
     expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source.replace('"height":200', '"height":300'));
     expect(listAnnotationRanges(doc, id)).toEqual(ranges);
     await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+});
+
+describe("category bar composition", () => {
+  it("retains the limit note and diagnostics when the selected category window has no numeric values", async () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ version: 1, type: "bar", collection: "trend", category: { field: "name" }, y: [{ field: "value" }], limit: 1 });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { name: "Empty" } }, { id: "b", value: { name: "Numeric", value: 4 } },
+    ] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const root = mounted.editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(root.querySelector(".ub-chart-notice")?.textContent).toBe("Showing 1 of 2 records");
+    expect(root.querySelector(".ub-chart-diagnostics")?.textContent).toContain("No numeric values for series field “value”");
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Resize chart"]')?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>(".ub-bar-details")?.hidden).toBe(true);
+    await act(async () => { applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { name: "Now numeric", value: 2 } }] }]); flush(); });
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("ready");
+    expect(root.querySelector(".ub-chart-notice")?.textContent).toBe("Showing 1 of 2 records");
+    expect(root.querySelector<HTMLElement>(".ub-bar-details")?.hidden).toBe(false);
+    await act(async () => mounted.editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
+  it("selects duplicate and empty categories independently, follows data updates without writes, and resets on mapping edits", async () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ version: 1, type: "bar", collection: "trend", orientation: "horizontal",
+      category: { field: "name", label: "Team" }, y: [{ field: "value", label: "Open", unit: "tickets" }, { field: "other", label: "Closed" }] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { name: "Duplicate", value: 3, other: 4 } },
+      { id: "b", value: { name: "Duplicate" } },
+    ] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const details = editor.view.dom.querySelector<HTMLElement>(".ub-bar-details")!;
+    const selector = within(details).getByRole<HTMLSelectElement>("combobox", { name: "Select category" });
+    expect([...selector.options].map(option => [option.value, option.text])).toEqual([
+      ["", "Select a category"], ["a", "Duplicate · a"], ["b", "Duplicate · b"],
+    ]);
+    expect(editor.view.dom.querySelector("canvas")?.getAttribute("aria-label")).toBe("Bar chart of Open, Closed by Team");
+    expect(editor.view.dom.querySelector<HTMLElement>(".ub-chart-screen")?.style.getPropertyValue("--chart-height")).toBe("176px");
+    const before = Y.encodeStateAsUpdate(doc);
+    await act(async () => fireEvent.change(selector, { target: { value: "a" } }));
+    expect([...details.querySelectorAll("dt")].map(term => [term.textContent, term.nextElementSibling?.textContent])).toEqual([
+      ["Team", "Duplicate"], ["Open", "3 tickets"], ["Closed", "4"],
+    ]);
+    await act(async () => fireEvent.change(selector, { target: { value: "b" } }));
+    expect(details.querySelector("dl")?.textContent).toBe("TeamDuplicateValuesNo numeric values");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    const instance = charts.instances[0]!;
+    await act(async () => { applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "b", value: { name: "Updated", value: -5 } }] }]); flush(); });
+    expect(selector.value).toBe("b");
+    expect(details.querySelector("dl")?.textContent).toBe("TeamUpdatedOpen-5 tickets");
+    expect(charts.instances).toHaveLength(1);
+    expect(instance.updates).toBeGreaterThan(0);
+    const changed = source.replace('"horizontal"', '"vertical"');
+    await act(async () => { editBlock(doc, id, source, changed); flush(); });
+    expect(selector.value).toBe("");
+    expect(details.querySelector("dl")).toBeNull();
+    expect(editor.view.dom.querySelector<HTMLElement>(".ub-chart-screen")?.style.getPropertyValue("--chart-height")).toBe("");
+    await act(async () => { editBlock(doc, id, changed, mapping); flush(); });
+    expect(instance.destroyed).toBe(true);
+    expect(details.hidden).toBe(true);
+    expect(details.querySelector("select")).toBeNull();
+    await act(async () => editor.destroy());
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
     doc.destroy(); directory.destroy();
   });
 });

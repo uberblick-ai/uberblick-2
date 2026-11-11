@@ -40,6 +40,8 @@ export type {
   ScatterAxisMapping, ScatterConfig, ScatterPoint, ScatterAxisDiagnostics, ScatterDiagnostics,
   ScatterReady, ScatterNoRecords, ScatterProjection,
 } from "./scatter-data.js";
+export { parseBarConfig, prepareBar } from "./bar-data.js";
+export type { BarConfig, BarSeriesMapping, BarSeries, BarRow, BarDiagnostics, BarReady, BarNoRecords, BarProjection } from "./bar-data.js";
 export { chartViewType, prepareChartView } from "./chart-view.js";
 export type { ChartView } from "./chart-view.js";
 export { decisionCurrentRecord, decisionRelations, decisionTopicState, decisionTopicTitle, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";

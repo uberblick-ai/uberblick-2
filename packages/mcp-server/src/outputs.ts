@@ -187,7 +187,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
   ]);
 }
 const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict();
-const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line y field without numeric points, or a scatter group field with more than eight values; never a refusal or rollback.");
+const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line or category-bar y field without numeric values in the shown records, or a scatter group field with more than eight values; never a refusal or rollback.");
 const chartSeries = z.array(z.object({
   field: z.string().describe("Literal y field from the mapping, in mapping order."),
   pointCount: count.describe("Plotted numeric y values; null gaps are not points."),
@@ -202,19 +202,19 @@ const tableCounts = {
   rowCount: count.describe("Rows shown after schema omissions, sorting and the mapping's limit."),
   invalidRecordCount: count.describe("Schema-invalid records omitted from the table."),
 };
-const scatterCounts = {
+const plottedCounts = {
   recordCount: chartCounts.recordCount,
-  plottedCount: count.describe("Scatter points drawn after omitting schema-invalid records or unusable numeric x/y values and applying the 5,000-point cap; no record values are returned."),
+  plottedCount: count.describe("Scatter points with numeric x/y, or shown category-bar records with a category and at least one numeric y, after schema omissions, selection and the 5,000-record cap; no record values are returned."),
 };
 const xEndpoint = z.union([z.number().finite(), z.string()])
   .describe("First or last plotted x: a number for numeric x, or an ISO date/date-time string for date x; never epoch milliseconds.");
 const chartWriteSummary = z.union([
   z.object({ status: z.literal("ready"), warnings: chartWarnings, ...chartCounts, firstX: xEndpoint, lastX: xEndpoint }).strict(),
   z.object({ status: z.literal("ready"), warnings: chartWarnings, ...tableCounts }).strict(),
-  z.object({ status: z.literal("ready"), warnings: chartWarnings, ...scatterCounts }).strict(),
+  z.object({ status: z.literal("ready"), warnings: chartWarnings, ...plottedCounts }).strict(),
   z.object({ status: z.literal("no-records"), message: z.string(), warnings: chartWarnings, ...chartCounts }).strict(),
   z.object({ status: z.literal("no-records"), message: z.string(), warnings: chartWarnings, ...tableCounts }).strict(),
-  z.object({ status: z.literal("no-records"), message: z.string(), warnings: chartWarnings, ...scatterCounts }).strict(),
+  z.object({ status: z.literal("no-records"), message: z.string(), warnings: chartWarnings, ...plottedCounts }).strict(),
   z.object({ status: z.literal("collection-absent"), message: z.string(), warnings: chartWarnings,
     collections: z.array(z.string()).describe("Available collection names in this document; empty when it has no data.") }).strict(),
   z.object({ status: z.enum(["invalid-configuration", "collection-unusable", "mapping-incompatible"]),
