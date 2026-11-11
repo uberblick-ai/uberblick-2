@@ -1,4 +1,4 @@
-import { expectOpenPages, provePageArrival } from "./settle.js";
+import { expectOpenPages, provePageArrival, waitForAcknowledged } from "./settle.js";
 /** Native editor activation and selection require a real browser. */
 import { expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
@@ -79,6 +79,7 @@ test("typed and pasted bare addresses become stored links with a plain-text Undo
   await page.keyboard.press("ControlOrMeta+z");
   await expect(links).toHaveCount(0);
   await expect(editor(page)).toHaveText(`www.example.com stays plain ${sentence}`);
+  await waitForAcknowledged(page, { path: "upstream" });
   await page.reload();
   await expect(editor(page)).toHaveText(`www.example.com stays plain ${sentence}`);
   await expect(links).toHaveCount(0);
