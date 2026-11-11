@@ -1,10 +1,12 @@
 /** Native, continuous read-only table. Unchanged rows retain their DOM and cells. */
+import type { DataRecord } from "@uberblick/schema";
 import { tableCellFormatter, tableAccessibleName, sortTableRows } from "./table-data.js";
-import type { TableCell, TableColumnMapping, TableProjection, TableReady } from "./table-data.js";
+import type { TableBarScale, TableCell, TableColumnMapping, TableProjection, TableReady } from "./table-data.js";
 
 type TableViewProjection = TableReady | Pick<Exclude<TableProjection, TableReady>, "status" | "message">;
 
-function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableColumnMapping["format"] | undefined): void {
+function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableColumnMapping["format"] | undefined,
+  scale: TableBarScale | null): void {
   if (cell.dataset.state !== value.state) cell.dataset.state = value.state;
   let content = cell.firstElementChild as HTMLElement | null;
   if (content === null) {
@@ -18,6 +20,30 @@ function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableC
   const wrap = value.state === "valid" && (format === "number" || format === "date")
     ? "scalar" : short ? "short" : "long";
   if (content.dataset.wrap !== wrap) content.dataset.wrap = wrap;
+  if (scale !== null) {
+    content.dataset.bar = "true";
+    if (content.firstElementChild === null) {
+      const text = document.createElement("span");
+      text.className = "ub-data-value";
+      const track = document.createElement("span");
+      track.className = "ub-data-bar";
+      track.setAttribute("aria-hidden", "true");
+      const fill = document.createElement("span");
+      fill.className = "ub-data-bar-fill";
+      track.append(fill);
+      content.append(text, track);
+    }
+    const text = content.firstElementChild as HTMLElement;
+    const track = content.lastElementChild as HTMLElement;
+    const fill = track.firstElementChild as HTMLElement;
+    if (text.textContent !== value.text) text.textContent = value.text;
+    track.dataset.signed = String(scale.signed);
+    const fraction = value.barValue === undefined || scale.max === 0 ? 0 : Math.min(Math.abs(value.barValue) / scale.max, 1);
+    const width = fraction * (scale.signed ? 50 : 100);
+    fill.style.width = `${width}%`;
+    fill.style.left = `${scale.signed ? value.barValue !== undefined && value.barValue < 0 ? 50 - width : 50 : 0}%`;
+    return;
+  }
   if (value.href !== undefined) {
     let anchor = content.firstElementChild as HTMLAnchorElement | null;
     if (anchor === null) {
@@ -30,6 +56,16 @@ function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableC
     if (anchor.getAttribute("href") !== value.href) anchor.href = value.href;
     if (anchor.textContent !== value.text) anchor.textContent = value.text;
   } else if (content.firstElementChild !== null || content.textContent !== value.text) content.textContent = value.text;
+}
+
+function renderRow(row: HTMLTableRowElement, record: DataRecord, projection: TableReady,
+  formatters: Array<ReturnType<typeof tableCellFormatter>>, onlyBars: boolean): void {
+  formatters.forEach((format, index) => {
+    const column = projection.config.columns[index];
+    if (onlyBars && column?.bar === undefined) return;
+    const cell = row.cells[index] ?? row.insertCell();
+    renderCell(cell, format(record), column?.format, projection.barScales[index] ?? null);
+  });
 }
 
 export function dataTableView(): {
@@ -51,6 +87,7 @@ export function dataTableView(): {
   table.append(caption, head, body);
   scroll.append(table);
   let columns = "";
+  let scales = "";
   let projection: TableReady | null = null;
   let readerSort: { index: number; direction: "asc" | "desc" } | null = null;
   let headers: Array<{ cell: HTMLTableCellElement; arrow: HTMLElement }> = [];
@@ -70,6 +107,9 @@ export function dataTableView(): {
     }
     projection = next;
     const { config } = next;
+    const nextScales = JSON.stringify(next.barScales);
+    const scaleChanged = scales !== nextScales;
+    scales = nextScales;
     const chosenColumn = readerSort === null ? undefined : config.columns[readerSort.index];
     const rows = chosenColumn === undefined ? next.rows : sortTableRows(next.rows, chosenColumn, readerSort?.direction ?? "asc");
     const sort = readerSort ?? (config.sort === undefined ? null : {
@@ -132,19 +172,11 @@ export function dataTableView(): {
       let row = rendered.get(record.id);
       if (row === undefined) {
         const element = document.createElement("tr");
-        for (const [index, format] of formatters.entries()) {
-          const cell = document.createElement("td");
-          renderCell(cell, format(record), config.columns[index]?.format);
-          element.append(cell);
-        }
+        renderRow(element, record, next, formatters, false);
         row = { element, value };
         rendered.set(record.id, row);
-      } else if (row.value !== value) {
-        const cells = row.element.cells;
-        formatters.forEach((format, index) => {
-          const cell = cells[index];
-          if (cell !== undefined) renderCell(cell, format(record), config.columns[index]?.format);
-        });
+      } else if (row.value !== value || scaleChanged) {
+        renderRow(row.element, record, next, formatters, row.value === value);
         row.value = value;
       }
       if (row.element === cursor) cursor = cursor.nextElementSibling;

@@ -34,7 +34,7 @@ export type {
   ChartConfig, ChartNoRecords, ChartProjection, ChartReady, ChartSeries, ChartSeriesMapping,
 } from "./chart-data.js";
 export { parseTableConfig, prepareTable, sortTableRows } from "./table-data.js";
-export type { TableColumnMapping, TableConfig, TableNoRecords, TableProjection, TableReady } from "./table-data.js";
+export type { TableBarScale, TableColumnMapping, TableConfig, TableNoRecords, TableProjection, TableReady } from "./table-data.js";
 export { parseScatterConfig, prepareScatter } from "./scatter-data.js";
 export type {
   ScatterAxisMapping, ScatterConfig, ScatterPoint, ScatterAxisDiagnostics, ScatterDiagnostics,

@@ -640,9 +640,16 @@ export const toolHelpDetails = {
     "data updates, clears when no longer plotted, and resets on a mapping edit, remount or reload. " +
     "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
-    "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
+    "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\",\"bar\":true}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
     "Its one to thirty ordered columns name fields, optional labels and formats text (default), number, date or link. " +
-    "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). Optional title " +
+    "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). " +
+    "Only table columns with format number accept bar: true, or {\"max\":N} whose only key is max and whose N is a finite number greater than zero. " +
+    "False, null, empty objects, nonpositive maxima, extra keys, other formats and scatter details are invalid. " +
+    "A bar sits beside the unchanged formatted number and scales from zero to the largest absolute numeric value among the shown rows; " +
+    "limit and live updates can change the scale, but header sorting cannot. max fixes that scale, clipping larger magnitudes to a full bar " +
+    "without changing their number. If any shown value is negative, all bars share a middle zero line, with negatives left and positives right; " +
+    "otherwise zero is at the left edge. Absent, null and invalid values keep their markers without bars, and zero has no visible bar. " +
+    "Screen readers and copied text get only the number. Optional title " +
     "supplies only the table's accessible name, and sort (one column field, direction asc or desc) orders rows. " +
     "Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order " +
     "(record-id order without sort). Without limit, every valid record appears in one continuous native table, " +

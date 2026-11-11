@@ -4,6 +4,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
+import { contrast } from "../test/colour.js";
 import { activateControl, createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { renderedText } from "./contrast-helpers.js";
@@ -200,6 +201,15 @@ async function cellLines(cells: Locator): Promise<number[]> {
     }
     return tops.size;
   }));
+}
+
+async function barGeometry(cell: Locator): Promise<{ width: number; left: number }> {
+  return cell.evaluate(element => {
+    const track = element.querySelector(".ub-data-bar")?.getBoundingClientRect();
+    const fill = element.querySelector(".ub-data-bar-fill")?.getBoundingClientRect();
+    if (track === undefined || fill === undefined || track.width === 0) throw new Error("e2e: bar geometry is missing");
+    return { width: fill.width / track.width, left: (fill.left - track.left) / track.width };
+  });
 }
 
 /**
@@ -565,6 +575,173 @@ test("table rules and touch targets match on iPad and narrow windows in both app
       await info.attach(`table-rules-${width}-${colorScheme}`, { path: screenshot, contentType: "image/png" });
     }
   }
+});
+
+test("in-cell bars align their numbers, keep readable ink and scroll inside the table in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "Magnitude comparisons",
+    columns: [
+      { field: "name", label: "Name" },
+      { field: "value", label: "Change", format: "number", decimals: 0, bar: true },
+      { field: "rate", label: "Resolved", format: "number", unit: "%", decimals: 0, bar: { max: 100 } },
+      { field: "value", label: "Number only", format: "number", decimals: 0 },
+      ...Array.from({ length: 5 }, (_, index) => ({ field: "value", label: `Comparison ${index + 1}`, format: "number", bar: true })),
+    ],
+  };
+  const uuid = await tableDoc(session, "In-cell bar appearance", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "Payments", value: 42, rate: 91 } },
+    { id: "b", value: { name: "Search", value: -21, rate: 64 } },
+    { id: "c", value: { name: "Billing", value: 7, rate: 38 } },
+    { id: "d", value: { name: "Zero", value: 0, rate: 0 } },
+    { id: "e", value: { name: "Null", value: null, rate: null } },
+    { id: "f", value: { name: "Absent" } },
+    { id: "g", value: { name: "Invalid", value: "bad", rate: "bad" } },
+  ] }] });
+  const touch = info.project.use.hasTouch === true;
+  for (const colorScheme of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+      colorScheme, locale: "en-US", hasTouch: touch, isMobile: info.project.use.isMobile === true,
+      viewport: { width: touch ? 810 : 1280, height: 1000 },
+      ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+      ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+    } });
+    await waitForDocumentDraw(page, session, uuid);
+    await page.evaluate(() => document.fonts.ready);
+    const table = page.getByRole("table", { name: "Magnitude comparisons", exact: true });
+    const rows = table.locator("tbody tr");
+    await expect(rows).toHaveCount(7);
+    const changes = rows.locator("td:nth-child(2)");
+    await expect(changes).toHaveText(["42", "-21", "7", "0", "Null", "Absent", "Invalid: bad"]);
+    await expect(rows.locator("td:nth-child(4) .ub-data-bar")).toHaveCount(0);
+    expect(await changes.locator(".ub-data-bar").evaluateAll(elements => elements.every(element => element.getAttribute("aria-hidden") === "true"))).toBe(true);
+    const geometry = await changes.evaluateAll(elements => elements.map(element => {
+      const value = element.querySelector(".ub-data-value");
+      const bar = element.querySelector(".ub-data-bar");
+      if (value === null || bar === null) throw new Error("e2e: bar column content is missing");
+      const text = document.createRange(); text.selectNodeContents(value);
+      const valueBounds = text.getBoundingClientRect();
+      const barBounds = bar.getBoundingClientRect();
+      const zero = getComputedStyle(bar, "::before");
+      return {
+        valid: element.getAttribute("data-state") === "valid", textRight: valueBounds.right,
+        barLeft: barBounds.left, barWidth: barBounds.width,
+        font: getComputedStyle(value).fontVariantNumeric,
+        ink: getComputedStyle(value).color, ordinaryInk: getComputedStyle(element.nextElementSibling?.nextElementSibling ?? element).color,
+        signed: bar.getAttribute("data-signed"), zeroLeft: Number.parseFloat(zero.left), zeroWidth: Number.parseFloat(zero.width),
+      };
+    }));
+    for (const cell of geometry) {
+      expect(cell.barWidth).toBeGreaterThan(0);
+      expect(Math.abs(cell.barLeft - (geometry[0]?.barLeft ?? Infinity))).toBeLessThanOrEqual(1);
+      expect(cell.signed).toBe("true");
+      expect(Math.abs(cell.zeroLeft - cell.barWidth / 2)).toBeLessThanOrEqual(1);
+      expect(cell.zeroWidth).toBeGreaterThan(0);
+      if (!cell.valid) continue;
+      expect(cell.font).toContain("tabular-nums");
+      expect(cell.ink).toBe(cell.ordinaryInk);
+      expect(cell.textRight).toBeLessThan(cell.barLeft);
+      expect(Math.abs(cell.textRight - (geometry[0]?.textRight ?? Infinity))).toBeLessThanOrEqual(1);
+    }
+    expect((await barGeometry(changes.nth(0))).width).toBeCloseTo(0.5, 2);
+    expect((await barGeometry(changes.nth(1))).left).toBeCloseTo(0.25, 2);
+    expect((await barGeometry(changes.nth(3))).width).toBe(0);
+    const readings = await renderedText(page, ".ub-data-table");
+    expect(readings.length).toBeGreaterThan(0);
+    for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    const fill = await changes.first().locator(".ub-data-bar-fill").evaluate(element => getComputedStyle(element).backgroundColor);
+    for (const ground of new Set(readings.map(reading => reading.ground))) expect(contrast(fill, ground)).toBeGreaterThanOrEqual(3);
+    const scroll = page.locator(".ub-table-scroll");
+    expect(await scroll.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (touch) await scroll.evaluate(element => { element.scrollLeft = 400; });
+    else {
+      await scroll.hover();
+      await page.mouse.wheel(400, 0);
+    }
+    await expect.poll(() => scroll.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    await scroll.evaluate(element => { element.scrollLeft = 0; });
+    const screenshot = info.outputPath(`in-cell-bars-${colorScheme}.png`);
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await info.attach(`in-cell-bars-${colorScheme}`, { path: screenshot, contentType: "image/png" });
+    await page.context().close();
+  }
+});
+
+test("in-cell bars preserve native text copying and redraw unchanged rows when live scales change", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "Live comparisons", limit: 3,
+    sort: { field: "name", direction: "asc" },
+    columns: [{ field: "name", label: "Name" }, { field: "value", label: "Value", format: "number", bar: true },
+      { field: "rate", label: "Fixed", format: "number", bar: { max: 100 } }],
+  };
+  const uuid = await tableDoc(session, "Native in-cell comparisons", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "A", value: 10, rate: 25 } },
+    { id: "b", value: { name: "B", value: 20, rate: 150 } },
+    { id: "c", value: { name: "C", value: 40, rate: -50 } },
+    { id: "d", value: { name: "D", value: 160, rate: 50 } },
+  ] }] });
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+    hasTouch: touch, isMobile: info.project.use.isMobile === true,
+    viewport: { width: touch ? 810 : 1280, height: 1000 },
+    ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+    ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+    ...(info.project.name === "chromium" ? { permissions: ["clipboard-read", "clipboard-write"] } : {}),
+  } });
+  await waitForDocumentDraw(page, session, uuid);
+  await page.evaluate(() => document.fonts.ready);
+  const table = page.getByRole("table", { name: "Live comparisons", exact: true });
+  const row = (name: string): Locator => table.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
+  const value = (name: string): Locator => row(name).locator("td").nth(1);
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["A", "B", "C"]);
+  expect((await barGeometry(value("B"))).width).toBeCloseTo(0.5, 2);
+  expect(await value("B").ariaSnapshot()).toBe('- cell "20"');
+  const copyValue = value("B").locator(".ub-data-value");
+  const copyPoint = await copyValue.evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    const text = range.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    return { x: text.right - box.left - 5, y: text.top - box.top + text.height / 2 };
+  });
+  await copyValue.click({ clickCount: 3, position: copyPoint });
+  expect((await page.evaluate(() => document.getSelection()?.toString() ?? "")).trim()).toBe("20");
+  await page.keyboard.press("ControlOrMeta+c");
+  if (info.project.name === "chromium") {
+    await expect.poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe("20");
+  } else {
+    await page.evaluate(() => {
+      const target = document.createElement("textarea"); target.dataset.barCopy = "true";
+      document.body.append(target); target.focus();
+    });
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect(page.locator("textarea[data-bar-copy]")).toHaveValue(/^(?:20\n?|\n?20)$/);
+    await page.locator("textarea[data-bar-copy]").evaluate(element => element.remove());
+  }
+  const sort = table.getByRole("button", { name: "Value", exact: true });
+  await activateControl(sort, { touch });
+  await activateControl(sort, { touch });
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["C", "B", "A"]);
+  expect((await barGeometry(value("B"))).width).toBeCloseTo(0.5, 2);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "c", value: { name: "C", value: 80, rate: -50 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(value("C")).toHaveText("80");
+  expect((await barGeometry(value("B"))).width).toBeCloseTo(0.25, 2);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "d", value: { name: "AA", value: 160, rate: 50 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["AA", "B", "A"]);
+  expect((await barGeometry(value("B"))).width).toBeCloseTo(0.125, 2);
+  const fixed = row("B").locator("td").nth(2);
+  await expect(fixed).toHaveText("150");
+  await expect(fixed.locator(".ub-data-bar")).toHaveAttribute("data-signed", "false");
+  expect((await barGeometry(fixed)).width).toBeCloseTo(1, 2);
 });
 
 test("every header sorts through native pointer and keyboard input without moving the document selection", { tag: "@webkit" }, async ({ browser }, info) => {
