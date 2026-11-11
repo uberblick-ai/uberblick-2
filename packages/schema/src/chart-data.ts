@@ -15,6 +15,7 @@ export interface ChartSeriesMapping {
   type?: "line" | "bar";
   range?: [number, number];
   reference?: number;
+  note?: string;
 }
 export interface ChartConfig {
   version: 1;
@@ -28,7 +29,7 @@ export interface ChartConfig {
   height?: number;
   missing: "gap" | "connect";
 }
-interface ChartPoint { x: number; y: number | null; id: string }
+interface ChartPoint { x: number; y: number | null; id: string; note?: string }
 export interface ChartSeries { field: string; label: string; unit?: string; type: "line" | "bar"; points: ChartPoint[] }
 interface ChartDiagnostics {
   invalidSchema: number;
@@ -75,8 +76,9 @@ export function parseChartConfig(source: string):
       !object(value.x) || !keys(value.x, ["field", "type", "label"]) ||
       !name(value.x.field) || (value.x.type !== "number" && value.x.type !== "date") ||
       !optionalText(value.x, "label") || !Array.isArray(value.y) || value.y.length < 1 || value.y.length > 8 ||
-      !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit", "type", "range", "reference"]) &&
+      !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit", "type", "range", "reference", "note"]) &&
         name(series.field) && optionalText(series, "label") && optionalText(series, "unit") &&
+        (!Object.hasOwn(series, "note") || name(series.note)) &&
         (!Object.hasOwn(series, "type") || series.type === "line" || series.type === "bar") &&
         (!Object.hasOwn(series, "range") || (Array.isArray(series.range) && series.range.length === 2 &&
           numeric(series.range[0]) && numeric(series.range[1]) && series.range[0] < series.range[1])) &&
@@ -148,7 +150,10 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
   if (binding.status !== "ready") return binding;
   const { collection, schema } = binding;
   const badField = incompatible(schema, config.x.field, config.x.type) ? config.x.field
-    : config.y.find((series) => incompatible(schema, series.field, "number"))?.field;
+    : config.y.flatMap((series) => [
+      { field: series.field, format: "number" as const },
+      ...(series.note === undefined ? [] : [{ field: series.note, format: "text" as const }]),
+    ]).find((mapping) => incompatible(schema, mapping.field, mapping.format))?.field;
   if (badField !== undefined) return { status: "mapping-incompatible", message: `Chart mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.` };
 
   const diagnostics: ChartDiagnostics = {
@@ -156,7 +161,7 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
     series: config.y.map((series) => ({ label: series.label || series.field, missing: 0, invalid: 0 })),
   };
   const invalid = new Set(collection.invalidRecordIds);
-  const rows: { id: string; x: number; values: unknown[]; hasY: boolean }[] = [];
+  const rows: { id: string; x: number; values: unknown[]; notes: unknown[]; hasY: boolean }[] = [];
   for (const record of collection.records) {
     if (invalid.has(record.id) || !object(record.value)) { diagnostics.invalidSchema += 1; continue; }
     const rawX = own(record.value as JSONObject, config.x.field);
@@ -164,8 +169,9 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
     const x = config.x.type === "number" ? (numeric(rawX) ? rawX : null) : chartDate(rawX);
     if (x === null) { diagnostics.invalidX += 1; continue; }
     const values = config.y.map((series) => own(record.value as JSONObject, series.field));
+    const notes = config.y.map((series) => series.note === undefined ? undefined : own(record.value as JSONObject, series.note));
     const hasY = values.some(numeric);
-    rows.push({ id: record.id, x, values, hasY });
+    rows.push({ id: record.id, x, values, notes, hasY });
   }
   rows.sort((a, b) => a.x - b.x || compareCodePoints(a.id, b.id));
   const limit = Math.min(config.limit ?? CHART_RECORD_LIMIT, CHART_RECORD_LIMIT);
@@ -182,7 +188,10 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
     ...(mapping.unit !== undefined ? { unit: mapping.unit } : {}),
     points: selected.flatMap((row): ChartPoint[] => {
       const value = row.values[index];
-      if (numeric(value)) return [{ x: row.x, y: value, id: row.id }];
+      const note = row.notes[index];
+      if (numeric(value)) return [{ x: row.x, y: value, id: row.id,
+        ...(typeof note === "string" && note.length > 0 ? { note } : {}),
+      }];
       const count = diagnostics.series[index];
       if (value === undefined || value === null) {
         if (count !== undefined) count.missing += 1;

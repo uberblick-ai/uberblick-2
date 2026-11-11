@@ -27,6 +27,10 @@ Views whose assertions read series or reference colours run in both:
 | Category grouped stacks, horizontal, desktop | ![Light horizontal category bars](category-horizontal-desktop-light.png) | ![Dark horizontal category bars](category-horizontal-desktop-dark.png) |
 | Category grouped stacks, vertical, iPad | ![Light iPad vertical category bars](category-vertical-ipad-light.png) | ![Dark iPad vertical category bars](category-vertical-ipad-dark.png) |
 | Category grouped stacks, horizontal, iPad | ![Light iPad horizontal category bars](category-horizontal-ipad-light.png) | ![Dark iPad horizontal category bars](category-horizontal-ipad-dark.png) |
+| Point notes, overlay, desktop | ![Light desktop point notes](notes-overlay-desktop-light.png) | ![Dark desktop point notes](notes-overlay-desktop-dark.png) |
+| Point notes, panels, desktop | ![Light desktop note panels](notes-panels-desktop-light.png) | ![Dark desktop note panels](notes-panels-desktop-dark.png) |
+| Point notes, overlay, iPad | ![Light iPad point notes](notes-overlay-ipad-light.png) | ![Dark iPad point notes](notes-overlay-ipad-dark.png) |
+| Point notes, panels, iPad | ![Light iPad note panels](notes-panels-ipad-light.png) | ![Dark iPad note panels](notes-panels-ipad-dark.png) |
 
 The category cases in `chart.spec.ts` observe native rectangle fills and text
 paint in both orientations and appearances. They check grouped positive and
@@ -198,6 +202,19 @@ rectangle observations separately check grouped bars, zero-based negative bars,
 missing values, endpoint and lone-x containment, bars behind lines, filled legend
 swatches and mapping-order shared tooltips. The mixed fixture runs in Chromium
 and WebKit in both appearances.
+
+The compact point-note fixtures use native canvas text, glyph bounds, marker
+arcs and bar fills in overlay and panels. Their note-free and annotated draws
+must paint identical value ticks on automatic axes. They check top-point ink
+inside the canvas, muted note contrast in light and dark, single-line
+ellipsis, collision omission, sparse bar-note alignment, notes outside positive
+and negative bar ends, and retained markers on dense lines. Desktop pointer
+and explicit iPad touch show native tooltips with unchanged value lines,
+mapping-order full notes, omitted labels and literal markup text. The static
+text alternative remains unchanged. Run these fixtures with
+`mise run e2e -- chart.spec.ts --grep 'point notes' --project=chromium --project=webkit-ipad`.
+Attachments named `chart-notes-{overlay,panels}-{desktop,ipad}-{light,dark}.png`
+become the correspondingly named evidence files above without `chart-`.
 
 Copy the mixed-chart screenshots from a fresh Chromium run:
 

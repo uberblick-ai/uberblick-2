@@ -128,7 +128,7 @@ async function categoryRecords(session: McpSession, uuid: string, records: unkno
   }] });
 }
 
-interface PaintedText { canvas: number; text: string; color: string; x: number; y: number; width: number; left: number; right: number; font: string; rotated: boolean }
+interface PaintedText { canvas: number; text: string; color: string; x: number; y: number; width: number; left: number; right: number; top: number; bottom: number; font: string; rotated: boolean }
 interface PaintedPoint { canvas: number; x: number; y: number; radius: number; color: string }
 interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: PaintedPoint[] }
 interface PaintedRectangle { left: number; right: number; top: number; bottom: number }
@@ -720,11 +720,14 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         const metrics = this.measureText(args[0]);
         const left = transform.transformPoint({ x: args[1] - metrics.actualBoundingBoxLeft, y: args[2] });
         const right = transform.transformPoint({ x: args[1] + metrics.actualBoundingBoxRight, y: args[2] });
+        const top = transform.transformPoint({ x: args[1], y: args[2] - metrics.actualBoundingBoxAscent });
+        const bottom = transform.transformPoint({ x: args[1], y: args[2] + metrics.actualBoundingBoxDescent });
         probe.ink.push({ canvas: [...document.querySelectorAll(".ub-chart canvas")].indexOf(this.canvas),
           text: args[0], color: String(this.fillStyle), x: position.x * box.width / this.canvas.width,
           y: position.y * box.height / this.canvas.height,
           width: metrics.width * Math.hypot(transform.a, transform.b) * box.width / this.canvas.width,
-          left: left.x * box.width / this.canvas.width, right: right.x * box.width / this.canvas.width, font: this.font,
+          left: left.x * box.width / this.canvas.width, right: right.x * box.width / this.canvas.width,
+          top: top.y * box.height / this.canvas.height, bottom: bottom.y * box.height / this.canvas.height, font: this.font,
           rotated: Math.abs(transform.b) > 0.000001 || Math.abs(transform.c) > 0.000001 });
       }
       fillText.apply(this, args);
@@ -854,6 +857,177 @@ function expectUnchangedBarGeometry(before: PaintedBar[], after: PaintedBar[]): 
     expect(next?.canvas).toBe(bar.canvas);
     expect((next?.right ?? NaN) - (next?.left ?? NaN)).toBeCloseTo(bar.right - bar.left, 1);
     expect(((next?.left ?? NaN) + (next?.right ?? NaN)) / 2).toBeCloseTo((bar.left + bar.right) / 2, 1);
+  });
+}
+
+for (const layout of ["overlay", "panels"] as const) {
+  test(`point notes keep compact ${layout} charts readable without changing their axes`, { tag: "@webkit" }, async ({ browser }, info) => {
+    const session = writer();
+    const longNote = "Long note with the full release details that cannot fit above a single point in this compact chart";
+    const mapping = {
+      version: 1, type: "line", collection: "measurements", layout, height: layout === "panels" ? 150 : 200,
+      title: "Point notes", x: { field: "x", type: "number" }, y: [
+        { field: "peak", label: "Peak", unit: "%", note: "peakNote" },
+        { field: "peer", label: "Peer", unit: "%", note: "peerNote" },
+        { field: "runs", label: "Runs", unit: "%", type: "bar", note: "barNote" },
+      ],
+    };
+    const withoutNotes = { ...mapping, y: mapping.y.map(({ note: _note, ...series }) => series) };
+    const uuid = await chartDoc(session, "Point notes in compact charts", withoutNotes);
+    await session.call("update_data", { uuid, operations: [{ collection: "measurements",
+      schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: Array.from({ length: 41 }, (_, x) => ({ id: `point-${x}`, value: {
+        x, peak: x === 20 ? 100 : x === 10 ? -40 : 20, peer: 20,
+        ...(x === 10 ? { peakNote: longNote } : x === 20 ? { peakNote: "<b>Highest</b>" }
+          : x === 30 ? { peakNote: "Collision first", peerNote: "Collision second" }
+          : x === 31 ? { peakNote: "Adjacent note" } : {}),
+        ...(x === 0 ? { runs: -100 } : x === 5 ? { runs: -70, barNote: "Negative bar" }
+          : x === 38 ? { runs: 70, barNote: "Positive bar" }
+          : x === 30 ? { runs: -20, barNote: "Third note" } : {}),
+      } })),
+    }] });
+    const touch = info.project.use.hasTouch === true;
+    for (const appearance of ["light", "dark"] as const) {
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        beforeNavigate: async loading => { await installProbe(loading, uuid); await installBarProbe(loading); },
+        contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false }),
+          locale: "en-US", colorScheme: appearance },
+      });
+      await waitForDocumentDraw(page, session, uuid);
+      await page.evaluate(() => document.fonts.ready);
+      const valueTicks = async () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
+        .filter(entry => /^-?\d+(?:\.\d+)?%$/.test(entry.text)).map(entry => `${entry.canvas}:${entry.text}`));
+      const baselineTicks = await valueTicks();
+      expect(baselineTicks.length).toBeGreaterThan(0);
+      const image = page.getByRole("img", { name: "Point notes", exact: true });
+      const alternative = await image.getAttribute("aria-describedby");
+      if (alternative === null) throw new Error("e2e: point-note description is missing");
+      const baselineDescription = await page.locator(`[id="${alternative}"]`).textContent();
+      await editMapping(session, uuid, JSON.stringify(mapping));
+      await waitForDocumentDraw(page, session, uuid);
+      await expect.poll(valueTicks).toEqual(baselineTicks);
+      await expect(page.locator(`[id="${alternative}"]`)).toHaveText(baselineDescription ?? "");
+      expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(touch);
+      const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+      const notePattern = /^(Long note |<b>Highest<\/b>$|Collision (first|second)$|Adjacent note$|Negative bar$|Positive bar$|Third note$)/;
+      const notes = await expectPaintedTextColour(page, notePattern);
+      const highest = notes.find(entry => entry.text === "<b>Highest</b>");
+      const shortened = notes.find(entry => entry.text.startsWith("Long note "));
+      if (highest === undefined || shortened === undefined) throw new Error("e2e: highest or long point note is absent");
+      expect(shortened.text).not.toBe(longNote);
+      expect(shortened.text).toMatch(/…$/);
+      expect(shortened.text).not.toContain("\n");
+      expect(highest.top).toBeGreaterThanOrEqual(0);
+      expect(await page.evaluate(note => {
+        const canvas = document.querySelectorAll<HTMLCanvasElement>(".ub-chart canvas")[note.canvas];
+        const context = canvas?.getContext("2d");
+        if (canvas === undefined || context === null || context === undefined) throw new Error("e2e: highest-note pixels are absent");
+        const box = canvas.getBoundingClientRect(), scale = canvas.width / box.width;
+        const left = Math.max(0, Math.floor(note.left * scale)), top = Math.max(0, Math.floor(note.top * scale));
+        const width = Math.ceil((note.right - note.left) * scale) + 1, height = Math.ceil((note.bottom - note.top) * scale) + 1;
+        const ink = context.getImageData(left, top, width, height).data;
+        const swatch = document.createElement("canvas").getContext("2d");
+        if (swatch === null) throw new Error("e2e: note colour swatch is absent");
+        swatch.fillStyle = note.color;
+        swatch.fillRect(0, 0, 1, 1);
+        const colour = swatch.getImageData(0, 0, 1, 1).data;
+        let pixels = 0;
+        for (let index = 0; index < ink.length; index += 4) {
+          if (Math.abs((ink[index] ?? 0) - (colour[0] ?? 0)) < 20
+            && Math.abs((ink[index + 1] ?? 0) - (colour[1] ?? 0)) < 20
+            && Math.abs((ink[index + 2] ?? 0) - (colour[2] ?? 0)) < 20 && (ink[index + 3] ?? 0) > 200) pixels += 1;
+        }
+        return pixels;
+      }, highest)).toBeGreaterThan(5);
+      const linePoints = probe.points.filter(point => point.canvas === 0).sort((a, b) => a.x - b.x);
+      expect(linePoints.length).toBeGreaterThanOrEqual(4);
+      expect(linePoints.length).toBeLessThan(41);
+      const anchors = linePoints.filter((point, index) => index === 0 || Math.abs(point.x - (linePoints[index - 1]?.x ?? NaN)) > 0.5);
+      expect(anchors).toHaveLength(4);
+      const topPoint = anchors[1];
+      if (topPoint === undefined) throw new Error("e2e: annotated top-point marker is absent");
+      expect(topPoint.radius).toBeGreaterThan(0);
+      expect(highest.bottom).toBeLessThan(topPoint.y - topPoint.radius);
+      const lowPoint = anchors[0];
+      if (lowPoint === undefined) throw new Error("e2e: annotated low-point marker is absent");
+      const ticks = probe.ink.filter(entry => entry.canvas === 0 && /^-?\d+(?:\.\d+)?%$/.test(entry.text) && entry.right < lowPoint.x);
+      expect(ticks.length).toBeGreaterThan(0);
+      for (const tick of ticks) {
+        const value = -40 + (tick.y - lowPoint.y) / (topPoint.y - lowPoint.y) * 140;
+        expect(Number(tick.text.slice(0, -1)), `tick ${tick.text} misstates its gridline after notes reserve space`).toBeCloseTo(value, 3);
+      }
+      const firstCanvasCollisions = notes.filter(entry => entry.canvas === 0 && /^(Collision (first|second)|Adjacent note)$/.test(entry.text));
+      expect(firstCanvasCollisions).toHaveLength(1);
+      for (const note of notes) {
+        expect(note.rotated).toBe(false);
+        expect(note.left).toBeGreaterThanOrEqual(-0.5);
+        const box = await page.locator(".ub-chart canvas").nth(note.canvas).boundingBox();
+        if (box === null) throw new Error("e2e: note canvas is missing");
+        expect(note.right).toBeLessThanOrEqual(box.width + 0.5);
+        expect(note.bottom).toBeLessThanOrEqual(box.height + 0.5);
+        for (const other of notes) {
+          if (note === other || note.canvas !== other.canvas) continue;
+          expect(note.left < other.right && note.right > other.left && note.top < other.bottom && note.bottom > other.top,
+            `${note.text} overlaps ${other.text}`).toBe(false);
+        }
+      }
+      const barCanvas = layout === "panels" ? 2 : 0;
+      const bars = (await barGeometry(page)).filter(bar => bar.canvas === barCanvas).sort((a, b) => a.left - b.left);
+      expect(bars).toHaveLength(4);
+      const negative = notes.find(entry => entry.text === "Negative bar");
+      const positive = notes.find(entry => entry.text === "Positive bar");
+      if (negative === undefined || positive === undefined) throw new Error("e2e: sparse bar notes are absent");
+      expect(negative.top).toBeGreaterThan(bars[1]?.bottom ?? Infinity);
+      expect(positive.bottom).toBeLessThan(bars[3]?.top ?? -Infinity);
+      for (const [note, bar] of [[negative, bars[1]], [positive, bars[3]]] as const) {
+        const center = ((bar?.left ?? NaN) + (bar?.right ?? NaN)) / 2;
+        expect(note.left).toBeLessThanOrEqual(center);
+        expect(note.right).toBeGreaterThanOrEqual(center);
+      }
+      await canvasEvidence(page.locator(".ub-chart"), info, `chart-notes-${layout}-${touch ? "ipad" : "desktop"}-${appearance}`);
+      const pointCanvas = page.locator(".ub-chart canvas").first();
+      await pointCanvas.scrollIntoViewIfNeeded();
+      const box = await pointCanvas.boundingBox();
+      if (box === null) throw new Error("e2e: point-note canvas is missing");
+      const showTooltip = async (point: PaintedPoint, expected: string[]): Promise<void> => {
+        await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
+        const y = box.y + (lowPoint.y + topPoint.y) / 2;
+        if (touch) await page.touchscreen.tap(box.x + point.x, y);
+        else await page.mouse.move(box.x + point.x, y);
+        await expect.poll(() => page.evaluate(first => {
+          const texts = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts;
+          return texts.slice(texts.lastIndexOf(first)).join("");
+        }, expected[0] ?? "")).toBe(expected.join(""));
+        const tooltipInk = await page.evaluate(first => {
+          const ink = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink;
+          return ink.slice(ink.findLastIndex(entry => entry.text === first));
+        }, expected[0] ?? "");
+        for (const line of tooltipInk) {
+          expect(line.left, line.text).toBeGreaterThanOrEqual(-0.5);
+          expect(line.right, line.text).toBeLessThanOrEqual(box.width + 0.5);
+          expect(line.top, line.text).toBeGreaterThanOrEqual(-0.5);
+          expect(line.bottom, line.text).toBeLessThanOrEqual(box.height + 0.5);
+        }
+      };
+      const collisionPoint = anchors[2], adjacentPoint = anchors[3], longPoint = anchors[0];
+      if (collisionPoint === undefined || adjacentPoint === undefined || longPoint === undefined) throw new Error("e2e: dense note markers are absent");
+      await showTooltip(collisionPoint, layout === "overlay"
+        ? ["Peak: 20 %", "Peer: 20 %", "Runs: -20 %", "Collision first", "Collision second", "Third note"]
+        : ["Peak: 20 %", "Collision first"]);
+      await showTooltip(adjacentPoint, layout === "overlay"
+        ? ["Peak: 20 %", "Peer: 20 %", "Adjacent note"] : ["Peak: 20 %", "Adjacent note"]);
+      await showTooltip(longPoint, layout === "overlay"
+        ? ["Peak: -40 %", "Peer: 20 %", longNote] : ["Peak: -40 %", longNote]);
+      await showTooltip(topPoint, layout === "overlay"
+        ? ["Peak: 100 %", "Peer: 20 %", "<b>Highest</b>"] : ["Peak: 100 %", "<b>Highest</b>"]);
+      await editMapping(session, uuid, JSON.stringify(withoutNotes));
+      await waitForDocumentDraw(page, session, uuid);
+      if (touch) {
+        await page.touchscreen.tap(box.x + topPoint.x, box.y + (lowPoint.y + topPoint.y) / 2);
+        await expect(page.locator(".ub-chart-source")).toBeVisible();
+      }
+      await page.close();
+    }
   });
 }
 
