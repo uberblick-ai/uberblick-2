@@ -14,6 +14,27 @@ const tagAuthority =
   "no extra rights. Check `applied`, `synced` and `hub`: local application is not hub acknowledgement, and " +
   "a refused change is never reported as `synced: true`.";
 
+const categoryBarGuidance =
+  "For named categories use type bar, for example " +
+  "`{\"version\":1,\"type\":\"bar\",\"collection\":\"tickets\",\"category\":{\"field\":\"team\",\"label\":\"Team\"}," +
+  "\"y\":[{\"field\":\"open\",\"stack\":\"tickets\"},{\"field\":\"closed\",\"stack\":\"tickets\"}],\"orientation\":\"horizontal\"}`. " +
+  "category takes field and optional label; y has one to eight numeric series with field and optional label, unit, stack, range and reference. " +
+  "Series sharing a stack name stack; different or absent stack names sit side by side. Bars start at zero, with negative values stacking separately. " +
+  "orientation is vertical by default or horizontal. Optional sort names the category field (text order) or a series field (numeric order), " +
+  "with direction asc or desc; absent, null and invalid values follow valid values in either direction, and ties keep record-id order. " +
+  "Without sort, records keep record-id order. Optional positive-integer limit selects the first N after sorting, up to 5,000 drawn categories, " +
+  "with shown/total counts when records are hidden. Equal category values remain separate groups; schema-invalid records or absent/null categories " +
+  "are omitted and counted. A category without numeric series keeps an empty group; absent, null and wrong-type series values draw no bar. " +
+  "Values are never coerced or calculated. There is one value axis: unit, range, reference and title keep their line meaning, " +
+  "including zero and widening ranges for drawn stacks and references. The axis shows a unit only when all series share one, " +
+  "counting absent and empty units as equal. References cross the categories. Optional height is 100–600 whole pixels with the usual resize controls. " +
+  "Without height, vertical bars keep the line overlay size and horizontal bars grow with category count up to 600 pixels. " +
+  "Crowded axis labels are skipped and long labels shortened; hover, tap and keyboard reveal the full category and numeric values in mapping order " +
+  "with each series label and unit. A bar click or tap shows values; other drawing clicks and Open chart source open source in editable and read-only documents. " +
+  "layout, missing, x, a series type and unknown keys are invalid. Bound bar summaries have status, recordCount, plottedCount and warnings, " +
+  "with no record values, series counts or x endpoints. plottedCount counts shown categories with at least one numeric series. " +
+  "A chart that cannot draw includes its problem message and warning; every series with no numeric values in the shown categories warns by field name. ";
+
 export const toolHelpDetails = {
   list_tags:
     "The existing workspace tag catalog is returned in deterministic name order. Each entry carries the stable canonical " +
@@ -87,7 +108,7 @@ export const toolHelpDetails = {
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Chart seeds return a `chart` summary beside each block's id and rev, using this replica's current data. " +
     "A new document has no data yet: a valid mapping reports collection-absent, and invalid JSON reports " +
-    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " +
+    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " + categoryBarGuidance +
     "Ablauf and wireframe code seeds return a `drawing` summary with the diagnostics the web editor lists; " +
     "they never refuse creation either. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
@@ -403,7 +424,7 @@ export const toolHelpDetails = {
     "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
     "includes its first and last x, with no other record values. A bound scatter mapping reports recordCount " +
     "and plottedCount without record values, and warns when its group field has more than eight values. Warnings and summary failures never refuse " +
-    "or roll back the edit, or change its durability result. See data for the full summary contract. " +
+    "or roll back the edit, or change its durability result. See data for the full summary contract. " + categoryBarGuidance +
     "Editing an ablauf or wireframe code block returns a `drawing` summary instead: `status` and the " +
     "diagnostics the web editor lists, advisory like the chart summary.\n\n" +
     "For an existing list item, optional `list` (`bullet` or `ordered`) and `indent` (integer 0–3) change " +
@@ -598,6 +619,7 @@ export const toolHelpDetails = {
     "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
     "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
+    categoryBarGuidance +
     "A scatter plot uses type scatter, for example " +
     "`{\"version\":1,\"type\":\"scatter\",\"collection\":\"options\",\"x\":{\"field\":\"cost\"}," +
     "\"y\":{\"field\":\"quality\",\"unit\":\"%\",\"lower\":\"quality_low\",\"upper\":\"quality_high\",\"range\":[0,100]}," +
@@ -628,8 +650,8 @@ export const toolHelpDetails = {
     "with no pager or page state; when limit hides rows, the footnote includes shown and total valid-record counts. " +
     "Open table source appears on hover or keyboard focus and stays reachable without hover. " +
     "Existing pageSize values remain accepted as integers from one to one hundred for compatibility and never affect display; " +
-    "omit pageSize from new mappings. For line and table views, limit has no upper bound of its own. Records hidden by " +
-    "the author limit are not omissions. When it hides chart records, a muted note shows the latest shown and " +
+    "omit pageSize from new mappings. For line, category-bar and table views, limit has no upper bound of its own. Records hidden by " +
+    "the author limit are not omissions. When it hides line-chart records, a muted note shows the latest shown and " +
     "total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing " +
     "notice and diagnostics when N exceeds 5,000. update_data recomputes a limited window without changing its source. " +
     "Unknown mapping keys and options are invalid. All views only " +

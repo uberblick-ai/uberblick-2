@@ -58,6 +58,26 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("successful MCP output contracts", () => {
+  it("accepts private category-bar counts and rejects record data in the strict chart summary", () => {
+    const payload = {
+      uuid: randomUUID(), applied: true, synced: false, hub,
+      blocks: [{ id: "chart", rev: "read-rev", chart: {
+        status: "ready", recordCount: 4, plottedCount: 2, warnings: ["No numeric values for series field “empty”."],
+      } }],
+    };
+    expect(outputSchemas.insert_block.safeParse(payload).success).toBe(true);
+    const empty = { ...payload, blocks: [{ ...payload.blocks[0], chart: {
+      status: "no-records", message: "No plottable records in this chart collection.",
+      recordCount: 4, plottedCount: 0, warnings: ["No plottable records in this chart collection."],
+    } }] };
+    expect(outputSchemas.insert_block.safeParse(empty).success).toBe(true);
+    for (const extra of [{ rows: [{ label: "PRIVATE_LABEL", values: [42] }] }, { category: "PRIVATE_LABEL" }, { plottedCount: -1 }]) {
+      expect(outputSchemas.insert_block.safeParse({ ...payload,
+        blocks: [{ ...payload.blocks[0], chart: { ...payload.blocks[0]!.chart, ...extra } }],
+      }).success).toBe(false);
+    }
+  });
+
   it("advertises current table widths while preserving historical and write result shapes", async () => {
     const rig = await startServer();
     close.push(() => rig.close());

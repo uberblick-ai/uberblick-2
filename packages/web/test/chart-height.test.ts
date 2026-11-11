@@ -18,6 +18,12 @@ function change(source: string, height: number | undefined): string {
 }
 
 describe("chart height source edits", () => {
+  it("changes only category bar height while retaining orientation, stacks and authored formatting", () => {
+    const bar = '{ "version":1,"type":"bar","collection":"points","category":{"field":"name"},"orientation":"horizontal","y":[{"field":"a","stack":"eu","reference":0.5},{"field":"b","stack":"eu"}],"sort":{"field":"name","direction":"desc"},"limit":10 }';
+    const resized = change(bar, 320);
+    expect(resized).toBe(`${bar.slice(0, -2)},"height":320 }`);
+    expect(change(resized, undefined)).toBe(bar);
+  });
   it("changes only scatter height and preserves authored details and bound mappings", () => {
     const scatter = '{ "version":1,"type":"scatter","collection":"points","x":{"field":"x","lower":"low"},"y":{"field":"y"},"label":"name","details":[{"field":"url","format":"link"}] }';
     const resized = change(scatter, 320);

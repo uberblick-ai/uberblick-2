@@ -23,6 +23,27 @@ Views whose assertions read series or reference colours run in both:
 | Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
 | Scatter points and stored bounds, desktop | ![Light desktop scatter](scatter-desktop-light.png) | ![Dark desktop scatter](scatter-desktop-dark.png) |
 | Scatter points and selected details, iPad portrait | ![Light iPad scatter](scatter-ipad-light.png) | ![Dark iPad scatter](scatter-ipad-dark.png) |
+| Category grouped stacks, vertical, desktop | ![Light vertical category bars](category-vertical-desktop-light.png) | ![Dark vertical category bars](category-vertical-desktop-dark.png) |
+| Category grouped stacks, horizontal, desktop | ![Light horizontal category bars](category-horizontal-desktop-light.png) | ![Dark horizontal category bars](category-horizontal-desktop-dark.png) |
+| Category grouped stacks, vertical, iPad | ![Light iPad vertical category bars](category-vertical-ipad-light.png) | ![Dark iPad vertical category bars](category-vertical-ipad-dark.png) |
+| Category grouped stacks, horizontal, iPad | ![Light iPad horizontal category bars](category-horizontal-ipad-light.png) | ![Dark iPad horizontal category bars](category-horizontal-ipad-dark.png) |
+
+The category cases in `chart.spec.ts` observe native rectangle fills and text
+paint in both orientations and appearances. They check grouped positive and
+negative stacks, independent series, zero and declared ranges widened by
+stacks, neutral reference strokes across the category axis, duplicate labels,
+an empty labelled group, shortened axis text and full category values.
+Desktop pointer and iPad touch select a bar without opening source; the native
+selector reaches every group, including empty groups, and Tab leaves it.
+Live sort/limit windows, resize and the iPad Height field, locked source
+inspection and read-only selection use the production editor. A narrow
+320-pixel drawing retains all six category labels beside an eight-row legend;
+40 categories reach the 600-pixel cap, skip crowded ticks and remain selectable.
+
+Regenerate category evidence with `mise run e2e -- chart.spec.ts --grep category
+--project=chromium --project=webkit-ipad`. Attachments named
+`chart-category-{vertical,horizontal}-{desktop,ipad}-{light,dark}.png` become
+the correspondingly named files above without the `chart-` prefix.
 
 `scatter.spec.ts` uses synthetic observations with three named groups and an
 ungrouped record sharing another record's coordinates. Native canvas strokes

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { render } from "@uberblick/ablauf";
-import { createTagCatalogEntry, parseScatterConfig, setTags } from "@uberblick/schema";
+import { createTagCatalogEntry, parseScatterConfig, prepareChartView, setTags } from "@uberblick/schema";
 import { parseWireframe } from "@uberblick/wireframe";
 import { afterEach, expect, it, vi } from "vitest";
 import { FAILURE_INSTRUCTIONS } from "../src/failures.js";
@@ -36,6 +36,23 @@ function jsonSection(text: string, heading: string): any {
   if (json === undefined) throw new Error(`Help has no JSON in its ${heading} section`);
   return JSON.parse(json);
 }
+
+it("publishes a valid category-bar example and its private summary on every chart-writing help surface", async () => {
+  const rig = await local();
+  for (const topic of ["data", "create_doc", "insert_block", "edit_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    const example = text.match(/\{"version":1,"type":"bar"[^\n`]*\}/)?.[0];
+    expect(example, topic).toBeDefined();
+    const view = prepareChartView(example!, null);
+    expect(view.type, topic).toBe("bar");
+    expect(view.projection.status, topic).toBe("collection-absent");
+    for (const field of ["category", "stack", "orientation", "sort", "limit", "recordCount", "plottedCount", "warnings"]) {
+      expect(text, `${topic}: ${field}`).toContain(field);
+    }
+    expect(text, topic).toContain("no record values");
+    expect(text, topic).toContain("no numeric values");
+  }
+});
 
 it("lists every concept and registered tool once, with the same Markdown through both read routes", async () => {
   const rig = await local();

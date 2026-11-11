@@ -1,5 +1,5 @@
 /** Locale formatting and accessible presentation stay in the web client. */
-import type { ChartConfig, ChartProjection, ChartReady, TableProjection } from "@uberblick/schema";
+import type { BarConfig, BarReady, ChartConfig, ChartProjection, ChartReady, TableProjection } from "@uberblick/schema";
 export {
   CHART_RECORD_LIMIT, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT, chartDate,
   parseChartConfig, prepareChart,
@@ -41,12 +41,14 @@ export function formatChartNumber(value: number, locale?: string): string {
 export function formatChartX(value: number, type: ChartConfig["x"]["type"], locale?: string): string {
   return type === "number" ? formatChartNumber(value, locale) : chartDateFormatter(locale)(value);
 }
-export function chartAccessibleName(config: ChartConfig): string {
+export function chartAccessibleName(config: ChartConfig | BarConfig): string {
+  if (config.type === "bar") return config.title || `Bar chart of ${config.y.map(series => series.label || series.field).join(", ")} by ${config.category.label || config.category.field}`;
   const bars = config.y.filter((series) => series.type === "bar").length;
   const kind = bars === config.y.length ? "Bar" : bars > 0 ? "Line and bar" : "Line";
   return config.title || `${kind} chart of ${config.y.map((series) => series.label || series.field).join(", ")} by ${config.x.label || config.x.field}`;
 }
-export function chartAccessibleDescription(chart: ChartReady, locale?: string): string {
+export function chartAccessibleDescription(chart: ChartReady | BarReady, locale?: string): string {
+  if ("rows" in chart) return `${chart.plottedCount} plotted ${chart.plottedCount === 1 ? "record" : "records"} in ${chart.rows.length} categories. Select a category to read its full label and numeric series values.`;
   const latest = chart.series.map((series) => {
     const point = series.points.findLast((candidate) => candidate.y !== null);
     return `${series.label}: ${point?.y !== undefined && point.y !== null ? `${formatChartNumber(point.y, locale)}${series.unit ? ` ${series.unit}` : ""}` : "no plotted value"}`;
