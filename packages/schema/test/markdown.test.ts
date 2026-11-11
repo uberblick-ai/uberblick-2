@@ -67,6 +67,63 @@ describe("web addresses in Markdown prose", () => {
     doc.destroy();
   });
 
+  it.each([
+    "https://example.com/_next/a",
+    "https://example.com/a\\b*part[0]~~draft",
+    "https://example.com/`part`/end",
+    "www.example.com/_next/a",
+  ])("round-trips the text and target of an exported plain address %s", (address) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Plain address" });
+    appendBlock(doc, { type: "paragraph", text: `See ${address} now` });
+    const imported = importMarkdown(exportMarkdown(doc, { frontmatter: false }));
+    expect(imported.blocks[0]).toMatchObject({
+      text: `See ${address} now`,
+      inline: [
+        { text: "See ", marks: {} },
+        { text: address, marks: { link: address.startsWith("www.") ? `https://${address}` : address } },
+        { text: " now", marks: {} },
+      ],
+    });
+    doc.destroy();
+  });
+
+  it("keeps escaped trailing punctuation outside an exported plain address's target", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Address punctuation" });
+    appendBlock(doc, { type: "paragraph", text: "See https://example.com/path* now" });
+    expect(importMarkdown(exportMarkdown(doc, { frontmatter: false })).blocks[0]).toMatchObject({
+      text: "See https://example.com/path* now",
+      inline: [
+        { text: "See ", marks: {} },
+        { text: "https://example.com/path", marks: { link: "https://example.com/path" } },
+        { text: "* now", marks: {} },
+      ],
+    });
+    doc.destroy();
+  });
+
+  it("keeps non-web angle text stable through repeated Markdown round trips", () => {
+    const text = "<ab:c*d*> and <todo:[x]> and <ab:c *d*> and <todo: [x]>";
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Literal angles" });
+    appendBlock(doc, { type: "paragraph", text });
+    const markdown = exportMarkdown(doc, { frontmatter: false });
+    expect(importMarkdown(markdown).blocks).toEqual([{ type: "paragraph", text }]);
+    const reimported = docFrom(markdown);
+    expect(exportMarkdown(reimported, { frontmatter: false })).toBe(markdown);
+    reimported.destroy();
+    doc.destroy();
+  });
+
+  it("recognizes a bare address inside an angle span with invalid whitespace", () => {
+    expect(parseInline("<note: see https://example.com path>")).toEqual([
+      { text: "<note: see ", marks: {} },
+      { text: "https://example.com", marks: { link: "https://example.com" } },
+      { text: " path>", marks: {} },
+    ]);
+  });
+
   it("stores angle, bare and www addresses as ordinary links and round-trips them", () => {
     const source = "See <https://example.com/a>, http://example.com/path. And www.example.com?q=(yes)).";
     const imported = importMarkdown(source);
@@ -98,12 +155,18 @@ describe("web addresses in Markdown prose", () => {
     ]);
   });
 
-  it("retains literal backticks in address paths when they do not open code", () => {
-    for (const source of ["https://example.com`unfinished", "https://example.com\\`escaped\\`"]) {
-      expect(parseInline(source)).toEqual([{ text: source, marks: { link: source } }]);
-    }
+  it("retains unclosed backticks and decodes escaped backticks in address paths", () => {
+    expect(parseInline("https://example.com`unfinished")).toEqual([
+      { text: "https://example.com`unfinished", marks: { link: "https://example.com`unfinished" } },
+    ]);
+    expect(parseInline("https://example.com\\`escaped\\`")).toEqual([
+      { text: "https://example.com`escaped`", marks: { link: "https://example.com`escaped`" } },
+    ]);
     expect(parseInline("<https://example.com`literal>")).toEqual([
       { text: "https://example.com`literal", marks: { link: "https://example.com`literal" } },
+    ]);
+    expect(parseInline("<https://example.com/\\_literal>")).toEqual([
+      { text: "https://example.com/\\_literal", marks: { link: "https://example.com/\\_literal" } },
     ]);
   });
 

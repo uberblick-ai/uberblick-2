@@ -69,14 +69,20 @@ export const WebAddresses = Extension.create({
           const typed = input;
           input = null;
           const sync = tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined;
+          // known limit: a remote edit before address completion leaves it plain; revisit when provenance uses relative positions.
           if (sync?.isChangeOrigin === true) return null;
           if (tr.getMeta(typedKey)) return previous;
-          if (typed === null || typed.from + typed.text.length > tr.doc.content.size ||
-            tr.doc.textBetween(typed.from, typed.from + typed.text.length) !== typed.text) return null;
-          const added = { from: typed.from, to: typed.from + typed.text.length };
           const mapped = previous === null ? null : {
             from: tr.mapping.map(previous.from, 1), to: tr.mapping.map(previous.to, -1),
           };
+          if (typed === null) {
+            let inserted = false;
+            for (const map of tr.mapping.maps) map.forEach((_oldFrom, _oldTo, from, to) => { inserted ||= from < to; });
+            return !inserted && mapped !== null && mapped.from < mapped.to ? mapped : null;
+          }
+          if (typed.from + typed.text.length > tr.doc.content.size ||
+            tr.doc.textBetween(typed.from, typed.from + typed.text.length) !== typed.text) return null;
+          const added = { from: typed.from, to: typed.from + typed.text.length };
           return mapped !== null && added.from <= mapped.to && mapped.from <= added.to
             ? { from: Math.min(mapped.from, added.from), to: Math.max(mapped.to, added.to) } : added;
         },

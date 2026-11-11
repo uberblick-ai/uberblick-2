@@ -1052,20 +1052,49 @@ function matchCodeSpan(
   return null;
 }
 
-/** Bare addresses stop before recognized code; angle autolinks keep their precedence. */
-function matchProseAddress(source: string, start: number): ReturnType<typeof matchWebAddress> {
-  const address = matchWebAddress(source, start);
-  if (address === null || source[start] === "<") return address;
-  for (let index = start; index < address.to; index += 1) {
-    const character = source[index];
-    if (character === "\\" && (source[index + 1] === "\\" || source[index + 1] === "`")) {
-      index += 1;
+function isInlineEscape(next: string | undefined, table: boolean): next is string {
+  return next !== undefined && ("\\`*_~[]:<-=".includes(next) || (table && ">&!".includes(next)));
+}
+
+function unescapeInline(source: string, table: boolean): string {
+  return source.replace(/\\(.)/g, (escaped, next: string) => isInlineEscape(next, table) ? next : escaped);
+}
+
+/** Decode Markdown escapes before matching, retaining source offsets for the next token. */
+function matchProseAddress(source: string, start: number, table: boolean): { text: string; href: string; next: number } | null {
+  if (source[start] === "<") {
+    const address = matchWebAddress(source, start);
+    return address === null ? null : { text: address.text, href: address.href, next: address.to + 1 };
+  }
+  if (!"hHwW".includes(source[start] ?? "") || !/^(?:https?:\/\/|www\.)/i.test(source.slice(start))) return null;
+  const prefix = source[start - 1] ?? "";
+  let literal = prefix;
+  const offsets = [start];
+  for (let index = start; index < source.length && !/\s/.test(source[index] ?? "");) {
+    const character = source[index] as string;
+    if (character === "<") break;
+    if (character === "\\" && isInlineEscape(source[index + 1], table)) {
+      literal += source[index + 1];
+      index += 2;
+      offsets.push(index);
     } else if (character === "`") {
-      if (matchCodeSpan(source, index) !== null) return matchWebAddress(source.slice(0, index), start);
-      index += runLength(source, index, "`") - 1;
+      if (matchCodeSpan(source, index) !== null) break;
+      const end = index + runLength(source, index, "`");
+      while (index < end) {
+        literal += source[index];
+        index += 1;
+        offsets.push(index);
+      }
+    } else {
+      literal += character;
+      index += 1;
+      offsets.push(index);
     }
   }
-  return address;
+  const address = matchWebAddress(literal, prefix.length);
+  if (address === null) return null;
+  const end = address.to - prefix.length;
+  return { text: address.text, href: address.href, next: offsets[end] as number };
 }
 
 /** Absent means the edge of the line, which CommonMark counts as whitespace. */
@@ -1121,7 +1150,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false, aut
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && ("\\`*_~[]:<-=".includes(next) || (table && ">&!".includes(next)))) {
+      if (isInlineEscape(next, table)) {
         plain += next;
         i += 2;
         continue;
@@ -1153,16 +1182,16 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false, aut
     }
 
     if (autolinks && inlineLinkTarget(marks) === undefined) {
-      const address = matchProseAddress(source, i);
+      const address = matchProseAddress(source, i, table);
       if (address !== null) {
         flush();
         tokens.push({ kind: "text", text: address.text, marks: { ...marks, link: address.href } });
-        i = address.to + (char === "<" ? 1 : 0);
+        i = address.next;
         continue;
       }
       const angleEnd = angleAddressEnd(source, i);
       if (angleEnd !== null) {
-        plain += source.slice(i, angleEnd);
+        plain += unescapeInline(source.slice(i, angleEnd), table);
         i = angleEnd;
         continue;
       }

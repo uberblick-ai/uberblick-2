@@ -13,7 +13,8 @@ export interface WebAddress {
 export function angleAddressEnd(source: string, from: number): number | null {
   if (source[from] !== "<") return null;
   const angle = /^<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>]*>/.exec(source.slice(from))?.[0];
-  return angle === undefined ? null : from + angle.length;
+  return angle === undefined || [...angle].some((character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)
+    ? null : from + angle.length;
 }
 
 /** GFM path punctuation, entity-looking suffixes and unmatched final parentheses. */
@@ -43,7 +44,7 @@ export function matchWebAddress(source: string, from = 0): WebAddress | null {
     const end = angleAddressEnd(source, from);
     if (end === null) return null;
     const text = source.slice(from + 1, end - 1);
-    return [...text].every((character) => character.charCodeAt(0) > 32 && character.charCodeAt(0) !== 127) && isExternalHref(text)
+    return isExternalHref(text)
       ? { from: from + 1, to: end - 1, text, href: text } : null;
   }
   const first = source[from];

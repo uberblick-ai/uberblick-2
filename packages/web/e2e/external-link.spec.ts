@@ -55,7 +55,8 @@ test("typed and pasted bare addresses become stored links with a plain-text Undo
   }
   await createDoc(page, "Writing bare addresses");
   await placeCaret(page);
-  await page.keyboard.type("www.example.com");
+  await page.keyboard.type("www.example.comm");
+  await page.keyboard.press("Backspace");
   const links = editor(page).locator("a.ub-link");
   await expect(links).toHaveCount(0);
   await page.keyboard.type(" ");

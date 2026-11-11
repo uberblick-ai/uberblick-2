@@ -64,6 +64,23 @@ describe("web addresses written in prose", () => {
     expect(getBlockInline(doc, id)).toEqual([{ text: "https://example.com", marks: {} }]);
   });
 
+  it.each([
+    ["https://example.comm", "https://example.com".length],
+    ["https://exxample.com", "https://ex".length],
+  ])("keeps typing provenance after deleting a typo in %s", (text, index) => {
+    const { doc, id, editor } = fixture();
+    typeText(editor, text);
+    editor.view.dispatch(editor.state.tr.delete(index + 1, index + 2));
+    editor.commands.setTextSelection(20);
+    typeText(editor, " ");
+    expect(getBlockInline(doc, id)).toEqual([
+      { text: "https://example.com", marks: { link: "https://example.com" } },
+      { text: " ", marks: {} },
+    ]);
+    expect(editor.commands.keyboardShortcut("Mod-z")).toBe(true);
+    expect(getBlockInline(doc, id)).toEqual([{ text: "https://example.com ", marks: {} }]);
+  });
+
   it("links an address delivered with its finishing space in one text input", () => {
     const { doc, id, editor } = fixture();
     const text = "https://example.com ";
@@ -93,6 +110,14 @@ describe("web addresses written in prose", () => {
     typeText(editor, "some ");
     editBlock(doc, id, "some ", "https://example.com");
     editor.commands.setTextSelection(20);
+    typeText(editor, " ");
+    expect(getBlockInline(doc, id)).toEqual([{ text: "https://example.com ", marks: {} }]);
+  });
+
+  it("does not add typing provenance to programmatically inserted text", () => {
+    const { doc, id, editor } = fixture();
+    typeText(editor, "https://");
+    editor.view.dispatch(editor.state.tr.insertText("example.com"));
     typeText(editor, " ");
     expect(getBlockInline(doc, id)).toEqual([{ text: "https://example.com ", marks: {} }]);
   });

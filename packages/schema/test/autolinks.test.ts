@@ -37,23 +37,25 @@ describe("web address matching", () => {
 
 describe("structured Markdown writes", () => {
   it.each([
-    { type: "table", source: "| Header |\n| --- |\n| Before https://old.example.com then placeholder |" },
-    { type: "card", source: "title: Links\n\nBefore https://old.example.com then placeholder" },
-    { type: "figma", source: "url: https://www.figma.com/design/Abc123/File\n\nBefore https://old.example.com then placeholder" },
-  ] as const)("stores newly written addresses in $type prose while retaining an old plain address", ({ type, source }) => {
+    { type: "table", source: "| Header |\n| --- |\n| Before https://old.example.com/_next/a then placeholder and [kept](https://target.example.com) |" },
+    { type: "card", source: "title: Links\n\nBefore https://old.example.com/_next/a then placeholder and [kept](https://target.example.com)" },
+    { type: "figma", source: "url: https://www.figma.com/design/Abc123/File\n\nBefore https://old.example.com/_next/a then placeholder and [kept](https://target.example.com)" },
+  ] as const)("edits $type prose while retaining an escaped plain address and existing link", ({ type, source }) => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Links" });
     const id = appendBlock(doc, { type, text: source });
     const part = structuredInlineParts(findBlockElement(doc, id)!).find(({ texts }) =>
       texts.some((text) => readInlineRuns(text).some((run) => run.text.includes("https://old.example.com"))))!;
     const text = part.texts[0]!;
-    expect(readInlineRuns(text)).toContainEqual({ text: "https://old.example.com", marks: { link: "https://old.example.com" } });
-    text.format(7, "https://old.example.com".length, { link: null });
+    expect(readInlineRuns(text)).toContainEqual({ text: "https://old.example.com/_next/a", marks: { link: "https://old.example.com/_next/a" } });
+    text.format(7, "https://old.example.com/_next/a".length, { link: null });
     const before = getBlock(doc, id)!.text;
     editBlock(doc, id, before, before.replace("placeholder", "https://new.example.com"));
     expect(readInlineRuns(text)).toEqual([
-      { text: "Before https://old.example.com then ", marks: {} },
+      { text: "Before https://old.example.com/_next/a then ", marks: {} },
       { text: "https://new.example.com", marks: { link: "https://new.example.com" } },
+      { text: " and ", marks: {} },
+      { text: "kept", marks: { link: "https://target.example.com" } },
     ]);
     doc.destroy();
   });
