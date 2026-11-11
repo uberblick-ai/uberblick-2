@@ -49,6 +49,32 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("decision records linking GitHub work", () => {
+  it("indexes bare GitHub addresses written in decision prose through create, insert and edit", async () => {
+    const rig = await server();
+    const record = await rig.ok("create_doc", {
+      title: "Bare addresses", description: "Ordinary stored links participate in decision discovery.", kind: "decision",
+      blocks: [{ type: "paragraph", text: `The issue is ${HREF}.` }],
+    });
+    await rig.ok("insert_block", {
+      uuid: record.uuid,
+      blocks: [
+        { type: "list-item", inline: [{ text: "Follow https://github.com/owner/repo/pull/43.", marks: {} }] },
+        { type: "list-item", text: "Edit this reference." },
+      ],
+    });
+    const read = await rig.ok("get_doc", { uuid: record.uuid });
+    const editable = read.blocks.find((block: { text: string }) => block.text === "Edit this reference.");
+    await rig.ok("edit_block", {
+      uuid: record.uuid, block_id: editable.id, old_text: editable.text,
+      new_text: "Follow https://github.com/owner/repo/issues/44.", rev: editable.rev,
+    });
+    for (const number of [42, 43, 44]) {
+      expect((await lookup(rig, `owner/repo#${number}`)).decisions).toEqual([
+        { uuid: record.uuid, title: "Bare addresses", status: "open" },
+      ]);
+    }
+  });
+
   it("matches URL spellings once per record, ordered by binary title then UUID, with stub status", async () => {
     const rig = await server();
     const lower = await decision(rig, "alpha");
@@ -129,6 +155,8 @@ describe("decision records linking GitHub work", () => {
     });
     const replica = rig.instance.replicas.replica(record.uuid);
     replica.doc.transact(() => {
+      const legacyPlain = blockText(replica.doc, record.blocks[3].id)!;
+      legacyPlain.format(0, legacyPlain.length, { link: null });
       setKind(replica.doc, "decision");
       setStatus(replica.doc, "open");
       const both = blockText(replica.doc, record.blocks[4].id)!;

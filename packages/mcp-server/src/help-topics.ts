@@ -80,7 +80,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 - One block per paragraph, heading, list item, quote, callout, code fence or table. Lists are flat: \`indent\` 0–3.
 - Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 - \`## > Title\` is a toggle heading whose section starts collapsed; see \`markdown\` for details.
-- A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
+- A block's \`text\` keeps Markdown punctuation literal: \`**bold**\` stays literal. Bare web addresses in prose become external links when written. For other formatting or links, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
 - Visual blocks: flow, fan-out and sequence diagrams in \`ablauf\`, UI sketches in \`wireframe\`, charts, scatter plots and data tables in \`data\`, and Figma designs in \`markdown\`.
 - Check the result with \`export_markdown\`.
@@ -157,7 +157,7 @@ The document model is flat: one list item is one block, nested to at most four l
 
 A \`json-tree\` fence is an ordinary code block that the web editor shows as a foldable JSON tree. Use it for API responses, tool results and settings files; keep small snippets in a \`json\` fence. Import, export and MCP preserve its literal source.
 
-Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
+Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Bare \`http(s)://\` and \`www.\` addresses and \`<https://example.com>\` become ordinary external links when written; \`www.\` opens with HTTPS. Sentence-ending punctuation and unmatched closing parentheses stay outside the link. Other schemes in angle brackets stay text. Existing links and document links, inline code and source blocks are excluded. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
 **Column widths.** Unsized columns share the width equally. After writing a table, give each short column (names, labels, states, dates, numbers) the width of its longest cell, header included: about 8 px per character plus 32 px, at least 120 px. Leave the prose column unsized so it takes the rest; when two columns hold prose, leave both unsized. Never narrow a prose column to fit more columns: if a row still reads badly at full width, use a list or split the table.
 
@@ -268,7 +268,7 @@ The url is an HTTPS figma.com link to a design, file, prototype, board, slides o
 
 ## MCP content writes
 
-For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does not add inline formatting. Creation and insertion may supply explicit inline runs for prose. A table's text must be exactly one GFM table and writes its parsed cell formatting. Card and figma text is the content between its container delimiters, including create_doc seeds. get_doc exposes canonical table GFM, card content and Figma content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
+For ordinary blocks, inserting Markdown punctuation in \`text\` does not add inline formatting. Bare web addresses become external links in prose \`text\` and unlinked \`inline\` runs through create_doc, insert_block and edit_block. The written text stays as supplied, including angle brackets. Existing links, document links and inline code stay unchanged; an edit leaves untouched plain addresses plain. Creation and insertion may supply explicit inline runs for other prose formatting. A table's text must be exactly one GFM table and writes its parsed cell formatting. Card and figma text is the content between its container delimiters, including create_doc seeds. get_doc exposes canonical table GFM, card content and Figma content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
 
 Table structural and multi-cell edits require \`table_mapping\` rows and columns; see \`edit_block\` for the full mapping contract. For prose carrying formatting, text splices can re-anchor a mark when a changed range touches its edge. See \`edit_block\` before changing a marked span and verify the result with \`export_markdown\`.
 

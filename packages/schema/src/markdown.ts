@@ -25,6 +25,7 @@ import { parseFigmaInput, writeFigmaText } from "./figma.js";
 import { isCalloutIcon, isCalloutVariant } from "./callout.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
+import { angleAddressEnd, matchWebAddress } from "./autolinks.js";
 import type {
   Block,
   BlockType,
@@ -394,6 +395,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * first export preserves marks except unwritable edge whitespace and touching
  * code spans without a writable separator.
  */
+// known limit: plain addresses export bare and link on re-import; revisit when Markdown supports preserving an unlinked address.
 export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
   const open: OpenMark[] = [];
@@ -1050,6 +1052,22 @@ function matchCodeSpan(
   return null;
 }
 
+/** Bare addresses stop before recognized code; angle autolinks keep their precedence. */
+function matchProseAddress(source: string, start: number): ReturnType<typeof matchWebAddress> {
+  const address = matchWebAddress(source, start);
+  if (address === null || source[start] === "<") return address;
+  for (let index = start; index < address.to; index += 1) {
+    const character = source[index];
+    if (character === "\\" && (source[index + 1] === "\\" || source[index + 1] === "`")) {
+      index += 1;
+    } else if (character === "`") {
+      if (matchCodeSpan(source, index) !== null) return matchWebAddress(source.slice(0, index), start);
+      index += runLength(source, index, "`") - 1;
+    }
+  }
+  return address;
+}
+
 /** Absent means the edge of the line, which CommonMark counts as whitespace. */
 function isBlank(char: string | undefined): boolean {
   return char === undefined || /\s/.test(char);
@@ -1089,7 +1107,7 @@ function flanking(
 }
 
 /** Resolve escapes, literal code and recursive link labels before emphasis. */
-function tokenizeInline(source: string, marks: InlineMarkSet, table = false): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true): Token[] {
   const tokens: Token[] = [];
   let plain = "";
   const flush = (): void => {
@@ -1128,8 +1146,24 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table));
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table, autolinks));
         i = link.next;
+        continue;
+      }
+    }
+
+    if (autolinks && inlineLinkTarget(marks) === undefined) {
+      const address = matchProseAddress(source, i);
+      if (address !== null) {
+        flush();
+        tokens.push({ kind: "text", text: address.text, marks: { ...marks, link: address.href } });
+        i = address.to + (char === "<" ? 1 : 0);
+        continue;
+      }
+      const angleEnd = angleAddressEnd(source, i);
+      if (angleEnd !== null) {
+        plain += source.slice(i, angleEnd);
+        i = angleEnd;
         continue;
       }
     }
@@ -1340,8 +1374,8 @@ function marksFor(
 /**
  * Union tokenizer scope with covering spans; unclaimed delimiters remain text.
  */
-function scanInline(source: string, out: InlineRun[], table = false): void {
-  const tokens = tokenizeInline(source, {}, table);
+function scanInline(source: string, out: InlineRun[], table = false, autolinks = true): void {
+  const tokens = tokenizeInline(source, {}, table, autolinks);
   const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -1355,9 +1389,10 @@ function scanInline(source: string, out: InlineRun[], table = false): void {
 }
 
 /** The prose inline reader; table mode also undoes its escaped HTML punctuation. */
-export function parseInline(source: string, table = false): InlineRun[] {
+export function parseInline(source: string, options: boolean | { table?: boolean; autolinks?: boolean } = false): InlineRun[] {
   const runs: InlineRun[] = [];
-  scanInline(source, runs, table);
+  scanInline(source, runs, typeof options === "boolean" ? options : options.table ?? false,
+    typeof options === "boolean" ? true : options.autolinks ?? true);
   return runs;
 }
 

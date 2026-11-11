@@ -49,7 +49,6 @@ const STRIKE_PASTE = /(?<=^|[\s([{"'])(~~(?!\s+~~)([^~]+)~~)/g;
 const CODE_INPUT = /(?<=^|[\s([{"'])(`([^`]+)`)$/;
 const CODE_PASTE = /(?<=^|[\s([{"'])(`([^`]+)`)/g;
 const LINK_INPUT = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/;
-const LINK_PASTE = /https?:\/\/[^\s<>"]+/g;
 
 /**
  * Formatting paste rules run before inline code. Filter delimiters inside its
@@ -267,15 +266,6 @@ export const Link = Mark.create({
           );
           return undefined;
         },
-      }),
-    ];
-  },
-  addPasteRules() {
-    return [
-      markPasteRule({
-        find: LINK_PASTE,
-        type: this.type,
-        getAttributes: (match) => ({ href: match[0] }),
       }),
     ];
   },

@@ -16,6 +16,7 @@ import {
   setKind,
   setStatus,
   listNumbers,
+  parseInline,
   parseGfmTable,
   setTags,
   structuredInlineParts,
@@ -52,6 +53,85 @@ const SOURCE = [
   "spans two source lines.",
   "",
 ].join("\n");
+
+describe("web addresses in Markdown prose", () => {
+  it("leaves an existing plain address bare on export and links it on re-import", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Plain address" });
+    appendBlock(doc, { type: "paragraph", text: "https://example.com" });
+    const markdown = exportMarkdown(doc, { frontmatter: false });
+    expect(markdown).toBe("https://example.com\n");
+    expect(importMarkdown(markdown).blocks[0]?.inline).toEqual([
+      { text: "https://example.com", marks: { link: "https://example.com" } },
+    ]);
+    doc.destroy();
+  });
+
+  it("stores angle, bare and www addresses as ordinary links and round-trips them", () => {
+    const source = "See <https://example.com/a>, http://example.com/path. And www.example.com?q=(yes)).";
+    const imported = importMarkdown(source);
+    expect(imported.blocks[0]).toMatchObject({
+      type: "paragraph", text: "See https://example.com/a, http://example.com/path. And www.example.com?q=(yes)).",
+      inline: [
+        { text: "See ", marks: {} },
+        { text: "https://example.com/a", marks: { link: "https://example.com/a" } },
+        { text: ", ", marks: {} },
+        { text: "http://example.com/path", marks: { link: "http://example.com/path" } },
+        { text: ". And ", marks: {} },
+        { text: "www.example.com?q=(yes)", marks: { link: "https://www.example.com?q=(yes)" } },
+        { text: ").", marks: {} },
+      ],
+    });
+    const doc = docFrom(source);
+    expect(importMarkdown(exportMarkdown(doc, { frontmatter: false })).blocks).toEqual(imported.blocks);
+    doc.destroy();
+  });
+
+  it.each([
+    ["https://example.com`https://code.example`", "https://example.com", "https://example.com", "https://code.example"],
+    ["www.example.com``https://code.example`literal``", "www.example.com", "https://www.example.com", "https://code.example`literal"],
+    ["https://example.com`https://code.example with spaces`", "https://example.com", "https://example.com", "https://code.example with spaces"],
+  ])("keeps inline code adjoining %s outside the new link", (source, text, href, code) => {
+    expect(parseInline(source)).toEqual([
+      { text, marks: { link: href } },
+      { text: code, marks: { inlineCode: true } },
+    ]);
+  });
+
+  it("retains literal backticks in address paths when they do not open code", () => {
+    for (const source of ["https://example.com`unfinished", "https://example.com\\`escaped\\`"]) {
+      expect(parseInline(source)).toEqual([{ text: source, marks: { link: source } }]);
+    }
+    expect(parseInline("<https://example.com`literal>")).toEqual([
+      { text: "https://example.com`literal", marks: { link: "https://example.com`literal" } },
+    ]);
+  });
+
+  it("applies in every prose block and keeps code, source and existing link labels literal", () => {
+    for (const prefix of ["", "## ", "- ", "> ", "> [!NOTE]\n> "]) {
+      expect(importMarkdown(`${prefix}https://example.com`).blocks[0]?.inline).toEqual([
+        { text: "https://example.com", marks: { link: "https://example.com" } },
+      ]);
+    }
+    const source = "`https://example.com` [https://example.com](https://other.example.com) [www.example.com](aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa) <ftp://example.com/https://example.com>";
+    expect(parseInline(source)).toEqual([
+      { text: "https://example.com", marks: { inlineCode: true } },
+      { text: " ", marks: {} },
+      { text: "https://example.com", marks: { link: "https://other.example.com" } },
+      { text: " ", marks: {} },
+      { text: "www.example.com", marks: { docLink: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" } },
+      { text: " <ftp://example.com/https://example.com>", marks: {} },
+    ]);
+    for (const language of ["", "terminal", "chart"]) {
+      expect(importMarkdown(`\`\`\`${language}\nhttps://example.com\n\`\`\``).blocks[0]?.inline).toBeUndefined();
+    }
+    expect(parseInline("**https://example.com** _www.example.com_")).toEqual([
+      { text: "https://example.com", marks: { bold: true, link: "https://example.com" } },
+      { text: " ", marks: {} },
+      { text: "www.example.com", marks: { italic: true, link: "https://www.example.com" } },
+    ]);
+  });
+});
 
 function docFrom(markdown: string): Y.Doc {
   const imported = importMarkdown(markdown);

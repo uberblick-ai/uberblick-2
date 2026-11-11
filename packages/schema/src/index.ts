@@ -73,6 +73,8 @@ export {
 } from "./blocks.js";
 
 export { EXTERNAL_HREF, isDocId, isExternalHref, readsAsMark } from "./marks.js";
+export { findWebAddresses, linkifyInline, matchWebAddress } from "./autolinks.js";
+export type { WebAddress } from "./autolinks.js";
 export { readSyncedDocId } from "./synced-doc-id.js";
 export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
 export type { GitHubItem } from "./github-reference.js";

@@ -6,6 +6,7 @@
 
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
+import { findWebAddresses } from "./autolinks.js";
 import { snapshotCommentAnchors, widenShortenedCommentAnchors } from "./comment-edit.js";
 import { getBlocksFragment } from "./doc.js";
 import { CARD_PARTS, buildCardElement, cardButtons, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
@@ -621,6 +622,8 @@ export function normalizeLegacyTables(ydoc: Y.Doc): number {
 }
 
 export interface EditBlockOptions {
+  /** Link newly written prose addresses without normalizing untouched text. */
+  autolink?: boolean;
   /**
    * Refuse a stale rev even if oldText matches; attributes also affect the hash.
    */
@@ -662,6 +665,25 @@ function writeCalloutAttributes(element: Y.XmlElement, options: EditBlockOptions
   if (options.variant !== undefined) element.setAttribute("variant", options.variant);
   if (options.icon === "") element.removeAttribute("icon");
   else if (options.icon !== undefined) element.setAttribute("icon", options.icon);
+}
+
+function linkEditedAddresses(text: Y.XmlText, source: string, inserted: Array<{ from: number; to: number }>, type: BlockType, enabled = false): void {
+  if (!enabled || inserted.length === 0 || !isProseBlockType(type)) return;
+  const protectedRanges: Array<{ from: number; to: number }> = [];
+  let offset = 0;
+  for (const run of readInlineRuns(text)) {
+    const end = offset + run.text.length;
+    if (run.marks.link !== undefined || run.marks.docLink !== undefined || run.marks.inlineCode) {
+      protectedRanges.push({ from: offset, to: end });
+    }
+    offset = end;
+  }
+  for (const match of findWebAddresses(source)) {
+    if (!inserted.some(range => range.from < match.to && match.from < range.to)) continue;
+    // known limit: editing a link's label keeps its target; revisit when explicit retarget-on-edit is supported.
+    if (protectedRanges.some(range => range.from < match.to && match.from < range.to)) continue;
+    text.format(match.from, match.to - match.from, { link: { href: match.href } });
+  }
 }
 
 /**
@@ -739,6 +761,7 @@ export function editBlock(
 
     const text = requireBlockText(ydoc, element, blockId);
     const anchors = snapshotCommentAnchors(text);
+    const inserted: Array<{ from: number; to: number }> = [];
     let index = 0;
     for (const [op, chunk] of fastDiff(oldText, newText)) {
       if (op === DIFF_EQUAL) {
@@ -747,9 +770,12 @@ export function editBlock(
         text.delete(index, chunk.length);
       } else if (op === DIFF_INSERT) {
         text.insert(index, chunk);
+        inserted.push({ from: index, to: index + chunk.length });
         index += chunk.length;
       }
     }
+
+    linkEditedAddresses(text, newText, inserted, current.type, options.autolink);
 
     widenShortenedCommentAnchors(text, anchors);
 
