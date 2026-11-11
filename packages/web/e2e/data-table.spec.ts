@@ -623,10 +623,12 @@ test("in-cell bars align their numbers, keep readable ink and scroll inside the 
       const text = document.createRange(); text.selectNodeContents(value);
       const valueBounds = text.getBoundingClientRect();
       const barBounds = bar.getBoundingClientRect();
+      const cellBounds = element.getBoundingClientRect();
       const zero = getComputedStyle(bar, "::before");
       return {
         valid: element.getAttribute("data-state") === "valid", textRight: valueBounds.right,
-        barLeft: barBounds.left, barWidth: barBounds.width,
+        barLeft: barBounds.left, barWidth: barBounds.width, barRight: barBounds.right,
+        textLeft: valueBounds.left, cellLeft: cellBounds.left, cellRight: cellBounds.right,
         font: getComputedStyle(value).fontVariantNumeric,
         ink: getComputedStyle(value).color, ordinaryInk: getComputedStyle(element.nextElementSibling?.nextElementSibling ?? element).color,
         signed: bar.getAttribute("data-signed"), zeroLeft: Number.parseFloat(zero.left), zeroWidth: Number.parseFloat(zero.width),
@@ -634,6 +636,8 @@ test("in-cell bars align their numbers, keep readable ink and scroll inside the 
     }));
     for (const cell of geometry) {
       expect(cell.barWidth).toBeGreaterThan(0);
+      expect(cell.textLeft).toBeGreaterThanOrEqual(cell.cellLeft);
+      expect(cell.barRight).toBeLessThanOrEqual(cell.cellRight);
       expect(Math.abs(cell.barLeft - (geometry[0]?.barLeft ?? Infinity))).toBeLessThanOrEqual(1);
       expect(cell.signed).toBe("true");
       expect(Math.abs(cell.zeroLeft - cell.barWidth / 2)).toBeLessThanOrEqual(1);

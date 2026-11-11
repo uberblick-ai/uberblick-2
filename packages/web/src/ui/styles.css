@@ -1911,7 +1911,7 @@ h6.ub-heading {
 .ub-data-cell[data-bar="true"] { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; max-width: none; }
 .ub-data-value { flex: 1; text-align: right; font-variant-numeric: tabular-nums; }
 .ub-data-cell[data-wrap="long"] .ub-data-value { max-width: 32rem; }
-.ub-data-bar { position: relative; flex: 0 0 5rem; height: 0.75rem; user-select: none; }
+.ub-data-bar { position: relative; flex: 0 0 auto; width: 5rem; height: 0.75rem; user-select: none; }
 .ub-data-bar[data-signed="true"]::before {
   content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
   background: var(--muted-foreground);
