@@ -864,6 +864,7 @@ for (const layout of ["overlay", "panels"] as const) {
   test(`point notes keep compact ${layout} charts readable without changing their axes`, { tag: "@webkit" }, async ({ browser }, info) => {
     const session = writer();
     const longNote = "Long note with the full release details that cannot fit above a single point in this compact chart";
+    const lowValue = layout === "panels" ? -80 : -40;
     const mapping = {
       version: 1, type: "line", collection: "measurements", layout, height: layout === "panels" ? 150 : 200,
       title: "Point notes", x: { field: "x", type: "number" }, y: [
@@ -877,7 +878,7 @@ for (const layout of ["overlay", "panels"] as const) {
     await session.call("update_data", { uuid, operations: [{ collection: "measurements",
       schema: { version: 1, schema: { type: "object" } },
       replaceRecords: Array.from({ length: 41 }, (_, x) => ({ id: `point-${x}`, value: {
-        x, peak: x === 20 ? 100 : x === 10 ? -40 : 20, peer: 20,
+        x, peak: x === 20 ? 100 : x === 10 ? lowValue : 20, peer: 20,
         ...(x === 10 ? { peakNote: longNote } : x === 20 ? { peakNote: "<b>Highest</b>" }
           : x === 30 ? { peakNote: "Collision first", peerNote: "Collision second" }
           : x === 31 ? { peakNote: "Adjacent note" } : {}),
@@ -897,15 +898,36 @@ for (const layout of ["overlay", "panels"] as const) {
       await page.evaluate(() => document.fonts.ready);
       const valueTicks = async () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
         .filter(entry => /^-?\d+(?:\.\d+)?%$/.test(entry.text)).map(entry => `${entry.canvas}:${entry.text}`));
+      const expectAlignedPanelTicks = async (): Promise<void> => {
+        const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+        const panels = mapping.y.map((_series, canvas) => ink.filter(entry => entry.canvas === canvas && /^-?\d+(?:\.\d+)?%$/.test(entry.text)));
+        const first = panels[0] ?? [];
+        expect(first.length).toBeGreaterThanOrEqual(2);
+        for (const [canvas, ticks] of panels.entries()) {
+          expect(ticks.map(tick => tick.text)).toEqual(first.map(tick => tick.text));
+          for (const [index, tick] of ticks.entries()) {
+            expect(tick.y, `panel ${canvas} tick ${tick.text} uses a different shared-unit scale`).toBeCloseTo(first[index]?.y ?? NaN, 5);
+          }
+        }
+      };
       const baselineTicks = await valueTicks();
       expect(baselineTicks.length).toBeGreaterThan(0);
       const image = page.getByRole("img", { name: "Point notes", exact: true });
       const alternative = await image.getAttribute("aria-describedby");
       if (alternative === null) throw new Error("e2e: point-note description is missing");
       const baselineDescription = await page.locator(`[id="${alternative}"]`).textContent();
+      if (layout === "panels") {
+        await editMapping(session, uuid, JSON.stringify({ ...mapping,
+          y: mapping.y.map(({ note, ...series }, index) => index === 0 ? { ...series, note } : series),
+        }));
+        await waitForDocumentDraw(page, session, uuid);
+        await expect.poll(valueTicks).toEqual(baselineTicks);
+        await expectAlignedPanelTicks();
+      }
       await editMapping(session, uuid, JSON.stringify(mapping));
       await waitForDocumentDraw(page, session, uuid);
       await expect.poll(valueTicks).toEqual(baselineTicks);
+      if (layout === "panels") await expectAlignedPanelTicks();
       await expect(page.locator(`[id="${alternative}"]`)).toHaveText(baselineDescription ?? "");
       expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(touch);
       const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
@@ -953,7 +975,7 @@ for (const layout of ["overlay", "panels"] as const) {
       const ticks = probe.ink.filter(entry => entry.canvas === 0 && /^-?\d+(?:\.\d+)?%$/.test(entry.text) && entry.right < lowPoint.x);
       expect(ticks.length).toBeGreaterThan(0);
       for (const tick of ticks) {
-        const value = -40 + (tick.y - lowPoint.y) / (topPoint.y - lowPoint.y) * 140;
+        const value = lowValue + (tick.y - lowPoint.y) / (topPoint.y - lowPoint.y) * (100 - lowValue);
         expect(Number(tick.text.slice(0, -1)), `tick ${tick.text} misstates its gridline after notes reserve space`).toBeCloseTo(value, 3);
       }
       const firstCanvasCollisions = notes.filter(entry => entry.canvas === 0 && /^(Collision (first|second)|Adjacent note)$/.test(entry.text));
@@ -1017,7 +1039,7 @@ for (const layout of ["overlay", "panels"] as const) {
       await showTooltip(adjacentPoint, layout === "overlay"
         ? ["Peak: 20 %", "Peer: 20 %", "Adjacent note"] : ["Peak: 20 %", "Adjacent note"]);
       await showTooltip(longPoint, layout === "overlay"
-        ? ["Peak: -40 %", "Peer: 20 %", longNote] : ["Peak: -40 %", longNote]);
+        ? [`Peak: ${lowValue} %`, "Peer: 20 %", longNote] : [`Peak: ${lowValue} %`, longNote]);
       await showTooltip(topPoint, layout === "overlay"
         ? ["Peak: 100 %", "Peer: 20 %", "<b>Highest</b>"] : ["Peak: 100 %", "<b>Highest</b>"]);
       await editMapping(session, uuid, JSON.stringify(withoutNotes));

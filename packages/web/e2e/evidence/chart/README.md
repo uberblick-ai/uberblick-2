@@ -206,7 +206,9 @@ and WebKit in both appearances.
 The compact point-note fixtures use native canvas text, glyph bounds, marker
 arcs and bar fills in overlay and panels. Their note-free and annotated draws
 must paint identical value ticks on automatic axes. They check top-point ink
-inside the canvas, muted note contrast in light and dark, single-line
+inside the canvas and aligned shared-unit panel ticks with notes on only one
+line, then with a noted negative bar. They also check
+muted note contrast in light and dark, single-line
 ellipsis, collision omission, sparse bar-note alignment, notes outside positive
 and negative bar ends, and retained markers on dense lines. Desktop pointer
 and explicit iPad touch show native tooltips with unchanged value lines,

@@ -604,7 +604,8 @@ export const toolHelpDetails = {
     "Each y series optionally accepts note, a literal top-level field name under the same rules as field. " +
     "A non-empty string note on a plotted point appears as a short, muted single-line label above it or outside its bar's end, " +
     "truncated with an ellipsis when long. Colliding notes are hidden; the native tooltip keeps their full text after all value lines, " +
-    "in mapping order. Absent, null, empty and non-string notes add nothing. Notes are plain text and never change values, " +
+    "in mapping order. Unusually long notes can be clipped by compact chart tooltips. " +
+    "Absent, null, empty and non-string notes add nothing. Notes are plain text and never change values, " +
     "axes, legend entries, reference lines, diagnostics, the text alternative or mapping-write summaries. " +
     "note is invalid on x and in scatter, category-bar and table mappings. " +
     "Bars-only charts keep top-level type line and draw grouped bars from zero. " +

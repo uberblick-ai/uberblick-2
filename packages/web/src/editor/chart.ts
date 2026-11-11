@@ -37,7 +37,7 @@ import { chartHeightEdits } from "./chart-height.js";
 import { chartHeightField } from "./chart-height-field.js";
 import { scatterView, scatterDiagnosticsText } from "./scatter-view.js";
 import { barView, barDefaultHeight, barDiagnosticsText, chartTooltipLines } from "./bar-view.js";
-import { chartNotes } from "./chart-notes.js";
+import { chartNotes, chartNoteRoom } from "./chart-notes.js";
 import type { NotedPoint } from "./chart-notes.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
@@ -141,6 +141,8 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   };
   const ranges = layout === "panels" ? chartPanelRanges(result.series, config.y)
     : chartValueRanges(result.series, config.y, axes.seriesAxes);
+  // Shared ranges need the same pixel span even in panels without notes.
+  const noteRoom = layout === "panels" ? chartNoteRoom(result.series) : undefined;
   const panelUnit = (index: number): string => result.series[index]?.unit || "";
   const formatValue = (index: number, value: number): string =>
     `${formatChartNumber(value)}${panelUnit(index) ? ` ${panelUnit(index)}` : ""}`;
@@ -277,6 +279,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           } } : {}),
         },
         plugins: {
+          ...(noteRoom === undefined ? {} : { "chart-point-notes": noteRoom }),
           legend: { display: layout === "overlay", position: "bottom", align: "start", labels: {
             color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
             filter: item => (item.datasetIndex ?? 0) < indices.length,
@@ -302,6 +305,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
               return item.parsed.y === null ? "" : `${series?.label ?? series?.field ?? ""}: ${formatValue(index, item.parsed.y)}`;
             },
             afterBody(items) {
+              // known limit: unusually long notes can exceed compact canvas tooltips; revisit when users encounter clipped note text.
               const ctx = this.chart.ctx;
               ctx.save();
               ctx.font = toFont(font).string;

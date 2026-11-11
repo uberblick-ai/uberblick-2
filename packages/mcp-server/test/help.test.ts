@@ -466,6 +466,7 @@ it("describes per-point notes through data and chart-block help", () => {
       "short, muted single-line label above it or outside its bar's end",
       "truncated with an ellipsis when long",
       "full text after all value lines, in mapping order",
+      "Unusually long notes can be clipped by compact chart tooltips",
       "Absent, null, empty and non-string notes add nothing",
       "Notes are plain text and never change values, axes, legend entries, reference lines, diagnostics, the text alternative or mapping-write summaries",
       "note is invalid on x and in scatter, category-bar and table mappings",

@@ -1,21 +1,37 @@
-import type { FontSpec, Plugin } from "chart.js";
+import type { ChartType, FontSpec, Plugin } from "chart.js";
 import { toFont } from "chart.js/helpers";
 import { barAxisLabel } from "./bar-view.js";
+import type { ChartReady } from "./chart-data.js";
 
 export interface NotedPoint { x: number; y: number | null; note?: string }
 
+interface NoteRoom { top?: boolean; bottom?: boolean }
+
+export function chartNoteRoom(series: ChartReady["series"]): NoteRoom {
+  return {
+    top: series.some(entry => entry.points.some(point => point.note)),
+    bottom: series.some(entry => entry.type === "bar" && entry.points.some(point => point.note && point.y !== null && point.y < 0)),
+  };
+}
+
+declare module "chart.js" {
+  interface PluginOptionsByType<TType extends ChartType> {
+    "chart-point-notes"?: NoteRoom;
+  }
+}
+
 /** Read current datasets so live data, mapping and appearance updates share the hook. */
-export const chartNotes: Plugin<"line" | "bar"> = {
+export const chartNotes: Plugin<"line" | "bar", NoteRoom> = {
   id: "chart-point-notes",
-  afterLayout(chart) {
+  afterLayout(chart, _args, options) {
     const datasets = chart.data.datasets.filter((_, index) => chart.isDatasetVisible(index));
-    if (!datasets.some(dataset => (dataset.data as NotedPoint[]).some(point => point.note))) return;
+    if (!(options.top ?? datasets.some(dataset => (dataset.data as NotedPoint[]).some(point => point.note)))) return;
     const room = toFont(chart.options.font as FontSpec).lineHeight + 8;
     const area = chart.chartArea;
     // Select native ticks at the original size, then remap only y pixels.
     // Layout padding would change automatic tick steps and even axis bounds.
     const top = Math.min(Math.max(0, room - area.top), Math.max(0, area.height - 1));
-    const negative = datasets.some(dataset => dataset.type === "bar" &&
+    const negative = options.bottom ?? datasets.some(dataset => dataset.type === "bar" &&
       (dataset.data as NotedPoint[]).some(point => point.note && point.y !== null && point.y < 0));
     const bottom = negative ? Math.min(room, Math.max(0, area.height - top - 1)) : 0;
     area.top += top;
