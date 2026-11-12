@@ -11,6 +11,7 @@ import {
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { stderrLogger, type HubLogger } from "./log.js";
+import type { HubWriteTiming } from "./metrics.js";
 import { getUpdateAttribution, type UpdateAuthor } from "./update-attribution.js";
 
 const STRETCH_MS = 15 * 60 * 1_000;
@@ -105,6 +106,7 @@ export class HubRevisions {
     private readonly onStoreFailed: (error: unknown) => void,
     private readonly now: () => number = Date.now,
     private readonly log: HubLogger = stderrLogger,
+    private readonly writeTiming?: HubWriteTiming,
   ) {
     db.exec(`CREATE TABLE IF NOT EXISTS document_revisions (
       id TEXT PRIMARY KEY NOT NULL,
@@ -283,19 +285,22 @@ export class HubRevisions {
       const update = Y.encodeStateAsUpdate(staged, Y.encodeStateVector(document));
       const restoredId = randomUUID();
       const at = this.now();
-      this.db.exec("BEGIN IMMEDIATE");
+      const start = performance.now();
       try {
-        const head = this.preserveEarlierContent(room, current, at);
-        if (head !== undefined) this.closeHead(room, head, at);
-        this.insert(room, restoredId, authorIdentity(author).label, at, at, restored);
-        // Room state and its closed revision commit before any peer receives the update.
-        store(Y.encodeStateAsUpdate(staged));
-        this.db.exec("COMMIT");
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        this.onStoreFailed(error);
-        throw error;
-      }
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          const head = this.preserveEarlierContent(room, current, at);
+          if (head !== undefined) this.closeHead(room, head, at);
+          this.insert(room, restoredId, authorIdentity(author).label, at, at, restored);
+          // Room state and its closed revision commit before any peer receives the update.
+          store(Y.encodeStateAsUpdate(staged));
+          this.db.exec("COMMIT");
+        } catch (error) {
+          this.db.exec("ROLLBACK");
+          this.onStoreFailed(error);
+          throw error;
+        }
+      } finally { this.writeTiming?.revisionWrite(start); }
       Y.applyUpdate(document, update, RESTORE_ORIGIN);
       return { ok: true, id: restoredId, applied: true };
     } finally {
@@ -354,16 +359,19 @@ export class HubRevisions {
   }
 
   private writeName(operation: () => NameRevisionResult): NameRevisionResult {
-    this.db.exec("BEGIN IMMEDIATE");
+    const start = performance.now();
     try {
-      const result = operation();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      this.onStoreFailed(error);
-      throw error;
-    }
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const result = operation();
+        this.db.exec("COMMIT");
+        return result;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        this.onStoreFailed(error);
+        throw error;
+      }
+    } finally { this.writeTiming?.revisionWrite(start); }
   }
 
   /** Caller owns the transaction that also deletes the document's stored room. */
@@ -378,31 +386,34 @@ export class HubRevisions {
     if (this.isDeleted(room)) return;
     const at = this.now();
     const identity = authorIdentity(author);
-    this.db.exec("BEGIN IMMEDIATE");
+    const start = performance.now();
     try {
-      let head = this.preserveEarlierContent(room, before, at);
-      if (head !== undefined && (head.author_key !== identity.key || at >= headDeadline(head))) {
-        this.closeHead(room, head, at);
-        head = undefined;
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        let head = this.preserveEarlierContent(room, before, at);
+        if (head !== undefined && (head.author_key !== identity.key || at >= headDeadline(head))) {
+          this.closeHead(room, head, at);
+          head = undefined;
+        }
+        const id = head?.id ?? randomUUID();
+        if (head === undefined) {
+          this.db.prepare("INSERT OR IGNORE INTO document_revision_documents (room) VALUES (?)").run(room);
+          this.db.prepare(`INSERT INTO document_revision_heads
+            (room, id, author, author_key, started_at, last_edited_at, checksum, previous_checksum, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+            room, id, identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
+          );
+        } else {
+          this.db.prepare("UPDATE document_revision_heads SET checksum = ?, data = ?, last_edited_at = ? WHERE room = ?")
+            .run(after.checksum, after.checksum === head.previous_checksum ? null : after.state, at, room);
+        }
+        this.db.exec("COMMIT");
+        return id;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
       }
-      const id = head?.id ?? randomUUID();
-      if (head === undefined) {
-        this.db.prepare("INSERT OR IGNORE INTO document_revision_documents (room) VALUES (?)").run(room);
-        this.db.prepare(`INSERT INTO document_revision_heads
-          (room, id, author, author_key, started_at, last_edited_at, checksum, previous_checksum, data)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          room, id, identity.label, identity.key, at, at, after.checksum, before.checksum, after.state,
-        );
-      } else {
-        this.db.prepare("UPDATE document_revision_heads SET checksum = ?, data = ?, last_edited_at = ? WHERE room = ?")
-          .run(after.checksum, after.checksum === head.previous_checksum ? null : after.state, at, room);
-      }
-      this.db.exec("COMMIT");
-      return id;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    } finally { this.writeTiming?.revisionWrite(start); }
   }
 
   private head(room: string): Head | undefined {
@@ -424,14 +435,17 @@ export class HubRevisions {
   private close(room: string, at: number): void {
     const head = this.head(room);
     if (head === undefined) return;
-    this.db.exec("BEGIN IMMEDIATE");
+    const start = performance.now();
     try {
-      this.closeHead(room, head, at);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.closeHead(room, head, at);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    } finally { this.writeTiming?.revisionWrite(start); }
   }
 
   private closeHead(room: string, head: Head, at: number): void {
