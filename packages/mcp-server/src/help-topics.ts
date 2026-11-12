@@ -106,13 +106,14 @@ Routine feature details, formatting, refactors and bug fixes belong on the ownin
 
 ## Topics and titles
 
-A topic is the question; it keeps its identity while its answer changes. The first record's UUID is the topic's address for citations and pins. The title names the question, never the answer, and is stored once on the first record: renaming any record renames the topic. A successor takes the topic's title; omit \`title\` when creating it.
+A topic is the question; it keeps its identity while its answer changes. The first record's UUID is the topic's address for citations and pins. The title names the question, never the answer, and names no vendor, product or version unless choosing it is the question. It is stored once on the first record: renaming any record renames the topic. A successor takes the topic's title; omit \`title\` when creating it.
 
 ## Writing the answer
 
 - State the decision itself in one plain sentence naming the chosen option, without hedging such as "should consider" and without reasoning. Reasoning, alternatives and process go in a linked RFC; product detail goes on the owning regular page.
+- State the kind of option or principle chosen, so the answer stays true while implementation changes. Omit the current vendor, product, version, fallback chain or host unless choosing that specific vendor or technology is the decision. Implementation details go on the owning regular page, in the RFC or in the issue.
 - Keep it very short; that matters more than the block count. Aim for 60 words of prose or fewer; this is editorial guidance, not a validated limit. MCP accepts at most three answer blocks: paragraphs, code blocks (a short ablauf diagram can show the decision), tables or lists (adjacent list items count as one). Other block types refuse.
-- Short is not vague: keep the concrete terms needed to apply the decision. Do not restate the topic or write a specification.
+- Short is not vague: keep the concrete terms needed to apply the decision, including thresholds and scopes that are part of it. Do not restate the topic or write a specification.
 - Decisions have no TL;DR, and a decided record holds no structured data.
 
 ## Status changes
