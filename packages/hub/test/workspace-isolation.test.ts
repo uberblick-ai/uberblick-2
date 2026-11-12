@@ -554,10 +554,12 @@ describe("workspace isolation through OAuth", () => {
     expect(submitted.result.status).toBe("approved");
     const code = new URL(submitted.result.redirectUrl as string).searchParams.get("code")!;
     expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    const stored = r.db.connection.prepare(`SELECT codes.resource, grants.workspace_id, grants.principal_id
-      FROM hub_oauth_authorization_codes AS codes JOIN hub_agent_grants AS grants ON grants.id = codes.grant_id
-      WHERE codes.code_hash = ?`).get(createHash("sha256").update(code).digest("hex"));
-    expect(stored).toMatchObject({ resource: workspaceResourceUrl(ISSUER, B), workspace_id: B, principal_id: r.dual.principal.id });
+    const exchanged = await oauthExchange(r, { grant_type: "authorization_code", code, code_verifier: VERIFIER,
+      client_id: CLIENT, redirect_uri: REDIRECT, resource: workspaceResourceUrl(ISSUER, B) });
+    expect(exchanged.code).toBe(200);
+    const token = r.oauth.getAccessToken(exchanged.result.access_token as string);
+    expect(token).toMatchObject({ resource: workspaceResourceUrl(ISSUER, B) });
+    expect(r.grants.get(token!.grantId)).toMatchObject({ workspaceId: B, principalId: r.dual.principal.id });
     expect(r.db.connection.prepare("SELECT * FROM hub_credentials ORDER BY id").all()).toEqual(credentialsBefore);
   });
 });
