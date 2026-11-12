@@ -888,8 +888,9 @@ function discriminatorValues(root: ts.Node, key: string): string[] {
     ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === key ||
     (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) && property(node.expression);
   for (const node of descendants(source)) {
-    if (ts.isBindingElement(node) && ts.isIdentifier(node.name) &&
-      (node.propertyName ?? node.name).getText(source) === key) aliases.add(node.name.text);
+    if (!ts.isBindingElement(node) || !ts.isIdentifier(node.name)) continue;
+    const field = node.propertyName ?? node.name;
+    if ((ts.isIdentifier(field) || ts.isStringLiteralLike(field)) && field.text === key) aliases.add(node.name.text);
   }
   let changed = true;
   while (changed) {
