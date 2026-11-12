@@ -4,7 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { setTimeout } from "node:timers/promises";
 import type { Hocuspocus } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
-import type { HubLogRecord, HubLogger } from "./log.js";
+import { type HubLogRecord, type HubLogger, silentLogger } from "./log.js";
 import type { HubDatabase } from "./persistence.js";
 
 /** Passive wall-clock totals; recording a write does no I/O or collection. */
@@ -35,6 +35,7 @@ export interface WorkspaceMetrics {
 
 const RESERVED_ROOMS = new Set(["_directory", "_sidebar", "_settings", "_github_items"]);
 const METRICS_BATCH_SIZE = 128;
+const EVENT_LOOP_RESOLUTION_MS = 20;
 
 /** Read blob lengths in bounded batches, releasing each statement before yielding. */
 export async function collectWorkspaceMetrics(db: DatabaseSync, signal?: AbortSignal): Promise<Record<string, WorkspaceMetrics>> {
@@ -77,9 +78,10 @@ export function startHubMetrics(
   log: HubLogger,
   intervalMs = 60_000,
 ): () => Promise<void> {
+  if (log === silentLogger) return async () => {};
   let delay: ReturnType<typeof monitorEventLoopDelay> | undefined;
   try {
-    delay = monitorEventLoopDelay({ resolution: 1 });
+    delay = monitorEventLoopDelay({ resolution: EVENT_LOOP_RESOLUTION_MS });
     delay.enable();
   } catch { /* Other figures remain available without the delay monitor. */ }
   const controller = new AbortController();
@@ -97,9 +99,10 @@ export function startHubMetrics(
     collect(() => { record.rooms = hocuspocus.getDocumentsCount(); });
     collect(() => {
       if (delay === undefined) throw new Error("delay monitor unavailable");
-      record.eventLoopDelayP50Ms = delay.count === 0 ? 0 : delay.percentile(50) / 1e6;
-      record.eventLoopDelayP99Ms = delay.count === 0 ? 0 : delay.percentile(99) / 1e6;
-      record.eventLoopDelayMaxMs = delay.max / 1e6;
+      // The histogram includes the sampler's interval, not just time spent waiting.
+      record.eventLoopDelayP50Ms = delay.count === 0 ? 0 : Math.max(0, delay.percentile(50) / 1e6 - EVENT_LOOP_RESOLUTION_MS);
+      record.eventLoopDelayP99Ms = delay.count === 0 ? 0 : Math.max(0, delay.percentile(99) / 1e6 - EVENT_LOOP_RESOLUTION_MS);
+      record.eventLoopDelayMaxMs = delay.count === 0 ? 0 : Math.max(0, delay.max / 1e6 - EVENT_LOOP_RESOLUTION_MS);
     });
     collect(() => { delay?.reset(); });
     collect(() => { Object.assign(record, database.writeTiming.take()); });

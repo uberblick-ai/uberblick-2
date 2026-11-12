@@ -1,12 +1,13 @@
 import { Document } from "@hocuspocus/server";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { statSync } from "node:fs";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { DIRECTORY_DOCS_KEY, roomForDoc } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import type { HubLogRecord } from "../src/log.js";
+import { type HubLogRecord, silentLogger } from "../src/log.js";
 import { collectWorkspaceMetrics } from "../src/metrics.js";
 import { HubDatabase } from "../src/persistence.js";
 import { createHub, type Hub } from "../src/server.js";
@@ -24,6 +25,11 @@ import {
   WORKSPACE,
   type TestClient,
 } from "./helpers.js";
+
+vi.mock("node:perf_hooks", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:perf_hooks")>();
+  return { ...actual, monitorEventLoopDelay: vi.fn(actual.monitorEventLoopDelay) };
+});
 
 const ACTIVE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ARCHIVED = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -127,6 +133,40 @@ describe("workspace metric figures", () => {
 });
 
 describe("periodic hub metrics", () => {
+  it("reports delay beyond the coarse sampling interval and zero for empty intervals", async () => {
+    const actual = await vi.importActual<typeof import("node:perf_hooks")>("node:perf_hooks");
+    const histogram = actual.monitorEventLoopDelay({ resolution: 20 });
+    const count = vi.spyOn(histogram, "count", "get").mockReturnValue(3);
+    vi.spyOn(histogram, "percentile").mockImplementation(percentile => percentile === 50 ? 15e6 : 21e6);
+    vi.spyOn(histogram, "max", "get").mockReturnValue(50e6);
+    vi.spyOn(histogram, "reset").mockImplementation(() => { count.mockReturnValue(0); });
+    vi.mocked(monitorEventLoopDelay).mockReturnValueOnce(histogram);
+    const records: HubLogRecord[] = [];
+    const hub = await createHub({ port: 0, address: "127.0.0.1", databasePath: tempDatabasePath(),
+      authSecret: TEST_SECRET, log: record => { records.push(record); } }, { metricsIntervalMs: INTERVAL_MS });
+    hubs.push(hub);
+    expect(monitorEventLoopDelay).toHaveBeenLastCalledWith({ resolution: 20 });
+    await waitUntil("a sampled and an empty metrics interval", () => metrics(records).length >= 2);
+    expect(metrics(records)[0]).toMatchObject({
+      eventLoopDelayP50Ms: 0, eventLoopDelayP99Ms: 1, eventLoopDelayMaxMs: 30,
+    });
+    expect(metrics(records)[1]).toMatchObject({
+      eventLoopDelayP50Ms: 0, eventLoopDelayP99Ms: 0, eventLoopDelayMaxMs: 0,
+    });
+    await hub.stop();
+  });
+
+  it("starts no sampler or collection timer when logging is silent", async () => {
+    const monitorCalls = vi.mocked(monitorEventLoopDelay).mock.calls.length;
+    const intervals = vi.spyOn(globalThis, "setInterval");
+    const hub = await createHub({ port: 0, address: "127.0.0.1", databasePath: tempDatabasePath(),
+      authSecret: TEST_SECRET, log: silentLogger }, { metricsIntervalMs: INTERVAL_MS });
+    hubs.push(hub);
+    expect(vi.mocked(monitorEventLoopDelay).mock.calls).toHaveLength(monitorCalls);
+    expect(intervals.mock.calls.some(call => call[1] === INTERVAL_MS)).toBe(false);
+    await expect(hub.stop()).resolves.toBeUndefined();
+  });
+
   it("counts unique sockets and direct connections, reports idle intervals, and ends on stop", async () => {
     const records: HubLogRecord[] = [];
     const intervals = vi.spyOn(globalThis, "setInterval");
