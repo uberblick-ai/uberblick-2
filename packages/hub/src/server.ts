@@ -41,6 +41,7 @@ import { prepareDatabaseRelease } from "./database-release.js";
 import { OriginUpdates, type UpdateAuthor } from "./update-attribution.js";
 import { RevisionReads } from "./revision-reads.js";
 import type { UpdateOriginMetadata } from "@uberblick/schema";
+import { startHubMetrics } from "./metrics.js";
 
 /**
  * Local connections carry verified claims. Remote connections carry the
@@ -496,6 +497,13 @@ async function listen(
   }
 }
 
+function requireDatabasePath(databasePath: string | undefined): string {
+  if (databasePath === undefined || databasePath.trim() === "") {
+    throw new Error("createHub: databasePath must not be empty");
+  }
+  return databasePath;
+}
+
 /**
  * Resolve only with an open database and bound port; release both on startup failure.
  * Signal handlers belong to main.ts so this factory stays embeddable.
@@ -504,6 +512,8 @@ export async function createHub(config: HubConfig, options: {
   /** Test seam that can only make loopback admission stricter. */
   deviceCredentials?: true;
   hubVersion?: string;
+  /** Test seam; production always uses the one-minute interval. */
+  metricsIntervalMs?: number;
   extension?: (context: HubExtensionContext) => HubExtension;
 } = {}): Promise<Hub> {
   const address = config.address ?? DEFAULT_HOST;
@@ -528,10 +538,7 @@ export async function createHub(config: HubConfig, options: {
     protocolVersion,
     log,
   });
-  const databasePath = config.databasePath;
-  if (databasePath === undefined || databasePath.trim() === "") {
-    throw new Error("createHub: databasePath must not be empty");
-  }
+  const databasePath = requireDatabasePath(config.databasePath);
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
 
   // Hocuspocus swallows store failures; retain the first so flush/stop cannot claim durability.
@@ -670,6 +677,7 @@ export async function createHub(config: HubConfig, options: {
   if (deviceCredentials && extension?.signInConfigured !== true) {
     log({ event: "hub.auth.unavailable", reason: "GitHub sign-in is not configured; this remote hub admits no clients" });
   }
+  const stopMetrics = startHubMetrics(database, hocuspocus, log, options.metricsIntervalMs);
 
   /** The sticky store failure, as the error a durability claim should not hide. */
   function storeError(): Error | undefined {
@@ -695,7 +703,7 @@ export async function createHub(config: HubConfig, options: {
   const runStop = async (): Promise<void> => {
     // Fence asynchronous identity reads before any database teardown. An
     // outstanding HTTP request can complete only with a safe failure now.
-    await extension?.stop();
+    await Promise.all([stopMetrics(), extension?.stop()]);
     // Closing rooms removes the connections exposing their sockets.
     const sockets = openSockets(hocuspocus);
 
