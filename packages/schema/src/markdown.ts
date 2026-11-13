@@ -25,6 +25,7 @@ import { parseFigmaInput, writeFigmaText } from "./figma.js";
 import { isCalloutIcon, isCalloutVariant } from "./callout.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
+import { angleAddressEnd, matchWebAddress } from "./autolinks.js";
 import type {
   Block,
   BlockType,
@@ -394,6 +395,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * first export preserves marks except unwritable edge whitespace and touching
  * code spans without a writable separator.
  */
+// known limit: plain addresses export bare and link on re-import; revisit when Markdown supports preserving an unlinked address.
 export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
   const open: OpenMark[] = [];
@@ -1050,6 +1052,51 @@ function matchCodeSpan(
   return null;
 }
 
+function isInlineEscape(next: string | undefined, table: boolean): next is string {
+  return next !== undefined && ("\\`*_~[]:<-=".includes(next) || (table && ">&!".includes(next)));
+}
+
+function unescapeInline(source: string, table: boolean): string {
+  return source.replace(/\\(.)/g, (escaped, next: string) => isInlineEscape(next, table) ? next : escaped);
+}
+
+/** Decode Markdown escapes before matching, retaining source offsets for the next token. */
+function matchProseAddress(source: string, start: number, table: boolean): { text: string; href: string; next: number } | null {
+  if (source[start] === "<") {
+    const address = matchWebAddress(source, start);
+    return address === null ? null : { text: address.text, href: address.href, next: address.to + 1 };
+  }
+  if (!"hHwW".includes(source[start] ?? "") || !/^(?:https?:\/\/|www\.)/i.test(source.slice(start))) return null;
+  const prefix = source[start - 1] ?? "";
+  let literal = prefix;
+  const offsets = [start];
+  for (let index = start; index < source.length && !/\s/.test(source[index] ?? "");) {
+    const character = source[index] as string;
+    if (character === "<") break;
+    if (character === "\\" && isInlineEscape(source[index + 1], table)) {
+      literal += source[index + 1];
+      index += 2;
+      offsets.push(index);
+    } else if (character === "`") {
+      if (matchCodeSpan(source, index) !== null) break;
+      const end = index + runLength(source, index, "`");
+      while (index < end) {
+        literal += source[index];
+        index += 1;
+        offsets.push(index);
+      }
+    } else {
+      literal += character;
+      index += 1;
+      offsets.push(index);
+    }
+  }
+  const address = matchWebAddress(literal, prefix.length);
+  if (address === null) return null;
+  const end = address.to - prefix.length;
+  return { text: address.text, href: address.href, next: offsets[end] as number };
+}
+
 /** Absent means the edge of the line, which CommonMark counts as whitespace. */
 function isBlank(char: string | undefined): boolean {
   return char === undefined || /\s/.test(char);
@@ -1089,7 +1136,7 @@ function flanking(
 }
 
 /** Resolve escapes, literal code and recursive link labels before emphasis. */
-function tokenizeInline(source: string, marks: InlineMarkSet, table = false): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true): Token[] {
   const tokens: Token[] = [];
   let plain = "";
   const flush = (): void => {
@@ -1103,7 +1150,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && ("\\`*_~[]:<-=".includes(next) || (table && ">&!".includes(next)))) {
+      if (isInlineEscape(next, table)) {
         plain += next;
         i += 2;
         continue;
@@ -1128,8 +1175,24 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table));
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table, autolinks));
         i = link.next;
+        continue;
+      }
+    }
+
+    if (autolinks && inlineLinkTarget(marks) === undefined) {
+      const address = matchProseAddress(source, i, table);
+      if (address !== null) {
+        flush();
+        tokens.push({ kind: "text", text: address.text, marks: { ...marks, link: address.href } });
+        i = address.next;
+        continue;
+      }
+      const angleEnd = angleAddressEnd(source, i);
+      if (angleEnd !== null) {
+        plain += unescapeInline(source.slice(i, angleEnd), table);
+        i = angleEnd;
         continue;
       }
     }
@@ -1340,8 +1403,8 @@ function marksFor(
 /**
  * Union tokenizer scope with covering spans; unclaimed delimiters remain text.
  */
-function scanInline(source: string, out: InlineRun[], table = false): void {
-  const tokens = tokenizeInline(source, {}, table);
+function scanInline(source: string, out: InlineRun[], table = false, autolinks = true): void {
+  const tokens = tokenizeInline(source, {}, table, autolinks);
   const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -1355,9 +1418,10 @@ function scanInline(source: string, out: InlineRun[], table = false): void {
 }
 
 /** The prose inline reader; table mode also undoes its escaped HTML punctuation. */
-export function parseInline(source: string, table = false): InlineRun[] {
+export function parseInline(source: string, options: boolean | { table?: boolean; autolinks?: boolean } = false): InlineRun[] {
   const runs: InlineRun[] = [];
-  scanInline(source, runs, table);
+  scanInline(source, runs, typeof options === "boolean" ? options : options.table ?? false,
+    typeof options === "boolean" ? true : options.autolinks ?? true);
   return runs;
 }
 

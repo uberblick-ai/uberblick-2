@@ -261,6 +261,16 @@ describe("card block contract", () => {
 });
 
 describe("card link button", () => {
+  it("keeps address labels as valid plain text while prose parts become links", () => {
+    const { doc, id, card } = fixture("title: www.example.com\nbutton: [https://example.com](https://other.example.com)\n\nVisit https://example.com.");
+    expect(cardButtons(card)).toEqual([{ text: "https://example.com", href: "https://other.example.com" }]);
+    expect(cardInline(card).title).toEqual([{ text: "www.example.com", marks: { link: "https://www.example.com" } }]);
+    expect(cardInline(card).body).toEqual([
+      { text: "Visit ", marks: {} }, { text: "https://example.com", marks: { link: "https://example.com" } }, { text: ".", marks: {} },
+    ]);
+    expect(isSupportedCard(card)).toBe(true);
+    expect(getBlock(doc, id)?.text).toContain("button: [https://example.com](https://other.example.com)");
+  });
   it("keeps the single default button's stored value, text, revision and approval fingerprint", () => {
     const source = SOURCE.replace("footer: Metadata", "footer: Metadata\nbutton: [Discuss](codex://new)");
     const { doc, id, card } = fixture(source);

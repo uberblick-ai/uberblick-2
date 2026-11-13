@@ -184,6 +184,12 @@ it("renders current-member pills, formatting and external links while keeping do
 });
 
 describe("comment inline Markdown", () => {
+  it("keeps www addresses as plain comment text", () => {
+    const view = render(<CommentText text="See www.example.com and <ftp://example.com>" docLinks={null} />);
+    expect(view.container.textContent).toBe("See www.example.com and <ftp://example.com>");
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
   it("renders emphasis, strike, inline code and external links", () => {
     const view = render(<CommentText text="**must**, *maybe*, ~~before~~, `ub update`, [spec](https://example.com/spec), https://example.com/a" docLinks={null} />);
     expect(view.container.querySelector("strong")?.textContent).toBe("must");

@@ -341,7 +341,7 @@ function tableFromTextPlugin(): Plugin {
       handlePaste(view, event) {
         if (inTable(view.state)) {
           const plain = event.clipboardData?.getData("text/plain") ?? "";
-          view.dispatch(view.state.tr.insertText(singleLine(plain)).scrollIntoView());
+          view.dispatch(view.state.tr.insertText(singleLine(plain)).setMeta("webAddressPaste", true).scrollIntoView());
           return true;
         }
         // transformPastedHTML turns only HTML tables into text paragraphs.

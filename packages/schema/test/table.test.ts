@@ -247,11 +247,12 @@ describe("structured table contract", () => {
     expect(getBlocks(doc)).toHaveLength(1);
   });
 
-  it("accepts inline HTML and autolinks as literal cells when they do not start another block", () => {
+  it("accepts inline HTML and reads autolinks in cells when they do not start another block", () => {
     const doc = seeded();
     const text = "| Header |\n| --- |\n<b>bold</b>\n<http://example.test>";
     const id = appendBlock(doc, { type: "table", text });
-    expect(parseGfmTable(getBlock(doc, id)!.text)?.rows.map((row) => row.map((cell) => parseTableCell(cell).map((run) => run.text).join("")))).toEqual([["<b>bold</b>"], ["<http://example.test>"]]);
+    expect(parseGfmTable(getBlock(doc, id)!.text)?.rows.map((row) => row.map((cell) => parseTableCell(cell).map((run) => run.text).join("")))).toEqual([["<b>bold</b>"], ["http://example.test"]]);
+    expect(tableCellText(tableRows(element(doc, id))[2]![0]!)?.toDelta()).toEqual([{ insert: "http://example.test", attributes: { link: { href: "http://example.test" } } }]);
   });
 
   it("preserves untouched cell identity, whitespace and marks when editing a neighbour", () => {

@@ -360,8 +360,9 @@ test("GitHub paste shortcuts preserve a table cell's single paragraph and longer
   await expect(headers.first().locator("p")).toHaveCount(1);
   await page.keyboard.press("Tab");
   await pastePlain(page, `see ${TARGET} first`);
-  await expect(headers.nth(1)).toHaveText(`see ${TARGET} first`);
-  await expect(headers.nth(1).locator("a.ub-link")).toHaveCount(0);
+  await expect(headers.nth(1).locator("a.ub-link")).toHaveAttribute("href", TARGET);
+  await expect(headers.nth(1).locator(".ub-github-link-text")).toHaveText(TARGET);
+  await expect(headers.nth(1).locator(".ub-github-pill")).toBeVisible();
   await expect(headers.nth(1).locator("p")).toHaveCount(1);
   await expect(headers).toHaveCount(3);
 });

@@ -82,5 +82,5 @@ function withCommentLinks(source: string, documentLinks: boolean): string {
 }
 
 export function commentInline(text: string, documentLinks = true): InlineRun[] {
-  return parseInline(withCommentLinks(text, documentLinks));
+  return parseInline(withCommentLinks(text, documentLinks), { autolinks: false });
 }
