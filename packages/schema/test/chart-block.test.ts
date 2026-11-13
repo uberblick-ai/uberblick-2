@@ -24,7 +24,7 @@ const UUID = "66666666-6666-4666-8666-666666666666";
 const mapping = JSON.stringify({
   version: 1, type: "line", collection: "observations",
   x: { field: "day", type: "date" },
-  y: [{ field: "count", label: "Count", unit: "issues" }],
+  y: [{ field: "count", label: "Count", unit: "issues", note: "event" }],
   title: "A ``` fence inside a label",
 });
 const docs: Y.Doc[] = [];

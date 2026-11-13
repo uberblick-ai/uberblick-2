@@ -461,6 +461,24 @@ it("documents the table mapping through both help routes and accepts its source 
     .toMatchObject({ text: insertHelp.text });
 });
 
+it("describes per-point notes through data and chart-block help", () => {
+  const help = new HelpCatalog();
+  for (const topic of ["data", "insert_block"]) {
+    const text = topic === "data" ? help.read(topic).text : toolNamed(topic).details!;
+    for (const guidance of [
+      "Each y series optionally accepts note, a literal top-level field name under the same rules as field",
+      "A non-empty string note on a plotted point",
+      "short, muted single-line label above it or outside its bar's end",
+      "truncated with an ellipsis when long",
+      "full text after all value lines, in mapping order",
+      "Unusually long notes can be clipped by compact chart tooltips",
+      "Absent, null, empty and non-string notes add nothing",
+      "Notes are plain text and never change values, axes, legend entries, reference lines, diagnostics, the text alternative or mapping-write summaries",
+      "note is invalid on x and in scatter, category-bar and table mappings",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+  }
+});
+
 it("teaches valid scatter mappings and value-free write summaries through data and insert help", () => {
   const help = new HelpCatalog();
   const data = help.read("data").text;

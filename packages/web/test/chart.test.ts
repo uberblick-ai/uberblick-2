@@ -502,6 +502,53 @@ describe("the scatter chart's composed presentation and lifecycle", () => {
 });
 
 describe("the chart's derived lifecycle", () => {
+  it.each(["overlay", "panels"])("updates point notes and tooltip tails without changing %s chart text or values", layout => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), layout, y: [
+      { field: "value", label: "Score", note: "event" },
+      { field: "secondary", label: "Runs", type: "bar", note: "barEvent" },
+    ] });
+    const plain = source.replace(',"note":"event"', "").replace(',"note":"barEvent"', "");
+    editBlock(doc, id, mapping, plain);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "gap", value: { day: 1, value: 3, secondary: null, barEvent: "No bar" } },
+      { id: "event", value: { day: 2, value: 7, event: "<b>Release</b>", secondary: 5, barEvent: "Run finished" } },
+    ] }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const description = editor.view.dom.querySelector(".ub-chart-description")?.textContent;
+    const diagnostics = editor.view.dom.querySelector(".ub-chart-diagnostics")?.textContent;
+    editBlock(doc, id, plain, source);
+    const before = Y.encodeStateAsUpdate(doc);
+    flush();
+    const live = charts.instances.filter(chart => !chart.destroyed);
+    const data = live.flatMap(chart => (chart.data as { datasets: { data: { x: number; y: number; note?: string }[] }[] }).datasets);
+    expect(data[0]?.data).toEqual([{ x: 1, y: 3 }, { x: 2, y: 7, note: "<b>Release</b>" }]);
+    expect(data[1]?.data).toEqual([expect.objectContaining({ x: 2, y: 5, note: "Run finished" })]);
+    const tail = (chart: RecordedChart, x: number, hidden = -1): string[] => {
+      const callback = (chart.options as { plugins: { tooltip: { callbacks: {
+        afterBody: (this: unknown, items: unknown[]) => string[];
+      } } } }).plugins.tooltip.callbacks.afterBody;
+      return callback.call({ chart: { ctx: (chart.canvas as HTMLCanvasElement).getContext("2d"), width: 600,
+        isDatasetVisible: (index: number) => index !== hidden } },
+        [{ datasetIndex: 0, parsed: { x } }]);
+    };
+    expect(tail(live[0]!, 1)).toEqual([]);
+    expect(tail(live[0]!, 2)).toEqual(layout === "overlay" ? ["<b>Release</b>", "Run finished"] : ["<b>Release</b>"]);
+    expect(tail(live[0]!, 2, 0)).toEqual(layout === "overlay" ? ["Run finished"] : []);
+    if (layout === "panels") expect(tail(live[1]!, 2)).toEqual(["Run finished"]);
+    expect(editor.view.dom.querySelector(".ub-chart-description")?.textContent).toBe(description);
+    expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.textContent).toBe(diagnostics);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [
+      { id: "event", value: { day: 2, value: 7, event: "New note", secondary: 5, barEvent: null } },
+    ] }]);
+    flush();
+    expect(tail(live[0]!, 2)).toEqual(["New note"]);
+    if (layout === "panels") expect(tail(live[1]!, 2)).toEqual([]);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("draws native bars behind lines without changing mapping order in the legend or shared tooltip", () => {
     const { doc, directory, id } = fixture();
     const source = JSON.stringify({ ...JSON.parse(mapping), missing: "connect", y: [
