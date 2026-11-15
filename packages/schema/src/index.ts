@@ -42,6 +42,8 @@ export type {
 } from "./scatter-data.js";
 export { parseBarConfig, prepareBar } from "./bar-data.js";
 export type { BarConfig, BarSeriesMapping, BarSeries, BarRow, BarDiagnostics, BarReady, BarNoRecords, BarProjection } from "./bar-data.js";
+export { parseDotConfig, prepareDot } from "./dot-data.js";
+export type { DotConfig, DotSeriesMapping, DotSeries, DotRow, DotDiagnostics, DotReady, DotNoRecords, DotProjection } from "./dot-data.js";
 export { chartViewType, prepareChartView } from "./chart-view.js";
 export type { ChartView } from "./chart-view.js";
 export { decisionCurrentRecord, decisionRelations, decisionTopicState, decisionTopicTitle, readDecisions, relatedDecisionTopics, resolveDecisionTopics } from "./decisions.js";

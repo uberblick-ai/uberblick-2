@@ -278,9 +278,9 @@ describe("chart height controls", () => {
 });
 
 describe("category bar composition", () => {
-  it("retains the limit note and diagnostics when the selected category window has no numeric values", async () => {
+  it.each(["bar", "dot"])("retains the limit note and diagnostics for a %s window with no numeric values", async (type) => {
     const { doc, directory, id } = fixture();
-    const source = JSON.stringify({ version: 1, type: "bar", collection: "trend", category: { field: "name" }, y: [{ field: "value" }], limit: 1 });
+    const source = JSON.stringify({ version: 1, type, collection: "trend", category: { field: "name" }, y: [{ field: "value" }], limit: 1 });
     editBlock(doc, id, mapping, source);
     applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
       { id: "a", value: { name: "Empty" } }, { id: "b", value: { name: "Numeric", value: 4 } },
@@ -292,11 +292,11 @@ describe("category bar composition", () => {
     expect(root.querySelector(".ub-chart-notice")?.textContent).toBe("Showing 1 of 2 records");
     expect(root.querySelector(".ub-chart-diagnostics")?.textContent).toContain("No numeric values for series field “value”");
     expect(root.querySelector<HTMLButtonElement>('[aria-label="Resize chart"]')?.hidden).toBe(true);
-    expect(root.querySelector<HTMLElement>(".ub-bar-details")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>(type === "dot" ? ".ub-dot-details" : ".ub-bar-details")?.hidden).toBe(true);
     await act(async () => { applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { name: "Now numeric", value: 2 } }] }]); flush(); });
     expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("ready");
     expect(root.querySelector(".ub-chart-notice")?.textContent).toBe("Showing 1 of 2 records");
-    expect(root.querySelector<HTMLElement>(".ub-bar-details")?.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>(type === "dot" ? ".ub-dot-details" : ".ub-bar-details")?.hidden).toBe(false);
     await act(async () => mounted.editor.destroy());
     doc.destroy(); directory.destroy();
   });
@@ -343,6 +343,62 @@ describe("category bar composition", () => {
     expect(instance.destroyed).toBe(true);
     expect(details.hidden).toBe(true);
     expect(details.querySelector("select")).toBeNull();
+    await act(async () => editor.destroy());
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    doc.destroy(); directory.destroy();
+  });
+});
+
+describe("dot chart composition", () => {
+  it("retains full row values and literal notes through live updates and clears selection and drawings across view changes", async () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ version: 1, type: "dot", collection: "trend", connect: true, note: "note",
+      category: { field: "name", label: "System" }, y: [{ field: "value", label: "Old", unit: "%" }, { field: "other", label: "Today", unit: "%" }] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { name: "Duplicate", value: 12.5, other: 9.9, note: "<b>-2.6</b>" } },
+      { id: "b", value: { name: "Duplicate", note: { delta: 2 } } },
+    ] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    const details = root.querySelector<HTMLElement>(".ub-dot-details")!;
+    const selector = within(details).getByRole<HTMLSelectElement>("combobox", { name: "Select category" });
+    expect(root.dataset.view).toBe("dot");
+    expect([...selector.options].map(option => [option.value, option.text])).toEqual([
+      ["", "Select a category"], ["a", "Duplicate · a"], ["b", "Duplicate · b"],
+    ]);
+    expect(root.querySelector("canvas")?.getAttribute("aria-label")).toBe("Dot plot of Old, Today by System");
+    expect(root.querySelector(".ub-chart-description")?.textContent).toContain("numeric series values and note");
+    expect(root.querySelector<HTMLElement>(".ub-chart-screen")?.style.getPropertyValue("--chart-height")).toBe("176px");
+    const before = Y.encodeStateAsUpdate(doc);
+    await act(async () => fireEvent.change(selector, { target: { value: "a" } }));
+    expect([...details.querySelectorAll("dt")].map(term => [term.textContent, term.nextElementSibling?.textContent])).toEqual([
+      ["System", "Duplicate"], ["Old", "12.5 %"], ["Today", "9.9 %"], ["Note", "<b>-2.6</b>"],
+    ]);
+    expect(details.querySelector("b")).toBeNull();
+    await act(async () => fireEvent.change(selector, { target: { value: "b" } }));
+    expect(details.textContent).toContain('{"delta":2}');
+    expect(details.textContent).toContain("No numeric values");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    const instance = charts.instances[0]!;
+    await act(async () => { applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "b", value: { name: "Updated", value: 11.1, other: 13.6, note: "+2.5" } }] }]); flush(); });
+    expect(selector.value).toBe("b");
+    expect(details.querySelector("dl")?.textContent).toContain("SystemUpdatedOld11.1 %Today13.6 %Note+2.5");
+    expect(charts.instances).toHaveLength(1);
+    expect(instance.updates).toBeGreaterThan(0);
+    const changed = source.replace('"connect":true', '"connect":false');
+    await act(async () => { editBlock(doc, id, source, changed); flush(); });
+    expect(selector.value).toBe("");
+    expect(details.querySelector("dl")).toBeNull();
+    await act(async () => { editBlock(doc, id, changed, tableMapping); flush(); });
+    expect(instance.destroyed).toBe(true);
+    expect(details.hidden).toBe(true);
+    expect(details.querySelector("select")).toBeNull();
+    await act(async () => { editBlock(doc, id, tableMapping, source); flush(); });
+    expect(details.hidden).toBe(false);
+    expect(details.querySelector("dl")).toBeNull();
     await act(async () => editor.destroy());
     expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
     doc.destroy(); directory.destroy();

@@ -122,6 +122,19 @@ const CATEGORY_RECORDS = [
   { id: "e", value: { name: null, a: 80 } },
 ];
 
+const DOT_MAPPING = {
+  version: 1, type: "dot", collection: "teams", title: "Word error rate",
+  category: { field: "name", label: "System" }, connect: true, note: "change",
+  y: [{ field: "old", label: "Old reference", unit: "%" }, { field: "today", label: "Today", unit: "%" }],
+};
+const LONG_DOT_NOTE = `<b>+2.5</b> ${"Stored note ".repeat(12)}`;
+const DOT_RECORDS = [
+  { id: "a", value: { name: "Whisper large-v3", old: 12.5, today: 9.9, change: "−2.6" } },
+  { id: "b", value: { name: LONG_CATEGORY, old: 11.1, today: 13.6, change: LONG_DOT_NOTE } },
+  { id: "c", value: { name: "Missing today", old: 10.4, change: { source: "old" } } },
+  { id: "d", value: { name: "Equal", old: 12, today: 12 } },
+];
+
 async function categoryRecords(session: McpSession, uuid: string, records: unknown[] = CATEGORY_RECORDS): Promise<void> {
   await session.call("update_data", { uuid, operations: [{ collection: "teams",
     schema: { version: 1, schema: { type: "object" } }, replaceRecords: records,
@@ -129,7 +142,7 @@ async function categoryRecords(session: McpSession, uuid: string, records: unkno
 }
 
 interface PaintedText { canvas: number; text: string; color: string; x: number; y: number; width: number; left: number; right: number; top: number; bottom: number; font: string; rotated: boolean }
-interface PaintedPoint { canvas: number; x: number; y: number; radius: number; color: string }
+interface PaintedPoint { canvas: number; x: number; y: number; radius: number; color: string; stroke: string }
 interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: PaintedPoint[] }
 interface PaintedRectangle { left: number; right: number; top: number; bottom: number }
 interface PaintedBar extends PaintedRectangle { canvas: number; color: string; clip: PaintedRectangle | null; sequence: number }
@@ -409,6 +422,36 @@ async function categoryReferenceInk(page: Page, horizontal: boolean, bounds: Pai
   }, { horizontal, bounds });
 }
 
+/** Read the neutral connector or reference stroke directly from canvas pixels. */
+async function dotLineInk(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<number> {
+  return page.evaluate(({ from, to }) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(".ub-chart canvas");
+    const probe = document.querySelector(".ub-chart-probe");
+    const sample = document.createElement("canvas").getContext("2d");
+    const context = canvas?.getContext("2d");
+    if (canvas == null || context == null || probe === null || sample === null) throw new Error("e2e: dot pixels unavailable");
+    sample.fillStyle = getComputedStyle(probe).color;
+    sample.fillRect(0, 0, 1, 1);
+    const neutral = sample.getImageData(0, 0, 1, 1).data;
+    const box = canvas.getBoundingClientRect(), scaleX = canvas.width / box.width, scaleY = canvas.height / box.height;
+    const horizontal = from.y === to.y;
+    const start = horizontal ? Math.ceil(Math.min(from.x, to.x) * scaleX) : Math.ceil(Math.min(from.y, to.y) * scaleY);
+    const end = horizontal ? Math.floor(Math.max(from.x, to.x) * scaleX) : Math.floor(Math.max(from.y, to.y) * scaleY);
+    let coverage = 0;
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const pixels = horizontal ? context.getImageData(start, Math.round(from.y * scaleY) + offset, end - start, 1).data
+        : context.getImageData(Math.round(from.x * scaleX) + offset, start, 1, end - start).data;
+      let matching = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if ((pixels[index + 3] ?? 0) >= 100 && [0, 1, 2].every(channel =>
+          Math.abs((pixels[index + channel] ?? 0) - (neutral[channel] ?? 0)) < 20)) matching += 1;
+      }
+      coverage = Math.max(coverage, matching / (end - start));
+    }
+    return coverage;
+  }, { from, to });
+}
+
 for (const orientation of ["vertical", "horizontal"] as const) {
   test(`category bars paint grouped positive and negative stacks ${orientation}`, { tag: "@webkit" }, async ({ browser }, info) => {
     const session = writer(), mapping = { ...CATEGORY_MAPPING, orientation };
@@ -597,6 +640,230 @@ test("horizontal category defaults fit labels beside a wrapped legend before ski
   await expect(page.locator(".ub-bar-details dt")).toHaveText(["Service", ...mapping.y.map(series => series.label)]);
 });
 
+test("dot plots paint hollow-to-filled pairs and full row values beside a nonzero plot", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer(), uuid = await chartDoc(session, "Dot pairs", DOT_MAPPING);
+  await categoryRecords(session, uuid, DOT_RECORDS);
+  const touch = info.project.use.hasTouch === true;
+  for (const appearance of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: page => installProbe(page, uuid),
+      contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false }),
+        locale: "en-US", colorScheme: appearance },
+    });
+    await waitForDocumentDraw(page, session, uuid);
+    const canvas = page.getByRole("img", { name: DOT_MAPPING.title, exact: true });
+    await expect(canvas).toBeVisible();
+    await expect(canvas).toHaveAccessibleDescription(/4 plotted records in 4 categories/);
+    await expect.poll(() => canvas.evaluate(element => element.getBoundingClientRect().height)).toBe(224);
+    const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+    const firstLabel = probe.ink.find(entry => entry.text === "Whisper large-v3");
+    const lastLabel = probe.ink.find(entry => entry.text === "Equal");
+    if (firstLabel === undefined || lastLabel === undefined) throw new Error("e2e: dot category labels absent");
+    const points = probe.points.filter(point => point.y >= firstLabel.top - 4 && point.y <= lastLabel.bottom + 4);
+    expect(points).toHaveLength(7);
+    const firstRow = points.filter(point => Math.abs(point.y - (points[0]?.y ?? NaN)) < 1).sort((a, b) => a.x - b.x);
+    // Recover value ticks from their painted anchors, independently of Chart.js options.
+    const ticks = probe.ink.filter(entry => /^\d+(?:\.\d+)? %$/.test(entry.text) && entry.y > lastLabel.bottom + 4);
+    expect(ticks.length).toBeGreaterThan(1);
+    const orderedTicks = ticks.toSorted((a, b) => a.x - b.x);
+    for (let index = 1; index < orderedTicks.length; index += 1) {
+      expect(orderedTicks[index]?.left ?? -Infinity).toBeGreaterThan(orderedTicks[index - 1]?.right ?? Infinity);
+    }
+    expect(Math.min(...ticks.map(tick => Number(tick.text.slice(0, -2))))).toBeGreaterThan(0);
+    for (const point of points) {
+      expect(point.x).toBeGreaterThanOrEqual(Math.min(...ticks.map(tick => tick.x)) - 1);
+      expect(point.x).toBeLessThanOrEqual(Math.max(...ticks.map(tick => tick.x)) + 1);
+    }
+    expect(firstRow).toHaveLength(2);
+    expect(firstRow[0]?.color).toBe(firstRow[0]?.stroke);
+    expect(firstRow[1]?.color).not.toBe(firstRow[1]?.stroke);
+    // First row improves, so its filled second-series dot lies on the left.
+    expect(firstRow[0]?.color).not.toMatch(/(?:transparent|, 0\))/);
+    expect(firstRow[1]?.color).toMatch(/(?:transparent|, 0\))/);
+    const left = firstRow[0], right = firstRow[1];
+    if (left === undefined || right === undefined) throw new Error("e2e: complete dot pair absent");
+    expect(await dotLineInk(page, { x: left.x + 8, y: left.y }, { x: right.x - 8, y: right.y })).toBeGreaterThan(0.7);
+    const legend = probe.points.filter(point => point.y > Math.max(...ticks.map(tick => tick.bottom)));
+    expect(legend).toHaveLength(2);
+    expect(legend.some(point => /(?:transparent|, 0\))/.test(point.color))).toBe(true);
+    expect(legend.some(point => point.color === point.stroke)).toBe(true);
+    const rowValues = probe.ink.filter(entry => /^(9\.9 % ← 12\.5 %|11\.1 % → 13\.6 %|10\.4 %|12 % → 12 %)$/.test(entry.text) && entry.y < lastLabel.bottom + 4);
+    expect(rowValues.map(entry => entry.text)).toEqual(expect.arrayContaining(["9.9 % ← 12.5 %", "11.1 % → 13.6 %", "10.4 %", "12 % → 12 %"]));
+    const box = await canvas.boundingBox();
+    if (box === null) throw new Error("e2e: dot canvas absent");
+    for (const value of rowValues) {
+      expect(value.left).toBeGreaterThan(Math.max(...points.map(point => point.x + point.radius)));
+      expect(value.right).toBeLessThanOrEqual(box.width);
+      expect(value.bottom).toBeLessThan(Math.min(...ticks.map(tick => tick.top)));
+    }
+    const note = probe.ink.find(entry => entry.text.startsWith("<") && entry.text.endsWith("…"));
+    expect(note, JSON.stringify(probe.ink.map(entry => entry.text))).toBeDefined();
+    expect(LONG_DOT_NOTE.startsWith(note?.text.slice(0, -1) ?? "missing")).toBe(true);
+    await expectPaintedTextColour(page, /^(9\.9 % ← 12\.5 %|11\.1 % → 13\.6 %|10\.4 %|12 % → 12 %)$/);
+    await canvasEvidence(page.locator(".ub-chart"), info, `chart-dot-${touch ? "ipad" : "desktop"}-${appearance}`);
+    await editMapping(session, uuid, JSON.stringify({ ...DOT_MAPPING,
+      y: DOT_MAPPING.y.map(series => ({ ...series, range: [8, 16], reference: 14 })), connect: false }));
+    await waitForDocumentDraw(page, session, uuid);
+    const referenced = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+    const valueTicks = referenced.ink.filter(entry => /^\d+(?:\.\d+)? %$/.test(entry.text) && entry.y > lastLabel.bottom + 4);
+    const startTick = valueTicks.find(entry => entry.text === "8 %"), endTick = valueTicks.find(entry => entry.text === "16 %");
+    if (startTick === undefined || endTick === undefined) throw new Error("e2e: declared dot axis bounds absent");
+    const referenceX = startTick.x + (endTick.x - startTick.x) * 6 / 8;
+    expect(await dotLineInk(page, { x: referenceX, y: firstLabel.top }, { x: referenceX, y: lastLabel.bottom })).toBeGreaterThan(0.75);
+    expect(referenced.ink.map(entry => entry.text)).toContain("12.5 % · 9.9 %");
+    await editMapping(session, uuid, JSON.stringify(DOT_MAPPING));
+    await waitForDocumentDraw(page, session, uuid);
+    const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+    const target = points.find(point => Math.abs(point.y - (firstRow[0]?.y ?? NaN)) > 2);
+    if (target === undefined) throw new Error("e2e: long dot row absent");
+    if (touch) await page.touchscreen.tap(box.x + target.x, box.y + target.y);
+    else await page.mouse.click(box.x + target.x, box.y + target.y);
+    await expect(selector).toHaveValue("b");
+    await expect(page.locator(".ub-chart-source")).toBeHidden();
+    await expect(page.locator(".ub-dot-details")).toContainText(LONG_CATEGORY);
+    await expect(page.locator(".ub-dot-details")).toContainText(LONG_DOT_NOTE);
+    await expect(page.locator(".ub-dot-details b")).toHaveCount(0);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe)).texts.join(""))
+      .toContain(LONG_DOT_NOTE);
+    await page.context().close();
+  }
+});
+
+test("dot selector, source, height and locked document controls keep native input", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer(), mapping = { ...DOT_MAPPING, height: 300 };
+  const uuid = await chartDoc(session, "Dot controls", mapping);
+  await categoryRecords(session, uuid, DOT_RECORDS);
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: page => installProbe(page, uuid),
+    contextOptions: touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false },
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+  await editor(page).locator(":scope > p").first().click();
+  for (let count = 0; count < 30 && !(await selector.evaluate(element => element === document.activeElement)); count += 1) {
+    await page.keyboard.press(process.platform === "darwin" && info.project.name === "webkit-ipad" ? "Alt+Tab" : "Tab");
+  }
+  await expect(selector).toBeFocused();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await expect(selector).toHaveValue("d");
+  await expect(page.locator(".ub-dot-details")).toContainText("Equal");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Tab");
+  await expect(selector).not.toBeFocused();
+  await proveMcpArrival(page, session, uuid, { path: "upstream", restore: true });
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+    expect(doc.blocks.find(block => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
+  });
+  if (touch) {
+    await page.getByRole("button", { name: "Open chart source", exact: true }).tap();
+    await page.getByRole("textbox", { name: "Height", exact: true }).fill("340");
+    await page.getByRole("textbox", { name: "Height", exact: true }).press("Enter");
+    await editor(page).locator(":scope > p").first().tap();
+  } else {
+    await page.locator(".ub-chart").hover();
+    const box = await page.getByRole("button", { name: "Resize chart", exact: true }).boundingBox();
+    if (box === null) throw new Error("e2e: dot resize handle absent");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 40, { steps: 4 });
+    await page.mouse.up();
+  }
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+    const drawn = JSON.parse(doc.blocks.find(block => block.type === "chart")?.text ?? "{}");
+    expect(drawn).toEqual({ ...mapping, height: 340 });
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  await editMapping(session, uuid, JSON.stringify({ ...mapping, sort: { field: "today", direction: "desc" }, limit: 2 }));
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(selector.locator("option[value]:not([value=''])")).toHaveText([`${LONG_CATEGORY} · b`, "Equal · d"]);
+  await expect(page.locator(".ub-chart-notice")).toContainText("Showing 2 of 4 records");
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  try {
+    peer.decide("decided");
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await selector.focus();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Tab");
+    await expect(selector).not.toBeFocused();
+    const canvas = page.locator(".ub-chart canvas"), box = await canvas.boundingBox();
+    const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+    const label = probe.ink.find(entry => entry.text.startsWith("Search"));
+    const point = probe.points.find(point => label !== undefined && point.y >= label.top - 4 && point.y <= label.bottom + 4);
+    if (point === undefined || box === null) throw new Error("e2e: locked dot absent");
+    if (touch) await page.touchscreen.tap(box.x + point.x, box.y + point.y); else await page.mouse.click(box.x + point.x, box.y + point.y);
+    await expect(selector).toHaveValue("b");
+    await expect(page.locator(".ub-chart-source")).toBeHidden();
+    if (touch) await page.touchscreen.tap(box.x + box.width - 3, box.y + box.height - 3);
+    else await page.mouse.click(box.x + box.width - 3, box.y + box.height - 3);
+    await expect(page.locator(".ub-chart-source")).toBeVisible();
+    await editor(page).locator(":scope > p").first().click();
+    await page.getByRole("button", { name: "Open chart source", exact: true }).click();
+    await expect(page.locator(".ub-chart-source")).toBeVisible();
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  } finally { peer.close(); }
+});
+
+test("dot row text fits narrow widths, omits dense or oversized values and retains full details", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer(), mapping = { ...DOT_MAPPING, connect: false, y: [{ field: "today", label: "Today", unit: "%" }] };
+  const uuid = await chartDoc(session, "Dot text limits", mapping);
+  const records = Array.from({ length: 50 }, (_, index) => ({ id: String(index).padStart(2, "0"), value: {
+    name: `System ${index}`, today: 83.5 + index / 10, change: "Stored note ".repeat(12),
+  } }));
+  await categoryRecords(session, uuid, records.slice(0, 4));
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: page => installProbe(page, uuid) });
+  await waitForDocumentDraw(page, session, uuid);
+  await page.locator(".ub-editor").evaluate(element => { (element as HTMLElement).style.width = "320px"; });
+  await expect.poll(() => page.locator(".ub-chart canvas").evaluate(element =>
+    (element as HTMLCanvasElement).width / devicePixelRatio)).toBeLessThanOrEqual(320);
+  const paintedValues = async () => page.evaluate(() => {
+    const ink = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink;
+    const top = ink.find(entry => entry.text === "System 0")?.top ?? Infinity;
+    const bottom = ink.find(entry => entry.text === "System 3")?.bottom ?? -Infinity;
+    return ink.filter(entry => /^83\.[5-8] %$/.test(entry.text) && entry.y >= top && entry.y <= bottom);
+  });
+  await expect.poll(async () => (await paintedValues()).length).toBe(4);
+  const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+  const category = probe.ink.find(entry => entry.text === "System 0");
+  const last = probe.ink.find(entry => entry.text === "System 3");
+  const points = probe.points.filter(point => category !== undefined && last !== undefined && point.y >= category.top - 4 && point.y <= last.bottom + 4);
+  expect(points).toHaveLength(4);
+  for (const text of await paintedValues()) {
+    expect(text.left).toBeGreaterThan(Math.max(...points.map(point => point.x + point.radius)));
+    expect(text.right).toBeLessThanOrEqual(320);
+  }
+  await categoryRecords(session, uuid, records);
+  await waitForDocumentDraw(page, session, uuid);
+  await expect.poll(() => page.locator(".ub-chart-screen").evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(600);
+  const dense = await page.evaluate(() => {
+    const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
+    const right = Math.max(...probe.points.filter(point => point.radius === 4).map(point => point.x + point.radius));
+    return probe.ink.filter(entry => /^8\d(?:\.\d+)? %$/.test(entry.text) && entry.left > right);
+  });
+  expect(dense.length).toBeLessThan(50);
+  for (let index = 1; index < dense.length; index += 1) expect(dense[index]?.top ?? -Infinity).toBeGreaterThan(dense[index - 1]?.bottom ?? Infinity);
+  const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+  await selector.selectOption("49");
+  await expect(page.locator(".ub-dot-details")).toContainText("Stored note ".repeat(12));
+  await categoryRecords(session, uuid, [{ id: "extreme", value: { name: "Extreme", today: 1e308, change: "Full retained note" } }]);
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(selector.locator("option[value]:not([value=''])")).toHaveCount(1);
+  await selector.selectOption("extreme");
+  await expect(page.locator(".ub-dot-details")).toContainText(new Intl.NumberFormat("en-US", { maximumSignificantDigits: 12 }).format(1e308));
+  await expect(page.locator(".ub-dot-details")).toContainText("Full retained note");
+  const extremeInk = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+  expect(extremeInk.some(entry => entry.text === "Full retained note")).toBe(false);
+  await categoryRecords(session, uuid, [{ id: "tiny", value: { name: "Tiny", today: Number.MIN_VALUE } }]);
+  await waitForDocumentDraw(page, session, uuid);
+  const tinyInk = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+  const tinyLabel = tinyInk.ink.find(entry => entry.text === "Tiny");
+  expect(tinyLabel).toBeDefined();
+  expect(tinyInk.points.filter(point => tinyLabel !== undefined && point.y >= tinyLabel.top - 4 && point.y <= tinyLabel.bottom + 4)).toHaveLength(1);
+});
+
 /**
  * Read Tiptap's existing editor reference and y-sync plugin, never a product
  * test hook. A data-map observation marks when the browser has applied an
@@ -739,7 +1006,7 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         const box = this.canvas.getBoundingClientRect();
         probe.points.push({ canvas: [...document.querySelectorAll(".ub-chart canvas")].indexOf(this.canvas),
           x: position.x * box.width / this.canvas.width,
-          y: position.y * box.height / this.canvas.height, radius: args[2], color: String(this.fillStyle) });
+          y: position.y * box.height / this.canvas.height, radius: args[2], color: String(this.fillStyle), stroke: String(this.strokeStyle) });
       }
       arc.apply(this, args);
     };

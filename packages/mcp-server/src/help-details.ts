@@ -35,6 +35,29 @@ const categoryBarGuidance =
   "with no record values, series counts or x endpoints. plottedCount counts shown categories with at least one numeric series. " +
   "A chart that cannot draw includes its problem message and warning; every series with no numeric values in the shown categories warns by field name. ";
 
+const dotGuidance =
+  "For named categories whose values sit far from zero use type dot, for example " +
+  "`{\"version\":1,\"type\":\"dot\",\"collection\":\"systems\",\"category\":{\"field\":\"system\",\"label\":\"System\"}," +
+  "\"y\":[{\"field\":\"wer_old\",\"label\":\"Old reference\",\"unit\":\"%\"},{\"field\":\"wer_today\",\"label\":\"Today\",\"unit\":\"%\"}]," +
+  "\"connect\":true,\"note\":\"change\",\"sort\":{\"field\":\"wer_today\",\"direction\":\"asc\"}}`. " +
+  "A dot mapping takes version 1, type dot, collection, category with field and optional label, and one or two numeric y series " +
+  "with field and optional label, unit, range and reference. Optional connect is boolean; connect: true needs exactly two series. " +
+  "Optional note names one top-level field per row; strings appear verbatim, other non-null values as compact JSON, never markup, " +
+  "and absent or null notes add nothing. Rows run down the side and values across. One series is filled; with two, the first is hollow " +
+  "and the second filled, including the legend. connect joins only pairs with both values. The value axis spans plotted values, ranges " +
+  "and references with rounded ticks, without forcing zero; range is a minimum span and distinct references draw neutral lines. " +
+  "The axis shows a unit only when all series share one, counting absent and empty units as equal. " +
+  "sort, limit, title, height, category eligibility, diagnostics and the 5,000-row cap work as for category bars. " +
+  "Each row ends with its full plotted values and units; joined pairs read lower value first with the arrow pointing to the second series " +
+  "(9.9 ← 12.5 or 11.1 → 13.6), equal pairs first → second, and unjoined pairs in mapping order, followed by the note. " +
+  "The chart calculates no difference, total or share. Long notes shorten with an ellipsis. Crowded row-end text, or values too wide " +
+  "to fit beside a usable plot, are omitted; tooltip and keyboard category selection keep the full values and note in mapping order. " +
+  "A dot click or tap selects its row; other drawing clicks and Open chart source open source, including in read-only documents. " +
+  "Without height, rows grow the chart within 100–600 pixels. orientation, stack, a series note, layout, missing, x, a series type " +
+  "and unknown keys are invalid. Bound dot summaries have status, recordCount, plottedCount and warnings from the shared projection, " +
+  "with no record values or note text. plottedCount counts shown rows with at least one numeric value; a problem adds its message " +
+  "and warning, and every series field with no numeric values adds a warning naming the field. ";
+
 export const toolHelpDetails = {
   list_tags:
     "The existing workspace tag catalog is returned in deterministic name order. Each entry carries the stable canonical " +
@@ -108,7 +131,7 @@ export const toolHelpDetails = {
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Chart seeds return a `chart` summary beside each block's id and rev, using this replica's current data. " +
     "A new document has no data yet: a valid mapping reports collection-absent, and invalid JSON reports " +
-    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " + categoryBarGuidance +
+    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " + categoryBarGuidance + dotGuidance +
     "Ablauf and wireframe code seeds return a `drawing` summary with the diagnostics the web editor lists; " +
     "they never refuse creation either. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
@@ -425,7 +448,7 @@ export const toolHelpDetails = {
     "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
     "includes its first and last x, with no other record values. A bound scatter mapping reports recordCount " +
     "and plottedCount without record values, and warns when its group field has more than eight values. Warnings and summary failures never refuse " +
-    "or roll back the edit, or change its durability result. See data for the full summary contract. " + categoryBarGuidance +
+    "or roll back the edit, or change its durability result. See data for the full summary contract. " + categoryBarGuidance + dotGuidance +
     "Editing an ablauf or wireframe code block returns a `drawing` summary instead: `status` and the " +
     "diagnostics the web editor lists, advisory like the chart summary.\n\n" +
     "For an existing list item, optional `list` (`bullet`, `ordered`, `unchecked` or `checked`) and `indent` (integer 0–3) change " +
@@ -610,7 +633,7 @@ export const toolHelpDetails = {
     "in mapping order. Unusually long notes can be clipped by compact chart tooltips. " +
     "Absent, null, empty and non-string notes add nothing. Notes are plain text and never change values, " +
     "axes, legend entries, reference lines, diagnostics, the text alternative or mapping-write summaries. " +
-    "note is invalid on x and in scatter, category-bar and table mappings. " +
+    "A series note is invalid on x and in scatter, category-bar, dot and table mappings. " +
     "Bars-only charts keep top-level type line and draw grouped bars from zero. " +
     "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis. " +
     "Missing, null or wrong-type bar values draw no bar; missing affects only lines. Optional x and y labels, y units, title and " +
@@ -629,7 +652,7 @@ export const toolHelpDetails = {
     "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
     "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
-    categoryBarGuidance +
+    categoryBarGuidance + dotGuidance +
     "A scatter plot uses type scatter, for example " +
     "`{\"version\":1,\"type\":\"scatter\",\"collection\":\"options\",\"x\":{\"field\":\"cost\"}," +
     "\"y\":{\"field\":\"quality\",\"unit\":\"%\",\"lower\":\"quality_low\",\"upper\":\"quality_high\",\"range\":[0,100]}," +
@@ -667,7 +690,7 @@ export const toolHelpDetails = {
     "with no pager or page state; when limit hides rows, the footnote includes shown and total valid-record counts. " +
     "Open table source appears on hover or keyboard focus and stays reachable without hover. " +
     "Existing pageSize values remain accepted as integers from one to one hundred for compatibility and never affect display; " +
-    "omit pageSize from new mappings. For line, category-bar and table views, limit has no upper bound of its own. Records hidden by " +
+    "omit pageSize from new mappings. For line, category-bar, dot and table views, limit has no upper bound of its own. Records hidden by " +
     "the author limit are not omissions. When it hides line-chart records, a muted note shows the latest shown and " +
     "total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing " +
     "notice and diagnostics when N exceeds 5,000. update_data recomputes a limited window without changing its source. " +

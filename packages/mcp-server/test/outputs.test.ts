@@ -58,7 +58,7 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("successful MCP output contracts", () => {
-  it("accepts private category-bar counts and rejects record data in the strict chart summary", () => {
+  it("accepts category-bar and dot counts and rejects record values or notes in the strict chart summary", () => {
     const payload = {
       uuid: randomUUID(), applied: true, synced: false, hub,
       blocks: [{ id: "chart", rev: "read-rev", chart: {
@@ -71,7 +71,8 @@ describe("successful MCP output contracts", () => {
       recordCount: 4, plottedCount: 0, warnings: ["No plottable records in this chart collection."],
     } }] };
     expect(outputSchemas.insert_block.safeParse(empty).success).toBe(true);
-    for (const extra of [{ rows: [{ label: "PRIVATE_LABEL", values: [42] }] }, { category: "PRIVATE_LABEL" }, { plottedCount: -1 }]) {
+    for (const extra of [{ rows: [{ label: "PRIVATE_LABEL", values: [42] }] }, { category: "PRIVATE_LABEL" },
+      { note: "PRIVATE_NOTE_TEXT" }, { plottedCount: -1 }]) {
       expect(outputSchemas.insert_block.safeParse({ ...payload,
         blocks: [{ ...payload.blocks[0], chart: { ...payload.blocks[0]!.chart, ...extra } }],
       }).success).toBe(false);
@@ -156,23 +157,33 @@ describe("successful MCP output contracts", () => {
       x: { field: "day", type: "date" }, y: [{ field: "count" }] });
     const table = JSON.stringify({ version: 1, type: "table", collection: "observations",
       columns: [{ field: "count", format: "number" }] });
+    const dot = JSON.stringify({ version: 1, type: "dot", collection: "observations",
+      category: { field: "team" }, y: [{ field: "count" }], note: "change" });
     const created = await success("create_doc", {
       title: "Chart output contract", description: "Chart summaries pass the advertised output schemas.",
-      blocks: [{ type: "chart", text: line }, { type: "chart", text: "{ incomplete" }],
+      blocks: [{ type: "chart", text: line }, { type: "chart", text: "{ incomplete" }, { type: "chart", text: dot }],
     });
     expect(created.blocks.map((block: { chart: { status: string } }) => block.chart.status))
-      .toEqual(["collection-absent", "invalid-configuration"]);
+      .toEqual(["collection-absent", "invalid-configuration", "collection-absent"]);
     await success("update_data", { uuid: created.uuid, operations: [{
       collection: "observations", schema: { version: 1, schema: { type: "object" } },
-      upsert: [{ id: "point", value: { day: "2026-09-10", count: 17 } }],
+      upsert: [{ id: "point", value: { day: "2026-09-10", count: 17, team: "PRIVATE_TEAM", change: "PRIVATE_NOTE_TEXT" } }],
     }] });
     const inserted = await success("insert_block", { uuid: created.uuid, blocks: [
-      { type: "paragraph", text: "Context" }, { type: "chart", text: line }, { type: "chart", text: table },
+      { type: "paragraph", text: "Context" }, { type: "chart", text: line }, { type: "chart", text: table }, { type: "chart", text: dot },
     ] });
     expect(inserted.blocks[0]).not.toHaveProperty("chart");
     expect(inserted.blocks[1].chart).toMatchObject({ status: "ready", recordCount: 1, plottedCount: 1,
       series: [{ field: "count", pointCount: 1 }], firstX: "2026-09-10", lastX: "2026-09-10" });
     expect(inserted.blocks[2].chart).toEqual({ status: "ready", recordCount: 1, rowCount: 1, invalidRecordCount: 0, warnings: [] });
+    expect(inserted.blocks[3].chart).toEqual({ status: "ready", recordCount: 1, plottedCount: 1, warnings: [] });
+    expect(JSON.stringify(inserted)).not.toMatch(/PRIVATE_TEAM|PRIVATE_NOTE_TEXT/);
+    const editedDot = await success("edit_block", { uuid: created.uuid,
+      block_id: inserted.blocks[3].id, rev: inserted.blocks[3].rev, old_text: dot,
+      new_text: dot.replace('"count"', '"missing"') });
+    expect(editedDot.block.chart).toEqual({ status: "no-records", recordCount: 1, plottedCount: 0,
+      message: "No plottable records in this chart collection.",
+      warnings: ["No plottable records in this chart collection.", expect.stringContaining("missing")] });
     const empty = line.replace('"count"', '"coutn"');
     const edited = await success("edit_block", { uuid: created.uuid,
       block_id: inserted.blocks[1].id, rev: inserted.blocks[1].rev, old_text: line, new_text: empty });

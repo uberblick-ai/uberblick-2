@@ -95,6 +95,7 @@ describe("shared chart-block projection", () => {
     ['{"type":"table"}', "table", "Invalid table configuration:"],
     ['{"type":"scatter"}', "scatter", "Invalid scatter configuration:"],
     ['{"type":"bar"}', "bar", "Invalid bar configuration:"],
+    ['{"type":"dot"}', "dot", "Invalid dot configuration:"],
   ] as const)("dispatches %s to the same parser and problem message", (source, type, message) => {
     expect(chartViewType(source)).toBe(type);
     expect(prepareChartView(source, null)).toMatchObject({

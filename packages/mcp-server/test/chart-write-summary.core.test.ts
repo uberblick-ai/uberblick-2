@@ -22,6 +22,10 @@ const bar = {
   version: 1, type: "bar", collection: "observations",
   category: { field: "team" }, y: [{ field: "count" }],
 };
+const dot = {
+  version: 1, type: "dot", collection: "observations",
+  category: { field: "team" }, y: [{ field: "count" }],
+};
 
 async function local(): Promise<Rig> {
   const rig = await startServer();
@@ -344,7 +348,54 @@ describe("chart source write summaries", () => {
     expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
   });
 
-  it("reports bound empty line, scatter, bar and table collections with counts", async () => {
+  it("summarizes dot seeds, selected rows and empty series across writes without returning values or notes", async () => {
+    const rig = await local();
+    const mapping = { ...dot, connect: true, note: "change", sort: { field: "team", direction: "asc" }, limit: 3,
+      y: [{ field: "count", label: "PRIVATE_SERIES_LABEL", unit: "%" }, { field: "spare", unit: "%" }] };
+    const source = JSON.stringify(mapping);
+    const created = await rig.ok("create_doc", {
+      title: "Dot feedback", description: "Row values and notes remain in the document.",
+      blocks: [{ type: "chart", text: source }],
+    });
+    expect(created.blocks[0].chart).toEqual({
+      status: "collection-absent", message: "Chart collection “observations” is absent.",
+      collections: [], warnings: [expect.any(String)],
+    });
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: { type: "object" } },
+      upsert: [
+        { id: "private-a", value: { team: "PRIVATE_A", count: 42424242, change: "PRIVATE_NOTE_TEXT" } },
+        { id: "private-b", value: { team: "PRIVATE_A", count: null, spare: 31313131, change: { private: true } } },
+        { id: "private-c", value: { team: "PRIVATE_C", count: "PRIVATE_WRONG_TYPE", change: "+2.5" } },
+        { id: "private-d", value: { team: "PRIVATE_D", count: 1, spare: 1 } },
+        { id: "private-null", value: { team: null, count: 42424242 } },
+        { id: "private-absent", value: { count: 42424242 } },
+      ],
+    }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    doc.getMap(DATA_KEY).set(JSON.stringify(["record", "observations", "private-invalid"]), "PRIVATE_INVALID_RECORD");
+    const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
+    const result = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "chart", text: source }] });
+    expect(result.blocks[0].chart).toEqual({ status: "ready", recordCount: 7, plottedCount: 2, warnings: [] });
+    expect(JSON.stringify(result)).not.toMatch(/42424242|31313131|PRIVATE_|private-|\+2\.5/);
+    expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
+    const edited = await rig.ok("edit_block", {
+      uuid: created.uuid, block_id: result.blocks[0].id, rev: result.blocks[0].rev, old_text: source,
+      new_text: JSON.stringify({ ...mapping, y: [{ field: "count" }, { field: "never" }] }),
+    });
+    expect(edited.block.chart).toEqual({
+      status: "ready", recordCount: 7, plottedCount: 1, warnings: [expect.stringContaining("never")],
+    });
+    const noValues = await insert(rig, created.uuid, { ...mapping, y: [{ field: "unused" }, { field: "never" }] });
+    expect(noValues).toEqual({
+      status: "no-records", message: "No plottable records in this chart collection.", recordCount: 7, plottedCount: 0,
+      warnings: ["No plottable records in this chart collection.", expect.stringContaining("unused"), expect.stringContaining("never")],
+    });
+    expect(JSON.stringify({ edited, noValues })).not.toMatch(/42424242|31313131|PRIVATE_|private-|\+2\.5/);
+    expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
+  });
+
+  it("reports bound empty line, scatter, bar, dot and table collections with counts", async () => {
     const rig = await local();
     const { uuid } = await create(rig);
     await rig.ok("update_data", { uuid, operations: [{
@@ -364,6 +415,10 @@ describe("chart source write summaries", () => {
       recordCount: 0, plottedCount: 0, warnings: [expect.any(String)],
     });
     expect(await insert(rig, uuid, bar)).toEqual({
+      status: "no-records", message: "No plottable records in this chart collection.",
+      recordCount: 0, plottedCount: 0, warnings: [expect.any(String), expect.stringContaining("count")],
+    });
+    expect(await insert(rig, uuid, dot)).toEqual({
       status: "no-records", message: "No plottable records in this chart collection.",
       recordCount: 0, plottedCount: 0, warnings: [expect.any(String), expect.stringContaining("count")],
     });
