@@ -153,6 +153,15 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: { list: "ordered" },
   },
   {
+    id: "list-checklist",
+    label: "Checklist",
+    group: "Lists",
+    trigger: null,
+    keywords: ["task", "todo", "checkbox", "item"],
+    type: "list-item",
+    attrs: { list: "unchecked" },
+  },
+  {
     id: "code",
     label: "Code",
     group: "Source",
@@ -219,7 +228,7 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
 ];
 
 export const DECISION_ANSWER_MENU_ENTRIES: readonly BlockMenuEntry[] = BLOCK_MENU_ENTRIES.filter(
-  (entry) => ["paragraph", "list-bullet", "list-ordered", "code", "table"].includes(entry.id),
+  (entry) => ["paragraph", "list-bullet", "list-ordered", "list-checklist", "code", "table"].includes(entry.id),
 );
 
 /**

@@ -80,7 +80,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 - One block per paragraph, heading, list item, quote, callout, code fence or table. Lists are flat: \`indent\` 0–3.
 - Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 - \`## > Title\` is a toggle heading whose section starts collapsed; see \`markdown\` for details.
-- A block's \`text\` is plain text: \`**bold**\` stays literal. For formatting or links in prose, pass \`inline\` runs with marks when creating or inserting.
+- A block's \`text\` keeps Markdown punctuation literal: \`**bold**\` stays literal. Bare web addresses in prose become external links when written. For other formatting or links, pass \`inline\` runs with marks when creating or inserting.
 - Tables, cards, embeds and GitHub references are in \`markdown\`.
 - Visual blocks: flow, fan-out and sequence diagrams in \`ablauf\`, UI sketches in \`wireframe\`, charts, scatter plots and data tables in \`data\`, and Figma designs in \`markdown\`.
 - Check the result with \`export_markdown\`.
@@ -106,13 +106,14 @@ Routine feature details, formatting, refactors and bug fixes belong on the ownin
 
 ## Topics and titles
 
-A topic is the question; it keeps its identity while its answer changes. The first record's UUID is the topic's address for citations and pins. The title names the question, never the answer, and is stored once on the first record: renaming any record renames the topic. A successor takes the topic's title; omit \`title\` when creating it.
+A topic is the question; it keeps its identity while its answer changes. The first record's UUID is the topic's address for citations and pins. The title names the question, never the answer, and names no vendor, product or version unless choosing it is the question. It is stored once on the first record: renaming any record renames the topic. A successor takes the topic's title; omit \`title\` when creating it.
 
 ## Writing the answer
 
 - State the decision itself in one plain sentence naming the chosen option, without hedging such as "should consider" and without reasoning. Reasoning, alternatives and process go in a linked RFC; product detail goes on the owning regular page.
+- State the kind of option or principle chosen, so the answer stays true while implementation changes. Omit the current vendor, product, version, fallback chain or host unless choosing that specific vendor or technology is the decision. Implementation details go on the owning regular page, in the RFC or in the issue.
 - Keep it very short; that matters more than the block count. Aim for 60 words of prose or fewer; this is editorial guidance, not a validated limit. MCP accepts at most three answer blocks: paragraphs, code blocks (a short ablauf diagram can show the decision), tables or lists (adjacent list items count as one). Other block types refuse.
-- Short is not vague: keep the concrete terms needed to apply the decision. Do not restate the topic or write a specification.
+- Short is not vague: keep the concrete terms needed to apply the decision, including thresholds and scopes that are part of it. Do not restate the topic or write a specification.
 - Decisions have no TL;DR, and a decided record holds no structured data.
 
 ## Status changes
@@ -147,7 +148,7 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, setext headings underlined with \`===\` (level 1) or \`---\` (level 2), bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, setext headings underlined with \`===\` (level 1) or \`---\` (level 2), bullet, ordered and checklist items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
 
 Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 
@@ -155,9 +156,11 @@ Blocks of the retired Mermaid block type are deleted automatically, including in
 
 The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import, except a callout's icon comment described below. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
+Checklist items import as \`list: "unchecked"\` from \`- [ ] item\`, or \`list: "checked"\` from \`- [x] item\` and \`- [X] item\`; \`*\` and \`+\` bullet markers work too, at every supported depth. The marker is not part of the text. Export uses \`- [ ]\` and \`- [x]\`. Ordered \`1. [ ] item\` keeps the marker as literal text. A bullet whose text starts with a checklist marker exports with the opening bracket escaped so it imports as the same bullet text. Through MCP, set \`list\` on \`create_doc\` seeds or \`insert_block\`; repeat \`old_text\` as \`new_text\` in \`edit_block\` and set \`list\` to tick or untick an item.
+
 A \`json-tree\` fence is an ordinary code block that the web editor shows as a foldable JSON tree. Use it for API responses, tool results and settings files; keep small snippets in a \`json\` fence. Import, export and MCP preserve its literal source.
 
-Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
+Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Bare \`http(s)://\` and \`www.\` addresses and \`<https://example.com>\` become ordinary external links when written; \`www.\` opens with HTTPS. Sentence-ending punctuation and unmatched closing parentheses stay outside the link. Other schemes in angle brackets stay text. Existing links and document links, inline code and source blocks are excluded. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
 **Column widths.** Unsized columns share the width equally. After writing a table, give each short column (names, labels, states, dates, numbers) the width of its longest cell, header included: about 8 px per character plus 32 px, at least 120 px. Leave the prose column unsized so it takes the rest; when two columns hold prose, leave both unsized. Never narrow a prose column to fit more columns: if a row still reads badly at full width, use a list or split the table.
 
@@ -268,7 +271,7 @@ The url is an HTTPS figma.com link to a design, file, prototype, board, slides o
 
 ## MCP content writes
 
-For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does not add inline formatting. Creation and insertion may supply explicit inline runs for prose. A table's text must be exactly one GFM table and writes its parsed cell formatting. Card and figma text is the content between its container delimiters, including create_doc seeds. get_doc exposes canonical table GFM, card content and Figma content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
+For ordinary blocks, inserting Markdown punctuation in \`text\` does not add inline formatting. Bare web addresses become external links in prose \`text\` and unlinked \`inline\` runs through create_doc, insert_block and edit_block. The written text stays as supplied, including angle brackets. Existing links, document links and inline code stay unchanged; an edit leaves untouched plain addresses plain. Creation and insertion may supply explicit inline runs for other prose formatting. A table's text must be exactly one GFM table and writes its parsed cell formatting. Card and figma text is the content between its container delimiters, including create_doc seeds. get_doc exposes canonical table GFM, card content and Figma content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
 
 Table structural and multi-cell edits require \`table_mapping\` rows and columns; see \`edit_block\` for the full mapping contract. For prose carrying formatting, text splices can re-anchor a mark when a changed range touches its edge. See \`edit_block\` before changing a marked span and verify the result with \`export_markdown\`.
 
@@ -779,10 +782,12 @@ Optional title and height behave as for a line overlay, including the resize han
 People insert Data table from the block menu, then edit its JSON source. Agents use the same \`chart\` block type:
 
 \`\`\`json
-{"version":1,"type":"table","collection":"observations","columns":[{"field":"day","label":"Day","format":"date"},{"field":"count","label":"Count","format":"number","decimals":0},{"field":"run_h","label":"Run time","format":"number","unit":"h","decimals":1},{"field":"url","format":"link"}],"sort":{"field":"day","direction":"desc"}}
+{"version":1,"type":"table","collection":"observations","columns":[{"field":"day","label":"Day","format":"date"},{"field":"count","label":"Count","format":"number","decimals":0,"bar":true},{"field":"run_h","label":"Run time","format":"number","unit":"h","decimals":1},{"field":"url","format":"link"}],"sort":{"field":"day","direction":"desc"}}
 \`\`\`
 
 A table mapping has version 1, type table, collection and 1–30 ordered columns. Each column has field, optional label and optional format: text (default), number, date or link. Only number accepts unit as a suffix and decimals as an integer from 0–10 setting exact fraction digits; without decimals it uses the line chart's number formatting. Optional title supplies only the table's accessible name; otherwise it is \`Data table of <collection>\`. Optional sort names one column field and direction asc or desc. Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order (record-id order without sort). Existing pageSize values remain accepted as integers from 1–100 for compatibility and never affect display; omit pageSize from new mappings. Unknown keys or options are invalid, including percent, currency, duration and textField.
+
+Only table columns with format number accept \`bar\`: \`true\`, or \`{"max":N}\` whose only key is max and whose N is a finite number greater than zero. False, null, empty objects, nonpositive maxima, extra keys, other formats and scatter details are invalid. A bar sits beside the unchanged formatted number and scales from zero to the largest absolute numeric value among the shown rows; limit and live updates can change the scale, but header sorting cannot. max fixes that scale, clipping larger magnitudes to a full bar without changing their number. If any shown value is negative, all bars share a middle zero line, with negatives left and positives right; otherwise zero is at the left edge. Absent, null and invalid values keep their markers without bars, and zero has no visible bar. Screen readers and copied text get only the number.
 
 A bound table mapping's write summary reports \`recordCount\`, \`rowCount\` after limit and \`invalidRecordCount\` for schema-invalid records omitted, with no series or x endpoints. The same status, message and warning rules apply. Other block types carry no chart summary. These summaries describe data held at the time of the source write; \`get_doc\`, \`get_revision\`, \`move_block\` and \`update_data\` do not return them.
 

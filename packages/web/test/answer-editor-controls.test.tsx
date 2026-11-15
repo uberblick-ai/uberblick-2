@@ -60,7 +60,7 @@ describe("decision answer editor controls", () => {
     const menu = screen.getByRole("listbox", { name: "Block types" });
     expect(fix.boundary.contains(menu)).toBe(true);
     expect(within(menu).getAllByRole("option").map((option) => option.getAttribute("aria-label")))
-      .toEqual(["Paragraph", "Bullet list", "Numbered list", "Code", "Table"]);
+      .toEqual(["Paragraph", "Bullet list", "Numbered list", "Checklist", "Code", "Table"]);
     act(() => within(menu).getByRole("option", { name: "Code" }).click());
     expect(getBlocks(fix.ydoc)).toMatchObject([{ type: "code", text: "" }]);
   });

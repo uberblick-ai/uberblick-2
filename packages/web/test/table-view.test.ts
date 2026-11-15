@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getAllByRole, getByRole } from "@testing-library/dom";
 import type { DataRecord } from "@uberblick/schema";
 import { dataTableView } from "../src/editor/table-view.js";
+import { prepareTable } from "../src/editor/table-data.js";
 import type { TableConfig, TableReady } from "../src/editor/table-data.js";
 
 const config: TableConfig = {
@@ -9,7 +10,8 @@ const config: TableConfig = {
   columns: [{ field: "value", format: "number" }, { field: "link", format: "link" }],
 };
 function ready(rows: DataRecord[], mapping = config): TableReady {
-  return { status: "ready", config: mapping, rows, recordCount: rows.length, invalidSchema: 0 };
+  return { status: "ready", config: mapping, rows, recordCount: rows.length, invalidSchema: 0,
+    barScales: mapping.columns.map(() => null) };
 }
 function rows(view: ReturnType<typeof dataTableView>): HTMLTableRowElement[] {
   return [...view.element.querySelectorAll<HTMLTableRowElement>("tbody tr")];
@@ -18,7 +20,72 @@ function record(id: string, value: number): DataRecord {
   return { id, value: { value, link: `https://example.com/${id}` } };
 }
 
+function barTable(records: DataRecord[], mapping: TableConfig): TableReady {
+  const projection = prepareTable(JSON.stringify(mapping), {
+    valid: true, bytes: 0, errors: [], collections: [{
+      name: "observations", schema: { version: 1, schema: { type: "object" } },
+      records, valid: true, invalidRecordIds: [], errors: [],
+    }],
+  });
+  if (projection.status !== "ready") throw new Error(projection.message);
+  return projection;
+}
+
 describe("continuous native table rendering", () => {
+  it("rescales unchanged bar cells through live windows without replacing their text or reader sort", () => {
+    const mapping: TableConfig = { ...config, limit: 2, columns: [
+      { field: "value", format: "number", bar: true }, { field: "link", format: "link" },
+    ] };
+    const view = dataTableView();
+    view.render(barTable([record("a", 10), record("b", 20), record("c", -100)], mapping));
+    const original = rows(view);
+    const text = original[0]?.querySelector(".ub-data-value")?.firstChild;
+    const bar = original[0]?.querySelector<HTMLElement>(".ub-data-bar-fill");
+    expect(bar?.style.width).toBe("50%");
+    const button = getByRole(view.element, "button", { name: "value" });
+    button.click();
+    button.click();
+    expect(rows(view)).toEqual([original[1], original[0]]);
+    expect(bar?.style.width).toBe("50%");
+    view.render(barTable([record("a", 10), record("b", 40), record("c", -100)], mapping));
+    expect(bar?.style.width).toBe("25%");
+    expect(rows(view)).toEqual([original[1], original[0]]);
+    view.render(barTable([record("a", 10), record("c", -100)], mapping));
+    expect(bar?.style.width).toBe("5%");
+    expect(bar?.style.left).toBe("50%");
+    expect(original[0]?.querySelector(".ub-data-bar")?.getAttribute("data-signed")).toBe("true");
+    expect(original[0]?.querySelector(".ub-data-value")?.firstChild).toBe(text);
+    expect(button.closest("th")?.getAttribute("aria-sort")).toBe("descending");
+    view.resetSort();
+    view.render(barTable([record("a", 10), record("c", -100)], mapping));
+    expect(bar?.style.width).toBe("5%");
+    expect(rows(view)[0]).toBe(original[0]);
+  });
+
+  it("clips signed bars without changing digits and keeps markers and zero free of bars", () => {
+    const mapping: TableConfig = { ...config, columns: [{
+      field: "value", format: "number", decimals: 2, unit: "%", bar: { max: 100 },
+    }] };
+    const view = dataTableView();
+    view.render(barTable([
+      record("a", -200), record("b", 200), record("c", 0),
+      { id: "d", value: {} }, { id: "e", value: { value: null } }, { id: "f", value: { value: "12" } },
+    ], mapping));
+    expect(rows(view).map(row => row.textContent)).toEqual(["-200.00 %", "200.00 %", "0.00 %", "Absent", "Null", "Invalid: 12"]);
+    expect([...view.element.querySelectorAll<HTMLElement>(".ub-data-bar-fill")].map(fill => [fill.style.left, fill.style.width]))
+      .toEqual([["0%", "50%"], ["50%", "50%"], ["50%", "0%"], ["50%", "0%"], ["50%", "0%"], ["50%", "0%"]]);
+    const tracks = [...view.element.querySelectorAll(".ub-data-bar")];
+    expect(tracks).toHaveLength(6);
+    expect(tracks.every(track => track.getAttribute("aria-hidden") === "true" && track.textContent === "")).toBe(true);
+    view.render(barTable([record("a", 0), record("b", 0)], {
+      ...mapping, columns: [{ field: "value", format: "number", bar: true }],
+    }));
+    expect([...view.element.querySelectorAll<HTMLElement>(".ub-data-bar-fill")].map(fill => [fill.style.left, fill.style.width]))
+      .toEqual([["0%", "0%"], ["0%", "0%"]]);
+    view.render(ready([record("a", 1)]));
+    expect(view.element.querySelector(".ub-data-bar, .ub-data-value, [data-bar]")).toBeNull();
+  });
+
   it("renders every row despite a legacy pageSize and retains native naming and headers", () => {
     const view = dataTableView();
     view.render(ready(Array.from({ length: 101 }, (_, index) => record(String(index), index)), { ...config, title: "Observations" }));

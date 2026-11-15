@@ -12,6 +12,7 @@ export interface TableColumnMapping {
   format: TableFormat;
   unit?: string;
   decimals?: number;
+  bar?: true | { max: number };
 }
 export interface TableConfig {
   version: 1;
@@ -23,10 +24,15 @@ export interface TableConfig {
   sort?: { field: string; direction: "asc" | "desc" };
   pageSize: number;
 }
+export interface TableBarScale {
+  max: number;
+  signed: boolean;
+}
 export interface TableReady {
   status: "ready";
   config: TableConfig;
   rows: DataRecord[];
+  barScales: Array<TableBarScale | null>;
   recordCount: number;
   invalidSchema: number;
   notice?: string;
@@ -42,12 +48,18 @@ interface TableProblem {
 }
 export type TableProjection = TableReady | TableNoRecords | TableProblem;
 export function tableColumn(value: unknown): boolean {
+  return validColumn(value, false);
+}
+
+function validColumn(value: unknown, allowBar: boolean): boolean {
   if (!object(value) || !name(value.field) || !optionalText(value, "label")) return false;
   const format = value.format ?? "text";
   if (format !== "text" && format !== "number" && format !== "date" && format !== "link") return false;
   // An explicit null is invalid, even though omitted format defaults to text.
   if (Object.hasOwn(value, "format") && value.format === null) return false;
-  if (!keys(value, format === "number" ? ["field", "label", "format", "unit", "decimals"] : ["field", "label", "format"])) return false;
+  if (!keys(value, format === "number" ? ["field", "label", "format", "unit", "decimals", ...(allowBar ? ["bar"] : [])] : ["field", "label", "format"])) return false;
+  if (Object.hasOwn(value, "bar") && value.bar !== true &&
+      (!object(value.bar) || !keys(value.bar, ["max"]) || !numeric(value.bar.max) || value.bar.max <= 0)) return false;
   return format !== "number" || (optionalText(value, "unit") &&
     (!Object.hasOwn(value, "decimals") || (Number.isInteger(value.decimals) &&
       typeof value.decimals === "number" && value.decimals >= 0 && value.decimals <= 10)));
@@ -61,7 +73,7 @@ export function parseTableConfig(source: string):
   if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize", "limit"]) ||
       value.version !== 1 || value.type !== "table" || !name(value.collection) ||
       !Array.isArray(value.columns) || value.columns.length < 1 || value.columns.length > 30 ||
-      !value.columns.every(tableColumn) || !optionalText(value, "title") ||
+      !value.columns.every((entry) => validColumn(entry, true)) || !optionalText(value, "title") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "pageSize") && (typeof value.pageSize !== "number" ||
         !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > 100)) ||
@@ -105,6 +117,21 @@ export function sortTableRows(rows: readonly DataRecord[], column: TableColumnMa
   });
 }
 
+function tableBarScales(columns: TableColumnMapping[], rows: DataRecord[]): Array<TableBarScale | null> {
+  return columns.map((column) => {
+    if (column.bar === undefined) return null;
+    let max = 0;
+    let signed = false;
+    for (const record of rows) {
+      const value = own(record.value, column.field);
+      if (!numeric(value)) continue;
+      max = Math.max(max, Math.abs(value));
+      signed ||= value < 0;
+    }
+    return { max: column.bar === true ? max : column.bar.max, signed };
+  });
+}
+
 function projectTable(config: TableConfig, data: DocData | null): TableProjection {
   const binding = bindCollection(data, config.collection, "Table");
   if (binding.status !== "ready") return binding;
@@ -123,15 +150,17 @@ function projectTable(config: TableConfig, data: DocData | null): TableProjectio
   const sortColumn = sort === undefined ? undefined : config.columns.find((entry) => entry.field === sort.field);
   if (sortColumn === undefined) rows.sort((a, b) => compareCodePoints(a.id, b.id));
   else rows = sortTableRows(rows, sortColumn, sort?.direction ?? "asc");
+  const eligibleCount = rows.length;
+  if (config.limit !== undefined && rows.length > config.limit) rows = rows.slice(0, config.limit);
+  const common = { config, rows, barScales: tableBarScales(config.columns, rows), recordCount: collection.records.length, invalidSchema };
   if (rows.length === 0) return {
     status: "no-records", message: "No records to show in this table collection.",
-    config, rows, recordCount: collection.records.length, invalidSchema,
+    ...common,
   };
-  if (config.limit !== undefined && rows.length > config.limit) return {
-    status: "ready", config, rows: rows.slice(0, config.limit), recordCount: collection.records.length, invalidSchema,
-    notice: `Showing ${config.limit} of ${rows.length} records`,
+  return {
+    status: "ready", ...common,
+    ...(rows.length < eligibleCount ? { notice: `Showing ${rows.length} of ${eligibleCount} records` } : {}),
   };
-  return { status: "ready", config, rows, recordCount: collection.records.length, invalidSchema };
 }
 
 export function prepareTable(source: string, data: DocData | null): TableProjection {

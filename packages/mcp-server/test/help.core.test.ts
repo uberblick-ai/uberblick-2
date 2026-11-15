@@ -1,4 +1,4 @@
-import { getBlockInline, INLINE_ICONS, validateCollectionSchema } from "@uberblick/schema";
+import { getBlockInline, INLINE_ICONS, parseTableConfig, validateCollectionSchema } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { readBlocks, removeTempDirs, startServer, testConfig, type FailingStore } from "./core-helpers.js";
@@ -57,6 +57,23 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   const example = text.match(/```json\n([\s\S]*?)\n```/)?.[1];
   expect(example).toBeDefined();
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
+});
+
+it("teaches table-only numeric bars, their scale and invalid forms in the data help", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "data" });
+  for (const guidance of [
+    "Only table columns with format number accept", '{"max":N}',
+    "whose only key is max", "finite number greater than zero",
+    "False, null, empty objects, nonpositive maxima, extra keys, other formats and scatter details are invalid",
+    "largest absolute numeric value among the shown rows", "header sorting cannot", "max fixes that scale",
+    "all bars share a middle zero line", "zero has no visible bar", "Screen readers and copied text get only the number",
+  ]) expect(text, guidance).toContain(guidance);
+  const source = text.match(/\{"version":1,"type":"table"[^`\n]+/)?.[0];
+  expect(source).toBeDefined();
+  expect(parseTableConfig(source!)).toMatchObject({ ok: true, config: {
+    columns: expect.arrayContaining([{ field: "count", label: "Count", format: "number", bar: true, decimals: 0 }]),
+  } });
 });
 
 it("documents inline icon names, source preservation, card labels and literal MCP emoji names", async () => {

@@ -32,6 +32,7 @@ import { addCredentialCeiling, revokeHmacCredentials } from "./credentials-schem
 import { writeDatabaseRelease } from "./database-release.js";
 import { DocumentClassifications } from "./document-classification.js";
 import type { HubLogger } from "./log.js";
+import { collectWorkspaceMetrics, HubWriteTiming, type WorkspaceMetrics } from "./metrics.js";
 import { HubRevisions } from "./revisions.js";
 import type { RestoreRevisionResult } from "./revisions.js";
 import type { UpdateAuthor } from "./update-attribution.js";
@@ -95,6 +96,7 @@ export function isEphemeralDatabase(databasePath: string): boolean {
  */
 export class HubDatabase implements Extension {
   readonly databasePath: string;
+  readonly writeTiming = new HubWriteTiming();
 
   private readonly onStoreFailed: (error: unknown) => void;
 
@@ -156,7 +158,7 @@ export class HubDatabase implements Extension {
         upsert: db.prepare(UPSERT_DOCUMENT),
       };
       this.revisionStore = new HubRevisions(db, this.options.revisions ?? false,
-        room => this.isDeletedRoom(room), this.onStoreFailed, this.options.now, this.options.log);
+        room => this.isDeletedRoom(room), this.onStoreFailed, this.options.now, this.options.log, this.writeTiming);
       this.classifications = new DocumentClassifications(db);
     } catch (error) {
       db.close();
@@ -252,6 +254,10 @@ export class HubDatabase implements Extension {
     return this.revisionStore;
   }
 
+  collectMetrics(signal?: AbortSignal): Promise<Record<string, WorkspaceMetrics>> {
+    return collectWorkspaceMetrics(this.connection, signal);
+  }
+
   private get documentClassifications(): DocumentClassifications {
     if (this.classifications === undefined) throw new Error("HubDatabase: the database is not open");
     return this.classifications;
@@ -318,6 +324,7 @@ export class HubDatabase implements Extension {
     document,
     documentName,
   }: Pick<onStoreDocumentPayload, "document" | "documentName">): Promise<void> {
+    const start = performance.now();
     try {
       // Queued stores retain their old document object after the room is closed.
       if (this.isDeletedRoom(documentName)) return;
@@ -331,6 +338,8 @@ export class HubDatabase implements Extension {
       // swallows this exception so flush/shutdown cannot falsely claim durability.
       this.onStoreFailed(error);
       throw error;
+    } finally {
+      this.writeTiming.roomStore(start);
     }
   }
 

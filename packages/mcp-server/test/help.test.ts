@@ -285,19 +285,19 @@ it("renders each tool's prose with an accepted example and owning-topic links, w
   }
 });
 
-it("creates and re-indents list items using the published help examples", async () => {
+it("creates, ticks and re-indents checklist items using the published help examples", async () => {
   const rig = await local();
   const createHelp = await rig.ok("get_help", { topic: "create_doc" });
   const created = await rig.ok("create_doc", jsonSection(createHelp.text, "Example"));
   const seed = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
-  expect(seed).toMatchObject({ type: "list-item", list: "ordered", indent: 0 });
+  expect(seed).toMatchObject({ type: "list-item", list: "unchecked", indent: 0 });
 
   const insertHelp = await rig.ok("get_help", { topic: "insert_block" });
   const inserted = await rig.ok("insert_block", {
     ...jsonSection(insertHelp.text, "Example"), uuid: created.uuid, after_block_id: seed.id,
   });
   const [insertedRead] = await readBlocks(rig, created.uuid, inserted.blocks);
-  expect(insertedRead).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
+  expect(insertedRead).toMatchObject({ type: "list-item", list: "unchecked", indent: 2 });
 
   const editHelp = await rig.ok("get_help", { topic: "edit_block" });
   const edited = await rig.ok("edit_block", {
@@ -306,7 +306,10 @@ it("creates and re-indents list items using the published help examples", async 
   });
   expect(edited.block).toEqual({ id: inserted.blocks[0].id, rev: expect.any(String) });
   expect(edited.block.rev).not.toBe(inserted.blocks[0].rev);
-  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, { ...insertedRead, indent: 1, rev: edited.block.rev }]);
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, { ...insertedRead, list: "checked", indent: 1, rev: edited.block.rev }]);
+  const markdown = (await rig.ok("get_help", { topic: "markdown" })).text;
+  for (const guidance of ['list: "unchecked"', 'list: "checked"', "- [ ] item", "- [x] item", "- [X] item", "1. [ ] item"])
+    expect(markdown).toContain(guidance);
 });
 
 it("advertises the server identity and instructions in initialize", async () => {
@@ -412,7 +415,7 @@ it("documents the table mapping through both help routes and accepts its source 
     version: 1, type: "table", collection: "observations",
     columns: [
       { field: "day", label: "Day", format: "date" },
-      { field: "count", label: "Count", format: "number", decimals: 0 },
+      { field: "count", label: "Count", format: "number", decimals: 0, bar: true },
       { field: "run_h", label: "Run time", format: "number", unit: "h", decimals: 1 },
       { field: "url", format: "link" },
     ],
@@ -444,6 +447,10 @@ it("documents the table mapping through both help routes and accepts its source 
   for (const guidance of [
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
+    "Only table columns with format number accept bar: true", '{"max":N} whose only key is max',
+    "finite number greater than zero", "False, null, empty objects, nonpositive maxima, extra keys, other formats and scatter details are invalid",
+    "largest absolute numeric value among the shown rows", "header sorting cannot", "max fixes that scale",
+    "all bars share a middle zero line", "zero has no visible bar", "Screen readers and copied text get only the number",
     "sort (one column field, direction asc or desc)", "supplies only the table's accessible name",
     "Without limit, every valid record appears in one continuous native table", "Generated from document data · read-only",
     "Open table source appears on hover or keyboard focus and stays reachable without hover",
@@ -451,6 +458,7 @@ it("documents the table mapping through both help routes and accepts its source 
   ]) expect(constraints, guidance).toContain(guidance);
   const insertSource = constraints?.match(/`(\{"version":1,"type":"table"[^`]+)`/)?.[1];
   expect(insertSource).toBeDefined();
+  expect(JSON.parse(insertSource!).columns[1]).toMatchObject({ format: "number", bar: true });
   expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });

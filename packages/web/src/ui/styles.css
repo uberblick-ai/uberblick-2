@@ -1612,6 +1612,30 @@ h6.ub-heading {
   content: attr(data-number) ".";
 }
 
+.ub-list-item:is([data-list="unchecked"], [data-list="checked"]) {
+  --checklist-target: 1.75rem;
+  padding-left: calc(var(--checklist-target) + 0.3rem);
+  padding-block: max(0px, calc((var(--checklist-target) - 1lh) / 2));
+  min-height: var(--checklist-target);
+}
+.ub-checklist-control {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--checklist-target);
+  height: var(--checklist-target);
+  cursor: pointer;
+  user-select: none;
+}
+.ub-checklist-control input { width: 1rem; height: 1rem; margin: 0; cursor: inherit; }
+.ub-checklist-control[data-disabled="true"] { cursor: default; }
+@media (any-pointer: coarse) {
+  .ub-list-item:is([data-list="unchecked"], [data-list="checked"]) { --checklist-target: 44px; }
+}
+
 /* Keep the list run's screen-reader container (editor/list-keys.ts) in
    the accessibility tree while clipping it visually. */
 .ub-sr-only {
@@ -1908,6 +1932,15 @@ h6.ub-heading {
 .ub-data-cell[data-wrap="long"] { min-width: 12ch; }
 .ub-data-cell[data-wrap="short"] { max-width: none; white-space: pre; }
 .ub-data-cell[data-wrap="scalar"] { max-width: none; white-space: nowrap; }
+.ub-data-cell[data-bar="true"] { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; max-width: none; }
+.ub-data-value { flex: 1; text-align: right; font-variant-numeric: tabular-nums; }
+.ub-data-cell[data-wrap="long"] .ub-data-value { max-width: 32rem; }
+.ub-data-bar { position: relative; flex: 0 0 auto; width: 5rem; height: 0.75rem; user-select: none; }
+.ub-data-bar[data-signed="true"]::before {
+  content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px;
+  background: var(--muted-foreground);
+}
+.ub-data-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--muted-foreground); }
 .ub-data-table th { max-width: 32rem; }
 .ub-data-sort {
   display: flex; align-items: center; gap: 0.3rem;

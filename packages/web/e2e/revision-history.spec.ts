@@ -940,6 +940,52 @@ test.describe("document history through ub open", () => {
     } finally { await harness().startHub(); }
   });
 
+  test("a checklist state change is labelled in history and both comparison sides keep disabled boxes", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const uuid = randomUUID();
+    const title = docTitle("Checklist history");
+    const source = new Y.Doc();
+    const states: Record<string, string> = {};
+    try {
+      initDoc(source, { uuid, title });
+      const task = appendBlock(source, { type: "list-item", list: "unchecked", indent: 1, text: "Keep the same task text" });
+      states.earlier = Buffer.from(snapshotRevision(source).state).toString("base64");
+      editBlock(source, task, "Keep the same task text", "Keep the same task text", { list: "checked" });
+      states.latest = Buffer.from(snapshotRevision(source).state).toString("base64");
+      await harness().seedDocument(source);
+    } finally { source.destroy(); }
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { ...(info.project.use.hasTouch === true ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce" },
+      beforeNavigate: async target => { await serveHistory(target, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], states); },
+    });
+    await expect(editor(page).getByRole("checkbox")).toBeChecked();
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
+    await previous(page);
+    await comparisonView(page, "Split");
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+    const touch = info.project.use.hasTouch === true;
+    for (const [side, checked] of [[earlierSide(page), false], [historicalEditor(page), true]] as const) {
+      const checkbox = side.getByRole("checkbox", { name: "Checklist item", exact: true });
+      await expect(checkbox).toBeChecked({ checked });
+      await expect(checkbox).toBeDisabled();
+      await expect(checkbox).not.toHaveAttribute("tabindex", "0");
+      await expect(side.locator(".ub-revision-fields")).toContainText("Changed: list");
+      const original = await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+      if (touch) await checkbox.tap({ force: true });
+      else await checkbox.click({ force: true });
+      await placeCaretIn(side.getByRole("listitem"), { touch });
+      await page.keyboard.press(`${modifier}+Enter`);
+      await expect(checkbox).toBeChecked({ checked });
+      expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+    }
+    await comparisonView(page, "Inline");
+    await expect(historicalEditor(page).getByRole("checkbox")).toBeDisabled();
+    await expect(historicalEditor(page).getByRole("checkbox")).toBeChecked();
+  });
+
   test("divider revisions draw and label added and removed lines in Split and Inline and fold unchanged dividers", { tag: "@webkit" }, async ({ browser }) => {
     const uuid = randomUUID();
     const title = docTitle("Divider history");

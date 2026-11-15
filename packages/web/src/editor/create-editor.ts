@@ -17,6 +17,7 @@ import { CommentAnchors } from "./comment-anchors.js";
 import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
+import { WebAddresses } from "./web-addresses.js";
 import { GitHubLinks } from "./github-links.js";
 import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
@@ -133,6 +134,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,
+    WebAddresses,
     GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }),
     InlineIcons,
     PersonMentions,

@@ -21,6 +21,24 @@ function seeded(input: BlockInput = { type: "list-item", text: "item" }): { doc:
 }
 
 describe("editBlock list attributes", () => {
+  it("ticks and unticks an item without changing text, and preserves state through text and indent edits", () => {
+    const { doc, id } = seeded({ type: "list-item", text: "item", list: "unchecked" });
+    const uncheckedRev = getBlockRev(doc, id);
+    expect(getBlock(doc, id)).toMatchObject({ text: "item", list: "unchecked", indent: 0 });
+    editBlock(doc, id, "item", "item", { rev: uncheckedRev, list: "checked" });
+    const checkedRev = getBlockRev(doc, id);
+    expect(getBlock(doc, id)).toMatchObject({ text: "item", list: "checked", indent: 0 });
+    expect(checkedRev).not.toBe(uncheckedRev);
+
+    editBlock(doc, id, "item", "item revised", { rev: checkedRev, indent: 2 });
+    expect(getBlock(doc, id)).toMatchObject({ text: "item revised", list: "checked", indent: 2 });
+    const editedRev = getBlockRev(doc, id);
+    editBlock(doc, id, "item revised", "item revised", { rev: editedRev, list: "unchecked" });
+    expect(getBlock(doc, id)).toMatchObject({ text: "item revised", list: "unchecked", indent: 2 });
+    expect(getBlockRev(doc, id)).not.toBe(editedRev);
+    doc.destroy();
+  });
+
   it("changes only supplied attributes, alone or together with a text splice", () => {
     const { doc, id } = seeded();
     const initialRev = getBlockRev(doc, id);
@@ -73,7 +91,7 @@ describe("editBlock list attributes", () => {
     const { doc, id } = seeded();
     const before = Y.encodeStateVector(doc);
     const invalidList = { list: "task", indent: 2 } as unknown as EditBlockOptions;
-    expect(() => editBlock(doc, id, "item", "changed", invalidList)).toThrow(InvalidListAttributesError);
+    expect(() => editBlock(doc, id, "item", "changed", invalidList)).toThrow("list must be bullet, ordered, unchecked or checked");
     expect(() => editBlock(doc, id, "item", "changed", { list: "ordered", tableMapping: { rows: [], columns: [] } })).toThrow(InvalidTableMappingError);
     expect(Y.encodeStateVector(doc)).toEqual(before);
   });

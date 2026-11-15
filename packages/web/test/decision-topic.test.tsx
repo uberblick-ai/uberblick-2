@@ -659,6 +659,9 @@ describe("decision topic navigation and history", () => {
 
   it("opens a superseded link at the current answer and keeps the named record reachable", async () => {
     story();
+    const earlier = room(roomForDoc(WORKSPACE, FIRST)).ydoc;
+    appendBlock(earlier, { type: "list-item", text: "Earlier checklist", list: "checked" });
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const host = (await open()).container;
     expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Original title");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
@@ -681,6 +684,22 @@ describe("decision topic navigation and history", () => {
     expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid))).sort())
       .toEqual([roomForDoc(WORKSPACE, CURRENT), roomForDoc(WORKSPACE, FIRST)].sort());
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+
+    await choose(host, FIRST);
+    const checkbox = within(host).getByRole<HTMLInputElement>("checkbox", { name: "Checklist item" });
+    expect(checkbox.checked).toBe(true);
+    expect(checkbox.disabled).toBe(true);
+    const editor = binding.mock.results.at(-1)?.value.editor;
+    if (editor == null) throw new Error("fixture earlier answer did not bind an editor");
+    const last = editor.state.doc.lastChild;
+    if (last === null) throw new Error("fixture earlier checklist is missing");
+    const before = getBlocks(earlier);
+    act(() => {
+      editor.commands.setTextSelection(editor.state.doc.content.size - last.nodeSize + 2);
+      checkbox.click();
+      editor.commands.keyboardShortcut("Mod-Enter");
+    });
+    expect(getBlocks(earlier)).toEqual(before);
   });
 
   it("retains the first-record title connection throughout topic navigation and releases it on leaving", async () => {

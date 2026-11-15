@@ -1,4 +1,4 @@
-import { expectOpenPages, provePageArrival } from "./settle.js";
+import { expectOpenPages, provePageArrival, waitForAcknowledged } from "./settle.js";
 /** Native editor activation and selection require a real browser. */
 import { expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
@@ -47,6 +47,44 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>, target 
     await page.bringToFront();
   }
 }
+
+test("typed and pasted bare addresses become stored links with a plain-text Undo step", { tag: "@webkit" }, async ({ page }) => {
+  await page.goto(harness().appUrl);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(page, "Writing bare addresses");
+  await placeCaret(page);
+  await page.keyboard.type("www.example.comm");
+  await page.keyboard.press("Backspace");
+  const links = editor(page).locator("a.ub-link");
+  await expect(links).toHaveCount(0);
+  await page.keyboard.type(" ");
+  await expect(links).toHaveAttribute("href", "https://www.example.com");
+  await expect(links).toHaveText("www.example.com");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(links).toHaveCount(0);
+  await expect(editor(page)).toHaveText("www.example.com ");
+  await page.keyboard.type("stays plain ");
+  await expect(links).toHaveCount(0);
+
+  const sentence = "See https://example.com. Also www.example.org/a_(b)).";
+  await editor(page).evaluate((element, text) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", text);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clipboard, bubbles: true, cancelable: true }));
+  }, sentence);
+  await expect(links).toHaveCount(2);
+  await expect(links.nth(0)).toHaveText("https://example.com");
+  await expect(links.nth(1)).toHaveAttribute("href", "https://www.example.org/a_(b)");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(links).toHaveCount(0);
+  await expect(editor(page)).toHaveText(`www.example.com stays plain ${sentence}`);
+  await waitForAcknowledged(page, { path: "upstream" });
+  await page.reload();
+  await expect(editor(page)).toHaveText(`www.example.com stays plain ${sentence}`);
+  await expect(links).toHaveCount(0);
+});
 
 test("primary, Ctrl and Cmd clicks open isolated tabs while Shift-click extends selection", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);

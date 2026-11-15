@@ -244,6 +244,34 @@ describe("decision record content permissions", () => {
     peer.destroy();
   });
 
+  it("allows checklist toggles only while the answer is open, following settlement without rebinding", async () => {
+    const ydoc = stage("open");
+    const id = appendBlock(ydoc, { type: "list-item", text: "Keep this task", list: "unchecked", indent: 1 });
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const host = await openApp();
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture document did not bind an editor");
+    const checkbox = (): HTMLInputElement => screen.getByRole("checkbox", { name: "Checklist item" });
+    const prose = editorElement(host);
+    act(() => editor.commands.setTextSelection(editor.state.doc.child(0).nodeSize + 3));
+    for (const status of ["open", "decided", "rejected", "withdrawn", "open"] as const) {
+      await act(async () => setStatus(ydoc, status));
+      expect(checkbox().disabled).toBe(status !== "open");
+      const before = getBlocks(ydoc);
+      act(() => checkbox().click());
+      if (status === "open") {
+        expect(getBlocks(ydoc).find((block) => block.id === id)?.list).toBe("checked");
+        act(() => editor.commands.keyboardShortcut("Mod-Enter"));
+        expect(getBlocks(ydoc)).toEqual(before);
+      } else {
+        act(() => editor.commands.keyboardShortcut("Mod-Enter"));
+        expect(getBlocks(ydoc)).toEqual(before);
+      }
+      expect(editorElement(host)).toBe(prose);
+      expect(binding).toHaveBeenCalledOnce();
+    }
+  });
+
   it("keeps card links active without author controls across every decision status", async () => {
     const ydoc = stage("open");
     appendBlock(ydoc, { type: "card", text: "title: Answer\nbutton: [Read details](https://example.invalid/answer)\n\nStored answer." });

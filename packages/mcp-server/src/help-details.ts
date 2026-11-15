@@ -100,10 +100,10 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-    "List-item seeds accept optional `list` (`bullet` or `ordered`, default `bullet`) and `indent` " +
+    "List-item seeds accept optional `list` (`bullet`, `ordered`, `unchecked` or `checked`, default `bullet`) and `indent` " +
     "(integer 0–3, default 0). These fields apply only to list-item blocks; invalid values refuse before " +
     "creating anything. For example, `{\"type\":\"list-item\",\"text\":\"Review notes\",\"list\":\"ordered\",\"indent\":2}` " +
-    "creates a nested ordered item. " +
+    "creates a nested ordered item. Use `unchecked` for `- [ ]` or `checked` for `- [x]` checklist items. " +
     "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Chart seeds return a `chart` summary beside each block's id and rev, using this replica's current data. " +
@@ -196,8 +196,9 @@ export const toolHelpDetails = {
     "\n" +
     "## What comes back\n" +
     "\n" +
+    "- List items return `list` (`bullet`, `ordered`, `unchecked` or `checked`) and `indent` (0–3). Checklist styles correspond to Markdown `- [ ]` and `- [x]`; their markers are not part of `text`. `get_revision` returns the same list fields.\n" +
     "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
-    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` is plain. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` returns the written characters without Markdown markup; stored links, including automatically linked web addresses, appear in `inline`. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
     "- Comment threads with their anchors, for annotate to reply to, resolve, move, edit or delete. Every comment returned by get_doc and annotate has a stable `id`, used as `comment_id` when editing or deleting. Edited comments also return `editedAt`, the last edit time as an ISO 8601 UTC string that the web's `(edited)` marker reads; unedited comments omit it. Comments may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
     "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
     "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
@@ -427,16 +428,18 @@ export const toolHelpDetails = {
     "or roll back the edit, or change its durability result. See data for the full summary contract. " + categoryBarGuidance +
     "Editing an ablauf or wireframe code block returns a `drawing` summary instead: `status` and the " +
     "diagnostics the web editor lists, advisory like the chart summary.\n\n" +
-    "For an existing list item, optional `list` (`bullet` or `ordered`) and `indent` (integer 0–3) change " +
+    "For an existing list item, optional `list` (`bullet`, `ordered`, `unchecked` or `checked`) and `indent` (integer 0–3) change " +
     "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
     "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
+    "The same pattern with `list: \"checked\"` ticks an item (`- [x]`); `list: \"unchecked\"` unticks it (`- [ ]`). " +
     "Omitted list fields keep their existing values. The same old_text/rev assertions guard both text " +
     "and attribute changes in one write; failures change neither. The result returns the block's id and new " +
     "rev; get_doc reads the stored fields. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
     "and concurrent text edits from another replica survive the merge. These fields refuse on any " +
     "other block type; they do not convert blocks or move an item.\n\n" +
-    "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
-    "without ever writing a mark. A splice strictly inside unmarked text leaves every mark — inline " +
+    "Bare web addresses newly written in prose become external links; unchanged plain addresses stay plain. " +
+    "Existing links, document links and inline code are excluded. Other Markdown punctuation stays literal. " +
+    "Marks anchor to positions in the block's text, not to the words they cover. A splice strictly inside unmarked text leaves existing marks — inline " +
     "formatting and annotation anchors alike — exactly where it was. A splice that touches a mark's edge " +
     "re-anchors it: rewrite a bolded term, or the separator between two marked ones, and the mark can open " +
     "mid-word, swallow the punctuation beside it, or spread over text nobody formatted. The marks survived; " +
@@ -558,10 +561,10 @@ export const toolHelpDetails = {
     "prefix, naming the first entry that breaks the shape. Success reaches peers as one document " +
     "update and moves the cursor once to the end of the last inserted block's stored text. Block types " +
     `are the closed set the schema owns — ${BLOCK_TYPES.join(", ")}. ` +
-    "A list is a run of adjacent list-item blocks. Optional `list` is `bullet` or `ordered` (default " +
+    "A list is a run of adjacent list-item blocks. Optional `list` is `bullet`, `ordered`, `unchecked` or `checked` (default " +
     "`bullet`), and `indent` is an integer 0–3 (default 0); both apply only to list-item blocks. " +
     "For example, `list: \"ordered\", indent: 2` creates a nested numbered item. Invalid values refuse " +
-    "before writing. Depth need not follow the preceding item's depth. " +
+    "before writing. Use `unchecked` for `- [ ]` or `checked` for `- [x]` checklist items. Depth need not follow the preceding item's depth. " +
     "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write. " +
     "Size it immediately with `column_widths`: one positive whole CSS pixel value or null per column. " +
     "Null means unsized; omission creates all columns unsized. Invalid widths or widths on a non-table entry refuse " +
@@ -647,9 +650,16 @@ export const toolHelpDetails = {
     "data updates, clears when no longer plotted, and resets on a mapping edit, remount or reload. " +
     "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
-    "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
+    "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\",\"bar\":true}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
     "Its one to thirty ordered columns name fields, optional labels and formats text (default), number, date or link. " +
-    "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). Optional title " +
+    "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). " +
+    "Only table columns with format number accept bar: true, or {\"max\":N} whose only key is max and whose N is a finite number greater than zero. " +
+    "False, null, empty objects, nonpositive maxima, extra keys, other formats and scatter details are invalid. " +
+    "A bar sits beside the unchanged formatted number and scales from zero to the largest absolute numeric value among the shown rows; " +
+    "limit and live updates can change the scale, but header sorting cannot. max fixes that scale, clipping larger magnitudes to a full bar " +
+    "without changing their number. If any shown value is negative, all bars share a middle zero line, with negatives left and positives right; " +
+    "otherwise zero is at the left edge. Absent, null and invalid values keep their markers without bars, and zero has no visible bar. " +
+    "Screen readers and copied text get only the number. Optional title " +
     "supplies only the table's accessible name, and sort (one column field, direction asc or desc) orders rows. " +
     "Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order " +
     "(record-id order without sort). Without limit, every valid record appears in one continuous native table, " +

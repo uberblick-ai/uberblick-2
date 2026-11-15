@@ -17,6 +17,7 @@ import { MAX_LIST_INDENT, listNumbers } from "@uberblick/schema";
 import type { ListMarkerInput } from "@uberblick/schema";
 import { renderableIndent } from "./nodes.js";
 import { retypeBlockInTransaction } from "./retype.js";
+import { checklistPlugins } from "./checklist.js";
 
 /** The top-level list item the selection head sits in, with its position. */
 function listItemAt(
@@ -58,8 +59,19 @@ const splitListItem: Command = (state, dispatch) => {
 
   const tr = state.tr;
   if (!state.selection.empty) tr.deleteSelection();
+  // At the start, the second half still carries the completed task.
+  const keepCheckedText = item.node.attrs.list === "checked"
+    && tr.selection.$from.parentOffset === 0
+    && tr.selection.$from.parent.content.size > 0;
+  if (keepCheckedText) {
+    tr.setNodeAttribute(tr.selection.$from.before(1), "list", "unchecked");
+  }
   tr.split(tr.selection.from, 1, [
-    { type: item.node.type, attrs: { ...item.node.attrs, id: null } },
+    { type: item.node.type, attrs: {
+      ...item.node.attrs, id: null,
+      list: item.node.attrs.list === "checked" && !keepCheckedText
+        ? "unchecked" : item.node.attrs.list,
+    } },
   ]);
   dispatch(tr.scrollIntoView());
   return true;
@@ -269,6 +281,7 @@ export function listStructurePlugin(): Plugin {
 export const ListBlocks = Extension.create({
   name: "uberblickListBlocks",
   addProseMirrorPlugins() {
-    return [listKeymap(), listStructurePlugin()];
+    // History keeps a native editing host for selection while the editor is read-only.
+    return [...checklistPlugins(() => this.editor.isEditable), listKeymap(), listStructurePlugin()];
   },
 });
