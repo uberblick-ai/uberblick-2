@@ -95,7 +95,7 @@ export function barAxisLabel(label: string, width: number, measure: (text: strin
   return `${letters.slice(0, low).join("")}…`;
 }
 
-function tooltipTitle(label: string, width: number, measure: (text: string) => number): string[] {
+export function chartTooltipLines(label: string, width: number, measure: (text: string) => number): string[] {
   const lines: string[] = [];
   for (const line of label.split(/\r?\n/u)) {
     let current = "";
@@ -204,7 +204,7 @@ export function barConfiguration(result: BarReady, colors: CSSStyleDeclaration, 
               if (row === undefined) return [];
               const ctx = this.chart.ctx;
               ctx.save(); ctx.font = `bold ${font.size}px ${font.family}`;
-              const title = tooltipTitle(row.label, Math.max(40, this.chart.width - 32), text => ctx.measureText(text).width);
+              const title = chartTooltipLines(row.label, Math.max(40, this.chart.width - 32), text => ctx.measureText(text).width);
               ctx.restore();
               return title;
             },

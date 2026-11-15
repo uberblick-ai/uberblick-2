@@ -89,8 +89,8 @@ describe("chart source write summaries", () => {
       upsert: [
         { id: "record-old", value: { day: "2026-09-08", count: 42424242 } },
         { id: "record-gap", value: { day: "2026-09-09", count: null } },
-        { id: "record-both", value: { day: "2026-09-10", count: 42424242, spare: 31313131 } },
-        { id: "record-spare", value: { day: "2026-09-11", spare: 31313131 } },
+        { id: "record-both", value: { day: "2026-09-10", count: 42424242, spare: 31313131, event: "PRIVATE_NOTE_TEXT" } },
+        { id: "record-spare", value: { day: "2026-09-11", spare: 31313131, event: "UNPLOTTED_NOTE_TEXT" } },
         { id: "record-bad-x", value: { day: "not a day", count: 42424242 } },
         { id: "record-no-x", value: { count: 42424242, secret: "PRIVATE_RECORD_VALUE" } },
       ],
@@ -98,7 +98,7 @@ describe("chart source write summaries", () => {
     const doc = rig.instance.replicas.replica(uuid).doc;
     const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
     const mapping = { ...line, limit: 3, y: [
-      { field: "count", label: "PRIVATE_SERIES_LABEL" }, { field: "spare" }, { field: "coutn" },
+      { field: "count", label: "PRIVATE_SERIES_LABEL", note: "event" }, { field: "spare" }, { field: "coutn" },
     ] };
     const result = await rig.ok("insert_block", { uuid, blocks: [
       { type: "paragraph", text: "A mixed batch" },
@@ -116,9 +116,11 @@ describe("chart source write summaries", () => {
       status: "collection-absent", message: "Chart collection “observation” is absent.",
       collections: ["observations"], warnings: [expect.any(String)],
     });
-    expect(JSON.stringify(result)).not.toMatch(/42424242|31313131|PRIVATE_RECORD_VALUE|PRIVATE_SERIES_LABEL|record-both/);
+    expect(JSON.stringify(result)).not.toMatch(/42424242|31313131|PRIVATE_RECORD_VALUE|PRIVATE_SERIES_LABEL|PRIVATE_NOTE_TEXT|UNPLOTTED_NOTE_TEXT|record-both/);
     expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
     expect(getBlocks(doc).find(block => block.id === result.blocks[1].id)?.text).toBe(JSON.stringify(mapping));
+    expect(await insert(rig, uuid, { ...mapping, y: mapping.y.map(({ note: _note, ...series }) => series) }))
+      .toEqual(result.blocks[1].chart);
 
     const edited = await rig.ok("edit_block", {
       uuid, block_id: result.blocks[1].id, rev: result.blocks[1].rev,

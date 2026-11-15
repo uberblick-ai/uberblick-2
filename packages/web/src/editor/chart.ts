@@ -11,6 +11,7 @@ import {
   Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip,
 } from "chart.js";
 import type { ChartConfiguration, ChartDataset, Scale } from "chart.js";
+import { toFont } from "chart.js/helpers";
 import { chartViewType, parseBarConfig, parseScatterConfig, prepareChartView } from "@uberblick/schema";
 import type { ChartView, DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
@@ -35,12 +36,14 @@ import { blockResize } from "./block-resize.js";
 import { chartHeightEdits } from "./chart-height.js";
 import { chartHeightField } from "./chart-height-field.js";
 import { scatterView, scatterDiagnosticsText } from "./scatter-view.js";
-import { barView, barDefaultHeight, barDiagnosticsText } from "./bar-view.js";
+import { barView, barDefaultHeight, barDiagnosticsText, chartTooltipLines } from "./bar-view.js";
+import { chartNotes, chartNoteRoom } from "./chart-notes.js";
+import type { NotedPoint } from "./chart-notes.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
 Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip);
-type Point = { x: number; y: number | null };
+type Point = NotedPoint;
 type Mark = "line" | "bar";
 
 const LIGHT = ["#1d4ed8", "#b91c1c", "#047857", "#7e22ce", "#a16207", "#0e7490", "#be185d", "#334155"];
@@ -68,7 +71,7 @@ function seriesDatasets(result: ChartReady, indices: number[], axes: ChartAxes, 
       xAxisID: "x",
       yAxisID: result.config.layout === "panels" ? "y" : axes.seriesAxes[index],
       // Native null bars still affect slot width and participate in hover.
-      data: series.type === "bar" ? series.points.filter(point => point.y !== null) : series.points.map(({ x, y }) => ({ x, y })),
+      data: series.type === "bar" ? series.points.filter(point => point.y !== null) : series.points.map(({ x, y, note }) => ({ x, y, ...(note === undefined ? {} : { note }) })),
       borderColor: palette[index], backgroundColor: palette[index], borderWidth: series.type === "bar" ? 0 : 2,
       ...(series.type === "bar" ? {} : {
         // A dense gap-free panel has no visible points. A constant lets
@@ -138,6 +141,8 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   };
   const ranges = layout === "panels" ? chartPanelRanges(result.series, config.y)
     : chartValueRanges(result.series, config.y, axes.seriesAxes);
+  // Shared ranges need the same pixel span even in panels without notes.
+  const noteRoom = layout === "panels" ? chartNoteRoom(result.series) : undefined;
   const panelUnit = (index: number): string => result.series[index]?.unit || "";
   const formatValue = (index: number, value: number): string =>
     `${formatChartNumber(value)}${panelUnit(index) ? ` ${panelUnit(index)}` : ""}`;
@@ -221,6 +226,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
     const references = referenceDatasets(result, indices, axes, colors.color);
     const configuration: ChartConfiguration<Mark, Point[]> = {
       type: "line",
+      plugins: [chartNotes],
       data: { datasets: [...seriesDatasets(result, indices, axes, palette, ranges), ...references] },
       options: {
         animation: false,
@@ -273,6 +279,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           } } : {}),
         },
         plugins: {
+          ...(noteRoom === undefined ? {} : { "chart-point-notes": noteRoom }),
           legend: { display: layout === "overlay", position: "bottom", align: "start", labels: {
             color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
             filter: item => (item.datasetIndex ?? 0) < indices.length,
@@ -296,6 +303,17 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
               const index = indices[item.datasetIndex] ?? 0;
               const series = config.y[index];
               return item.parsed.y === null ? "" : `${series?.label ?? series?.field ?? ""}: ${formatValue(index, item.parsed.y)}`;
+            },
+            afterBody(items) {
+              // known limit: unusually long notes can exceed compact canvas tooltips; revisit when users encounter clipped note text.
+              const ctx = this.chart.ctx;
+              ctx.save();
+              ctx.font = toFont(font).string;
+              const notes = indices.flatMap((index, datasetIndex) => this.chart.isDatasetVisible(datasetIndex) ? result.series[index]?.points.flatMap(point =>
+                point.note && items.some(item => item.parsed.x === point.x && (hasBars || indices[item.datasetIndex] === index))
+                  ? chartTooltipLines(point.note, Math.max(40, this.chart.width - 32), text => ctx.measureText(text).width) : []) ?? [] : []);
+              ctx.restore();
+              return notes;
             },
           } },
         },
@@ -622,6 +640,13 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       if (event.target === handle) return;
       if (drawnLayout === "scatter" && scatter.selectAt(event)) { event.preventDefault(); return; }
       if (drawnLayout === "bar" && bar.selectAt(event)) { event.preventDefault(); return; }
+      const chart = coarse?.matches === true ? instances.find(instance => instance.canvas === event.target) : undefined;
+      if (chart?.getElementsAtEventForMode(event, "nearest", { axis: "x", intersect: false }, false).some(active =>
+        chart.data.datasets[active.datasetIndex]?.data[active.index]?.note)) {
+        // Keep the native touch tooltip visible instead of opening its source.
+        event.preventDefault();
+        return;
+      }
       open(event);
     };
     screen.addEventListener("mousedown", openDrawing);
