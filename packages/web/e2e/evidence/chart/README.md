@@ -110,7 +110,13 @@ vertical and horizontal references span the widened plot, and the diagonal
 ends at the overlap of the two independent ranges. Neutral dashed strokes
 paint before the one-pixel whiskers, points and point labels. Native axis
 ticks show each reference's number and unit, remain separate from nearby tick
-ink and clear 4.5:1 contrast in light and dark. Desktop pointer and iPad touch
+ink and clear 4.5:1 contrast in light and dark. Ordinary labels and full-span
+grid lines remain on both sides of references, including the 100 % tick above
+the fixture's 37 % guide. Light-only regressions also cover two references
+within a 0–1 axis, thresholds at 10 and 20 on a 0–100 axis, a reference at 21
+beside the generated 20 tick, and crowded references at 21 and 21.01. They
+verify that collision hiding preserves ordinary grids and distant labels,
+while both crowded guides still paint. Desktop pointer and iPad touch
 on a reference open source without selecting a point; points still select.
 Toggling the diagonal leaves point geometry, ticks and labels unchanged, and
 disjoint ranges draw no diagonal. References leave the legend, text alternative,

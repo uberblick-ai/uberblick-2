@@ -310,6 +310,19 @@ test("scatter references and diagonal paint beneath observations without becomin
     const y = (value: number): number => alpha.y + (value - 82) / (50 - 82) * (twin.y - alpha.y);
     const near = (actual: { x: number; y: number }, expected: { x: number; y: number }): boolean =>
       Math.abs(actual.x - expected.x) < 1 && Math.abs(actual.y - expected.y) < 1;
+    const gridInk = await page.locator(".ub-chart-probe").evaluate(element => {
+      const context = document.createElement("canvas").getContext("2d");
+      if (context === null) throw new Error("e2e: no canvas colour normalizer");
+      context.strokeStyle = getComputedStyle(element).borderTopColor;
+      return String(context.strokeStyle);
+    });
+    expect(probe.texts.map(entry => entry.text)).toEqual(expect.arrayContaining(["0 EUR", "50 EUR", "100 EUR", "0 %", "100 %"]));
+    for (const value of [0, 50, 100]) {
+      expect(probe.lines.some(line => line.dash.length === 0 && line.colour === gridInk
+        && near(line.from, { x: x(value), y: y(120) }) && near(line.to, { x: x(value), y: y(-40) })), `x grid at ${value}`).toBe(true);
+      expect(probe.lines.some(line => line.dash.length === 0 && line.colour === gridInk
+        && near(line.from, { x: x(-20), y: y(value) }) && near(line.to, { x: x(120), y: y(value) })), `y grid at ${value}`).toBe(true);
+    }
     const expected = [
       { from: { x: x(25), y: y(120) }, to: { x: x(25), y: y(-40) } },
       { from: { x: x(120), y: y(120) }, to: { x: x(120), y: y(-40) } },
@@ -401,6 +414,49 @@ test("scatter references and diagonal paint beneath observations without becomin
       await waitForDocumentDraw(page, session, uuid);
       expect((await paint(page)).lines.filter(line => line.dash.length > 0)).toHaveLength(0);
       await expect(selector.locator("option[value]:not([value=''])")).toHaveCount(2);
+      await records(session, uuid, [
+        { id: "a", value: { name: "Alpha", cost: 0.1, quality: 10 } },
+        { id: "b", value: { name: "Beta", cost: 0.9, quality: 90 } },
+      ]);
+      for (const example of [
+        { axis: "x", reference: [0.25, 0.5], labels: ["0", "0.25", "0.5", "0.6", "0.8", "1"], grid: [0, 0.2, 0.4, 0.6, 0.8, 1] },
+        { axis: "y", reference: [10, 20], labels: ["0 %", "10 %", "20 %", "40 %", "60 %", "80 %", "100 %"], grid: [0, 40, 60, 80, 100] },
+        { axis: "y", reference: 21, labels: ["0 %", "21 %", "40 %", "60 %", "80 %", "100 %"], grid: [0, 20, 40, 60, 80, 100] },
+        { axis: "y", reference: [21, 21.01], labels: ["0 %", "40 %", "60 %", "80 %", "100 %"], grid: [0, 20, 40, 60, 80, 100] },
+      ] as const) {
+        await editMapping(session, uuid, { ...MAPPING, height: 400,
+          x: { field: "cost", label: "Speed", ...(example.axis === "x" ? { reference: example.reference } : {}) },
+          y: { field: "quality", label: "Quality", unit: "%", range: [0, 100], ...(example.axis === "y" ? { reference: example.reference } : {}) },
+        });
+        await waitForDocumentDraw(page, session, uuid);
+        const drawing = await paint(page), first = alphaPoint(drawing);
+        const points = drawing.points.filter(point => point.radius === 4);
+        expect(points).toHaveLength(2);
+        const second = points.find(point => Math.abs(point.x - first.x) > 1);
+        if (second === undefined) throw new Error("e2e: reference example scale anchors were not painted");
+        const pixelX = (value: number): number => first.x + (value - 0.1) / (0.9 - 0.1) * (second.x - first.x);
+        const pixelY = (value: number): number => first.y + (value - 10) / (90 - 10) * (second.y - first.y);
+        const strokes = drawing.lines.filter(line => line.dash.length > 0);
+        const referenceValues: readonly number[] = typeof example.reference === "number" ? [example.reference] : example.reference;
+        expect(strokes).toHaveLength(referenceValues.length);
+        for (const value of referenceValues) {
+          expect(strokes.filter(line => example.axis === "x"
+            ? Math.abs(line.from.x - pixelX(value)) < 0.001 && near(line.from, { x: pixelX(value), y: pixelY(100) }) && near(line.to, { x: pixelX(value), y: pixelY(0) })
+            : Math.abs(line.from.y - pixelY(value)) < 0.001 && near(line.from, { x: pixelX(0), y: pixelY(value) }) && near(line.to, { x: pixelX(1), y: pixelY(value) })),
+          `${example.axis} reference at ${value}`).toHaveLength(1);
+        }
+        expect(drawing.texts.map(entry => entry.text)).toEqual(expect.arrayContaining(example.labels));
+        if (example.axis === "y" && referenceValues.includes(21)) {
+          expect(drawing.texts.map(entry => entry.text)).not.toContain("20 %");
+          expect(drawing.texts.filter(entry => entry.text === "21 %" || entry.text === "21.01 %")).toHaveLength(1);
+        }
+        for (const value of example.grid) {
+          expect(drawing.lines.some(line => line.dash.length === 0 && line.colour === gridInk && (example.axis === "x"
+            ? near(line.from, { x: pixelX(value), y: pixelY(100) }) && near(line.to, { x: pixelX(value), y: pixelY(0) })
+            : near(line.from, { x: pixelX(0), y: pixelY(value) }) && near(line.to, { x: pixelX(1), y: pixelY(value) }))),
+          `${example.axis} example grid at ${value}`).toBe(true);
+        }
+      }
     }
     await page.context().close();
   }

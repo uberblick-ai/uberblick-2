@@ -1,6 +1,7 @@
 /** Chart.js owns plotting and hit testing; the native select owns keyboard input. */
 import { Chart, ScatterController } from "chart.js";
-import type { ChartConfiguration, Plugin, PointStyle, Scale } from "chart.js";
+import { toFont } from "chart.js/helpers";
+import type { ChartConfiguration, LinearScaleOptions, Plugin, PointStyle, Scale } from "chart.js";
 import type { ScatterAxisMapping, ScatterPoint, ScatterProjection, ScatterReady } from "@uberblick/schema";
 import { createRoot } from "react-dom/client";
 import { Fragment } from "react";
@@ -15,6 +16,28 @@ const SHAPES: PointStyle[] = ["circle", "triangle", "rect", "rectRot", "cross", 
 
 function references(mapping: ScatterAxisMapping): number[] {
   return [...new Set(Array.isArray(mapping.reference) ? mapping.reference : mapping.reference === undefined ? [] : [mapping.reference])];
+}
+
+function fitReferenceLabels(instance: Chart<"scatter">, result: ScatterReady, colors: CSSStyleDeclaration): void {
+  const font = toFont({ family: colors.fontFamily, size: Number.parseFloat(colors.fontSize), lineHeight: colors.lineHeight });
+  const { ctx } = instance;
+  ctx.save();
+  ctx.font = font.string;
+  for (const axis of ["x", "y"] as const) {
+    const scale = instance.scales[axis], values = references(result.config[axis]);
+    if (scale === undefined || values.length === 0) continue;
+    const occupied: { start: number; end: number }[] = [];
+    // Hide colliding labels only: native tick positions still supply the grid.
+    const prioritized = [...scale.ticks].sort((a, b) => Number(values.includes(b.value)) - Number(values.includes(a.value)));
+    for (const tick of prioritized) {
+      const pixel = scale.getPixelForValue(tick.value);
+      const extent = axis === "x" ? ctx.measureText(String(tick.label)).width : font.lineHeight;
+      const start = pixel - extent / 2, end = pixel + extent / 2;
+      if (occupied.some(other => start < other.end + 4 && end + 4 > other.start)) tick.label = "";
+      else occupied.push({ start, end });
+    }
+  }
+  ctx.restore();
 }
 
 function drawReferences(instance: Chart<"scatter">, result: ScatterReady, color: string): void {
@@ -149,6 +172,9 @@ export function scatterView(canvas: HTMLCanvasElement): {
   }
   const decorations: Plugin<"scatter"> = {
     id: "stored-scatter-decorations",
+    afterLayout(instance) {
+      if (result !== null) fitReferenceLabels(instance, result, colors);
+    },
     beforeDatasetsDraw(instance) {
       if (result === null) return;
       drawReferences(instance, result, colors.color);
@@ -240,15 +266,19 @@ export function scatterView(canvas: HTMLCanvasElement): {
             ? { suggestedMin: next.domain[axis][0], suggestedMax: next.domain[axis][1] }
             : { min: next.domain[axis][0], max: next.domain[axis][1] }),
           title: { display: true, text: next.config[axis].label || next.config[axis].field, color: colors.color, font },
+          beforeBuildTicks: (scale: Scale) => { (scale.options as LinearScaleOptions).ticks.maxTicksLimit = 6; },
           afterBuildTicks: (scale: Scale) => {
-            for (const tick of scale.ticks) tick.major = values.includes(tick.value);
-            for (const value of values) if (!scale.ticks.some(tick => tick.value === value)) scale.ticks.push({ value, major: true });
+            if (values.length === 0) return;
+            for (const value of values) if (!scale.ticks.some(tick => tick.value === value)) scale.ticks.push({ value });
             scale.ticks.sort((a, b) => a.value - b.value);
+            // Chart.js also uses this limit to thin grid lines after tick generation.
+            (scale.options as LinearScaleOptions).ticks.maxTicksLimit = scale.ticks.length;
           },
           // known limit: crowded reference labels may be skipped; revisit when every label must remain visible.
-          ticks: { color: colors.color, font, maxTicksLimit: Math.max(6, values.length), major: { enabled: values.length > 0 },
+          ticks: { color: colors.color, font, maxTicksLimit: 6,
+            ...(values.length > 0 ? { autoSkip: false, maxRotation: 0 } : {}),
             callback: (value: string | number) => `${formatChartNumber(Number(value))}${next.config[axis].unit ? ` ${next.config[axis].unit}` : ""}` },
-          grid: { color: (context: { tick?: { major?: boolean } }) => context.tick?.major ? "transparent" : colors.borderTopColor },
+          grid: { color: (context: { tick?: { value: number } }) => context.tick !== undefined && values.includes(context.tick.value) ? "transparent" : colors.borderTopColor },
           border: { display: false },
         };
       };
