@@ -200,6 +200,7 @@ describe("the registry", () => {
       "Caution",
       "Bullet list",
       "Numbered list",
+      "Checklist",
       "Code",
       "JSON tree",
       "Table",
@@ -241,7 +242,7 @@ describe("the registry", () => {
     const labels = (query: string): string[] =>
       filterBlockMenu(query).map((entry) => entry.label);
     expect(labels("")).toHaveLength(BLOCK_MENU_ENTRIES.length);
-    expect(labels("he")).toEqual(["Heading 1", "Heading 2", "Heading 3"]);
+    expect(labels("he")).toEqual(["Heading 1", "Heading 2", "Heading 3", "Checklist"]);
     expect(labels("h2")).toEqual(["Heading 2"]);
     expect(labels("##")).toEqual(["Heading 2", "Heading 3"]);
     expect(labels("```")).toEqual(["Code"]);
@@ -256,6 +257,7 @@ describe("the registry", () => {
     expect(labels("hint")).toEqual(["Tip"]);
     expect(labels("attention")).toEqual(["Warning"]);
     expect(labels("danger")).toEqual(["Caution"]);
+    expect(labels("todo")).toEqual(["Checklist"]);
     for (const alias of ["horizontal rule", "hr", "line", "separator"]) {
       expect(labels(alias)).toContain("Divider");
     }
@@ -306,6 +308,26 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
+  it("starts an unticked checklist from its menu entry and restores the slash query on undo", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const mounted = mountMenu(ydoc);
+    try {
+      caret(mounted.editor, 0, 0);
+      type(mounted.editor, "/todo");
+      expect(mounted.entryLabels()).toEqual(["Checklist"]);
+      mounted.press("Enter");
+      expect(getBlocks(ydoc)).toMatchObject([
+        { id: ids[0], type: "list-item", text: "", list: "unchecked", indent: 0 },
+      ]);
+      expect(mounted.editor.state.selection.$head.parent.attrs.id).toBe(ids[0]);
+      expect(mounted.card()).toBeNull();
+      act(() => { mounted.editor.commands.keyboardShortcut("Mod-z"); });
+      expect(getBlocks(ydoc)).toMatchObject([{ id: ids[0], type: "paragraph", text: "/todo" }]);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
   it("replaces the slash paragraph with a divider and a fresh paragraph in one undo step", () => {
     const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }, { type: "paragraph", text: "Below" }]);
     const mounted = mountMenu(ydoc);
@@ -490,7 +512,7 @@ describe("the slash menu", () => {
       expect(entryLabels()).toHaveLength(BLOCK_MENU_ENTRIES.length);
 
       type(editor, "he");
-      expect(entryLabels()).toEqual(["Heading 1", "Heading 2", "Heading 3"]);
+      expect(entryLabels()).toEqual(["Heading 1", "Heading 2", "Heading 3", "Checklist"]);
 
       // No pause is arranged: this is the real keyboard path, typed and picked
       // inside the UndoManager's half-second capture window. The boundary that

@@ -11,7 +11,7 @@ names it back. The Playwright assertions check the behavior described here.
 1. Open a document that already has one paragraph, with the caret in it.
 2. Press Enter, which leaves a second paragraph, empty, below the first.
 3. Type `/he`.
-4. See the block menu offer exactly the three heading levels.
+4. See the block menu offer the three heading levels followed by Checklist.
 5. Press ArrowDown once, then Enter, to take Heading 2.
 6. See the menu close, the second block become a level-two heading, and that
    heading be **empty** — the `/he` was the gesture, not text.
@@ -20,11 +20,9 @@ names it back. The Playwright assertions check the behavior described here.
 ## Assumptions this rests on
 
 - The slash menu converts only an *empty* paragraph — a non-empty one is not
-  offered the gesture at all. That is current product truth, stated in
-  *Using the web editor* (`8c00fba4-4c81-4eb4-9ce5-c4bbd9427efd`), and this
-  scenario would be wrong the day that changed.
-- `/he` filters the menu to the heading levels and nothing else, so the count in
-  step 4 is three. A new block type whose name matches `he` would break the
-  scenario without breaking the product.
+  offered the gesture at all. `slashTriggerAt` in `src/editor/block-menu.ts`
+  enforces this condition.
+- `/he` matches the three heading levels and Checklist, so the count in step 4
+  is four. Heading 2 remains the second entry.
 - Chromium only, at Playwright's `Desktop Chrome` viewport. The scenario says
   nothing about other browsers.

@@ -876,6 +876,52 @@ describe("an archived document is readable, says so, and offers one way back", (
   });
 });
 
+describe("checklist document permissions", () => {
+  it.each(["archived", "unwritable"] as const)("disables checkboxes while the document is %s and follows restored editing in place", async (cause) => {
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const docRoom = roomForDoc(WORKSPACE, UUID);
+    const ydoc = room(docRoom).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "Checklist permissions" });
+    appendBlock(ydoc, { type: "list-item", text: "Keep this task", list: "checked" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Checklist permissions" });
+    if (cause === "archived") tombstoneDirectoryEntry(directory, UUID);
+    else roomStatus.set(docRoom, { ...LIVE, writable: false });
+
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    const editor = binding.mock.results[0]?.value.editor;
+    if (editor == null) throw new Error("fixture document did not bind an editor");
+    const checkbox = (): HTMLInputElement => within(host).getByRole("checkbox", { name: "Checklist item" });
+    act(() => editor.commands.setTextSelection(3));
+    expect(checkbox().checked).toBe(true);
+    expect(checkbox().disabled).toBe(true);
+    const before = getBlocks(ydoc);
+    act(() => {
+      checkbox().click();
+      editor.commands.keyboardShortcut("Mod-Enter");
+    });
+    expect(getBlocks(ydoc)).toEqual(before);
+
+    await act(async () => {
+      if (cause === "archived") restoreButton(host)?.click();
+      else emitStatus(docRoom, { writable: true });
+    });
+    expect(checkbox().disabled).toBe(false);
+    act(() => checkbox().click());
+    expect(getBlocks(ydoc)[0]?.list).toBe("unchecked");
+
+    act(() => {
+      if (cause === "archived") tombstoneDirectoryEntry(directory, UUID);
+      else emitStatus(docRoom, { writable: false });
+      checkbox().click();
+      editor.commands.keyboardShortcut("Mod-Enter");
+    });
+    expect(checkbox().disabled).toBe(true);
+    expect(getBlocks(ydoc)[0]?.list).toBe("unchecked");
+    expect(binding).toHaveBeenCalledOnce();
+  });
+});
+
 describe("starting a thread requires a writable document", () => {
   for (const cause of ["archived", "not writable"] as const) {
     it(`withholds Comment while the document is ${cause}, then offers it again`, async () => {

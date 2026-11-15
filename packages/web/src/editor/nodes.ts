@@ -13,7 +13,7 @@
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
-import { COMMENT_MARK, MAX_LIST_INDENT } from "@uberblick/schema";
+import { COMMENT_MARK, MAX_LIST_INDENT, LIST_STYLES } from "@uberblick/schema";
 import type { HeadingLevel, ListIndent } from "@uberblick/schema";
 import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
 import {
@@ -163,8 +163,10 @@ const ListItem = Node.create({
       // Preserve stored strings; clamp only rendering.
       list: {
         default: "bullet",
-        parseHTML: (element: HTMLElement): string =>
-          element.getAttribute("data-list") === "ordered" ? "ordered" : "bullet",
+        parseHTML: (element: HTMLElement): string => {
+          const list = element.getAttribute("data-list");
+          return LIST_STYLES.find((style) => style === list) ?? "bullet";
+        },
         renderHTML: (attributes: Record<string, unknown>) => ({
           "data-list": String(attributes.list ?? "bullet"),
         }),

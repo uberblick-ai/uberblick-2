@@ -24,7 +24,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { createDoc, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { placeCaret, placeCaretIn } from "./harness.js";
 import { waitForAcknowledged } from "./settle.js";
 
 const { harness } = setupHarness();
@@ -257,7 +257,7 @@ test(
     await page.keyboard.type("/he", { delay: 15 });
     // Scoped to the menu: the sidebar's workspace switcher is a `<select>`,
     // and its options carry the same role.
-    await expect(page.getByRole("listbox", { name: "Block types" }).getByRole("option")).toHaveCount(3);
+    await expect(page.getByRole("listbox", { name: "Block types" }).getByRole("option")).toHaveCount(4);
 
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
@@ -486,4 +486,102 @@ test("real Tab keeps focus and the caret in the typed list item", async ({
   // And the caret is still in the item Tab indented: typing carries on there.
   await page.keyboard.type("!", { delay: 15 });
   await expect(items.nth(1)).toHaveText("b!");
+});
+
+test("a checklist starts from the menu and native click and caret keys keep editing the item", { tag: "@webkit" }, async ({ page }) => {
+  await page.goto(harness().appUrl);
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(page, "Checklist keyboard");
+  await placeCaret(page);
+  await page.keyboard.type("Checklist context");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/check");
+  await page.getByRole("option", { name: "Checklist", exact: true }).click();
+  await page.keyboard.type("Pack the bag");
+  const item = page.locator('.ub-editor .ProseMirror > li[data-list="unchecked"]');
+  const checkbox = item.getByRole("checkbox", { name: "Checklist item", exact: true });
+  await expect(checkbox).not.toBeChecked();
+  await expect(checkbox).toHaveAttribute("tabindex", "-1");
+  await expect(checkbox).toHaveAttribute("title", /(?:Cmd|Ctrl)\+Enter/);
+  const id = await item.getAttribute("id");
+  for (const scheme of ["light", "dark"] as const) {
+    await page.evaluate(theme => document.documentElement.setAttribute("data-theme", theme), scheme);
+    await expect(checkbox).toHaveCSS("color-scheme", scheme);
+    const marker = await checkbox.evaluate(async element => {
+      await document.fonts.ready;
+      const target = element.closest(".ub-checklist-control");
+      const listItem = element.closest("li");
+      if (target === null || listItem === null) throw new Error("e2e: missing checklist marker");
+      const text = document.createTreeWalker(listItem, NodeFilter.SHOW_TEXT).nextNode();
+      if (text === null) throw new Error("e2e: missing checklist text");
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      return { target: target.getBoundingClientRect().toJSON(), input: element.getBoundingClientRect().toJSON(), text: range.getBoundingClientRect().toJSON() };
+    });
+    expect(marker.target.width).toBeGreaterThanOrEqual(24);
+    expect(marker.target.height).toBeGreaterThanOrEqual(24);
+    expect(marker.input.right).toBeLessThanOrEqual(marker.text.left);
+    expect(Math.abs(marker.input.y + marker.input.height / 2 - marker.text.y - marker.text.height / 2)).toBeLessThan(4);
+  }
+
+  await checkbox.click();
+  const current = page.locator(".ub-editor .ProseMirror > li").first();
+  await expect(current.getByRole("checkbox")).toBeChecked();
+  await expect(current).toHaveText("Pack the bag");
+  await expect(current).toHaveAttribute("id", id ?? "");
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await page.keyboard.press(`${modifier}+z`);
+  await expect(current.getByRole("checkbox")).not.toBeChecked();
+  await expect(current).toHaveText("Pack the bag");
+  await current.getByRole("checkbox").click();
+  await expect(current.getByRole("checkbox")).toBeChecked();
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(current).toHaveText("Pack the bag!");
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(current.getByRole("checkbox")).not.toBeChecked();
+  await page.keyboard.press("Tab");
+  await expect(current).toHaveAttribute("data-indent", "1");
+  await page.keyboard.press("Shift+Tab");
+  await expect(current).toHaveAttribute("data-indent", "0");
+  await expect(current).toHaveText("Pack the bag!");
+  await expect(page.locator(".ub-editor .ProseMirror")).toBeFocused();
+  await page.keyboard.press(`${modifier}+Enter`);
+  await page.keyboard.press("Enter");
+  const next = page.locator(".ub-editor .ProseMirror > li").nth(1);
+  await expect(next.getByRole("checkbox")).not.toBeChecked();
+  await expect(next).toHaveAttribute("data-indent", "0");
+  await page.keyboard.press("Backspace");
+  await expect(blocks(page).last()).toHaveJSProperty("tagName", "P");
+  await placeCaretIn(current, { edge: "start" });
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Backspace");
+  const lifted = blocks(page).nth(1);
+  await expect(lifted).toHaveJSProperty("tagName", "P");
+  await expect(lifted).toHaveText("Pack the bag!");
+  await expect(lifted).toHaveAttribute("id", id ?? "");
+});
+
+test("native copying and pasting checklist items preserves both states", async ({ page }) => {
+  await openDoc(page, "");
+  await page.keyboard.type("/check");
+  await page.getByRole("option", { name: "Checklist", exact: true }).click();
+  await page.keyboard.type("Completed task");
+  const items = page.locator(".ub-editor .ProseMirror > li");
+  await items.first().getByRole("checkbox").click();
+  await placeCaretIn(items.first());
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Next task");
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await page.keyboard.press(`${modifier}+a`);
+  await page.keyboard.press(`${modifier}+c`);
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press(`${modifier}+v`);
+  await expect(items).toHaveText(["Completed task", "Next task", "Completed task", "Next task"]);
+  await expect.poll(() => items.evaluateAll(elements => elements.map(element => element.getAttribute("data-list"))))
+    .toEqual(["checked", "unchecked", "checked", "unchecked"]);
 });
