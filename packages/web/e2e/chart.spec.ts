@@ -579,7 +579,9 @@ for (const type of ["bar", "dot"] as const) {
     } }));
     await categoryRecords(session, uuid, narrowRecords);
     await waitForDocumentDraw(page, session, uuid);
-    await page.locator(".ub-chart").evaluate(element => { (element as HTMLElement).style.width = "320px"; });
+    await page.addStyleTag({ content: ".ub-chart { width: 320px; }" });
+    await expect.poll(() => image.evaluate(element => (element as HTMLCanvasElement).width / window.devicePixelRatio))
+      .toBeLessThanOrEqual(320);
     await expect.poll(async () => {
       const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
       return ink.filter(entry => /^System \d$/.test(entry.text)).map(entry => entry.text);
@@ -595,6 +597,31 @@ for (const type of ["bar", "dot"] as const) {
     const marks = await categoryGroupMarks(page, type, narrowRecords.map(record => record.value.name));
     expect(marks).toHaveLength(8);
     expect(new Set(marks.map(mark => mark.color)).size).toBe(8);
+    if (type === "bar") {
+      const field = "The complete classification retained for each system in the comparison";
+      await categoryRecords(session, uuid, narrowRecords.map(record => ({ ...record,
+        value: { ...record.value, [field]: record.value.tier },
+      })));
+      await editMapping(session, uuid, JSON.stringify({ ...mapping, group: field }));
+      await waitForDocumentDraw(page, session, uuid);
+      await expect.poll(() => image.evaluate(element => (element as HTMLCanvasElement).width / window.devicePixelRatio))
+        .toBeLessThanOrEqual(320);
+      const target = (await categoryGroupMarks(page, type, narrowRecords.map(record => record.value.name)))[0];
+      const bounds = await image.boundingBox();
+      if (bounds === null || target === undefined) throw new Error("e2e: long group tooltip target absent");
+      if (touch) await page.touchscreen.tap(bounds.x + target.x, bounds.y + target.y);
+      else await page.mouse.move(bounds.x + target.x, bounds.y + target.y);
+      const groupLines = async (): Promise<PaintedText[]> => page.evaluate(() => {
+        const ink = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink;
+        return ink.slice(ink.findLastIndex(entry => entry.text === "System 0") + 1)
+          .filter(entry => entry.text !== "Word error rate: 10 %");
+      });
+      await expect.poll(async () => (await groupLines()).map(entry => entry.text).join(""))
+        .toBe(`${field}: ${narrowRecords[0]?.value.tier}`);
+      await expect.poll(async () => (await groupLines()).length).toBeGreaterThan(1);
+      const lines = await groupLines();
+      expect(lines.every(entry => entry.left >= 0 && entry.right <= bounds.width + 1)).toBe(true);
+    }
   });
 }
 

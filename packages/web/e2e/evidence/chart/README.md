@@ -78,7 +78,8 @@ native keyboard selection also reaches group details and omits absent/null
 groups. The same selected details persist through the appearance change.
 A live update to eight long group names at 320 pixels checks that the wrapped
 legend remains inside the canvas, below every retained category label, and all
-eight colours remain distinct.
+eight colours remain distinct. Bar tooltips wrap long group text without losing
+the field or value, and every painted line stays inside the narrow canvas.
 
 Regenerate group evidence with `mise run e2e -- chart.spec.ts --grep 'category
 group colours' --project=chromium --project=webkit-ipad`. Attachments named

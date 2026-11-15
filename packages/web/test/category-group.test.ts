@@ -74,5 +74,12 @@ describe.each(["bar", "dot"] as const)("%s group presentation", type => {
     const context = { chart: { width: 600, ctx: { save() {}, restore() {}, measureText: (text: string) => ({ width: text.length * 6 }) } } };
     expect(label.call(context, { dataIndex: 0 })).toEqual(["kind: Paid", "score: 2"]);
     expect(label.call(context, { dataIndex: 3 })).toEqual(["score: 5"]);
+    const longGroup = "Paid API with a descriptive group name";
+    const long = configuration({ ...result, rows: [{ ...result.rows[0]!, groupValue: longGroup }] });
+    const wrappedLabel = long.options?.plugins?.tooltip?.callbacks?.label as typeof label;
+    const lines = wrappedLabel.call({ chart: { ...context.chart, width: 180 } }, { dataIndex: 0 });
+    expect(lines.slice(0, -1).join("")).toBe(`kind: ${longGroup}`);
+    expect(lines.every(line => line.length * 6 <= 148)).toBe(true);
+    expect(lines.at(-1)).toBe("score: 2");
   });
 });

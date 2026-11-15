@@ -217,9 +217,18 @@ export function barConfiguration(result: BarReady, colors: CSSStyleDeclaration, 
               ctx.restore();
               return title;
             },
-            label: item => {
+            label(item) {
               const row = result.rows[item.dataIndex];
-              return row === undefined ? [] : [...categoryGroupValue(result, row), ...barCategoryValues(result, row)].map(({ label, value }) => `${label}: ${value}`);
+              if (row === undefined) return [];
+              const values = barCategoryValues(result, row).map(({ label, value }) => `${label}: ${value}`);
+              const group = categoryGroupValue(result, row);
+              if (group.length === 0) return values;
+              const ctx = this.chart.ctx;
+              ctx.save(); ctx.font = `${font.size}px ${font.family}`;
+              const lines = group.flatMap(({ label, value }) => chartTooltipLines(`${label}: ${value}`,
+                Math.max(40, this.chart.width - 32), text => ctx.measureText(text).width));
+              ctx.restore();
+              return [...lines, ...values];
             },
           },
         },
