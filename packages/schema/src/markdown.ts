@@ -135,7 +135,7 @@ function nestedMarksOf(marks: InlineMarkSet): NestedMark[] {
 }
 
 interface EscapeContext {
-  /** Tables also escape pipes, HTML/autolink openers and entity ampersands. */
+  /** Tables also escape pipes, HTML closers and entity ampersands. */
   table?: boolean;
   /**
    * The first unescaped ] ends a link label and must be escaped inside it.
@@ -148,15 +148,15 @@ interface EscapeContext {
 }
 
 /**
- * Escape backslash, backtick, * and [; plus ] in labels, delimiting ~/_ and table
- * punctuation. Always escape [: a later run can supply its ](target). Missing
- * neighbors may delimit, and the tokenizer must undo this same vocabulary.
+ * Escape backslash, backtick, *, [ and <; plus ] in labels, delimiting ~/_ and
+ * table punctuation. Always escape openers: a later run can complete their
+ * syntax. Missing neighbors may delimit; the tokenizer undoes this vocabulary.
  */
 function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i] as string;
-    if (char === "\\" || char === "`" || char === "*" || char === "[" || (context.table === true && ["<", ">", "&", "!", "]"].includes(char))) {
+    if (char === "\\" || char === "`" || char === "*" || char === "[" || char === "<" || (context.table === true && [">", "&", "!", "]"].includes(char))) {
       out += `\\${char}`;
     } else if (char === "]" && context.insideLabel) {
       out += "\\]";
@@ -395,7 +395,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * first export preserves marks except unwritable edge whitespace and touching
  * code spans without a writable separator.
  */
-// known limit: plain addresses export bare and link on re-import; revisit when Markdown supports preserving an unlinked address.
+// known limit: unbracketed plain addresses link on re-import; revisit when Markdown supports preserving an unlinked address.
 export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
   const open: OpenMark[] = [];

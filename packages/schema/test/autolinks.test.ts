@@ -59,6 +59,33 @@ describe("structured Markdown writes", () => {
     ]);
     doc.destroy();
   });
+
+  it.each([
+    { type: "card", header: "title: Links", address: "https://example.com/a" },
+    { type: "card", header: "title: Links", address: "https://example.com/_next/a" },
+    { type: "figma", header: "url: https://www.figma.com/design/Abc123/File", address: "https://example.com/a" },
+    { type: "figma", header: "url: https://www.figma.com/design/Abc123/File", address: "https://example.com/_next/a" },
+  ] as const)("edits $type prose beside a stored plain angle address $address", ({ type, header, address }) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Links" });
+    const id = appendBlock(doc, {
+      type, text: `${header}\n\nBefore \\<${address}> then placeholder and [kept](https://target.example.com)`,
+    });
+    const part = structuredInlineParts(findBlockElement(doc, id)!).find(({ texts }) =>
+      texts.some((text) => text.toString().includes(address)))!;
+    const text = part.texts[0]!;
+    expect(readInlineRuns(text)).toEqual([
+      { text: `Before <${address}> then placeholder and `, marks: {} },
+      { text: "kept", marks: { link: "https://target.example.com" } },
+    ]);
+    const before = getBlock(doc, id)!.text;
+    editBlock(doc, id, before, before.replace("placeholder", "changed"));
+    expect(readInlineRuns(text)).toEqual([
+      { text: `Before <${address}> then changed and `, marks: {} },
+      { text: "kept", marks: { link: "https://target.example.com" } },
+    ]);
+    doc.destroy();
+  });
 });
 
 describe("linkifying literal inline runs", () => {

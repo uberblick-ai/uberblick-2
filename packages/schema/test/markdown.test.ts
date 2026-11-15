@@ -88,6 +88,29 @@ describe("web addresses in Markdown prose", () => {
     doc.destroy();
   });
 
+  it.each([
+    "https://example.com/a",
+    "https://example.com/_next/a",
+    "http://example.com/a",
+    "http://example.com/_next/a",
+  ])("keeps a stored plain angle address %s unchanged on Markdown round trip", (address) => {
+    const inline = [
+      { text: `Before <${address}> then `, marks: {} },
+      { text: "kept", marks: { link: "https://target.example.com/_kept/a" } },
+    ];
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Plain angle address" });
+    appendBlock(doc, { type: "paragraph", inline });
+    const markdown = exportMarkdown(doc, { frontmatter: false });
+    expect(importMarkdown(markdown).blocks[0]).toMatchObject({
+      text: `Before <${address}> then kept`, inline,
+    });
+    const reimported = docFrom(markdown);
+    expect(exportMarkdown(reimported, { frontmatter: false })).toBe(markdown);
+    reimported.destroy();
+    doc.destroy();
+  });
+
   it("keeps escaped trailing punctuation outside an exported plain address's target", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Address punctuation" });
