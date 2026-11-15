@@ -27,6 +27,8 @@ Views whose assertions read series or reference colours run in both:
 | Category grouped stacks, horizontal, desktop | ![Light horizontal category bars](category-horizontal-desktop-light.png) | ![Dark horizontal category bars](category-horizontal-desktop-dark.png) |
 | Category grouped stacks, vertical, iPad | ![Light iPad vertical category bars](category-vertical-ipad-light.png) | ![Dark iPad vertical category bars](category-vertical-ipad-dark.png) |
 | Category grouped stacks, horizontal, iPad | ![Light iPad horizontal category bars](category-horizontal-ipad-light.png) | ![Dark iPad horizontal category bars](category-horizontal-ipad-dark.png) |
+| Dot pairs, values and stored notes, desktop | ![Light desktop dots](dot-desktop-light.png) | ![Dark desktop dots](dot-desktop-dark.png) |
+| Dot pairs, values and stored notes, iPad portrait | ![Light iPad dots](dot-ipad-light.png) | ![Dark iPad dots](dot-ipad-dark.png) |
 | Point notes, overlay, desktop | ![Light desktop point notes](notes-overlay-desktop-light.png) | ![Dark desktop point notes](notes-overlay-desktop-dark.png) |
 | Point notes, panels, desktop | ![Light desktop note panels](notes-panels-desktop-light.png) | ![Dark desktop note panels](notes-panels-desktop-dark.png) |
 | Point notes, overlay, iPad | ![Light iPad point notes](notes-overlay-ipad-light.png) | ![Dark iPad point notes](notes-overlay-ipad-dark.png) |
@@ -48,6 +50,21 @@ Regenerate category evidence with `mise run e2e -- chart.spec.ts --grep category
 --project=chromium --project=webkit-ipad`. Attachments named
 `chart-category-{vertical,horizontal}-{desktop,ipad}-{light,dark}.png` become
 the correspondingly named files above without the `chart-` prefix.
+
+The dot cases observe native point arcs, legend markers, text ink and canvas
+pixels in both appearances. They check hollow-to-filled direction, neutral
+connectors and references, rounded nonzero ticks fitted to the final plot width,
+declared ranges, joined axis-order values and unjoined mapping-order values.
+Full row values stay outside the plot; stored notes alone use ellipsis. The
+desktop keyboard and pointer and iPad touch reach full category, values and
+literal note text without opening source. Other checks cover native Tab exit,
+editable and locked source controls, resize and Height, live windows, narrow
+columns, dense omission, huge retained values and a subnormal dot.
+
+Regenerate dot evidence with `mise run e2e -- chart.spec.ts --grep 'dot '
+--project=chromium --project=webkit-ipad`. Attachments named
+`chart-dot-{desktop,ipad}-{light,dark}.png` become the correspondingly named
+files above without the `chart-` prefix.
 
 `scatter.spec.ts` uses synthetic observations with three named groups and an
 ungrouped record sharing another record's coordinates. Native canvas strokes

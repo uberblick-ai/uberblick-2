@@ -18,6 +18,13 @@ function change(source: string, height: number | undefined): string {
 }
 
 describe("chart height source edits", () => {
+  it("changes only dot height while retaining row note, connector, ranges and authored formatting", () => {
+    const dot = '{ "version":1,"type":"dot","collection":"points","category":{"field":"name"},"y":[{"field":"a","reference":0.5},{"field":"b","range":[1,3]}],"connect":true,"note":"change","sort":{"field":"name","direction":"desc"},"limit":10 }';
+    const resized = change(dot, 320);
+    expect(resized).toBe(`${dot.slice(0, -2)},"height":320 }`);
+    expect(change(resized, undefined)).toBe(dot);
+    expect(chartHeightEdits(dot.replace('"connect":true', '"orientation":"horizontal"'), 320)).toBeNull();
+  });
   it("changes only category bar height while retaining orientation, stacks and authored formatting", () => {
     const bar = '{ "version":1,"type":"bar","collection":"points","category":{"field":"name"},"orientation":"horizontal","y":[{"field":"a","stack":"eu","reference":0.5},{"field":"b","stack":"eu"}],"sort":{"field":"name","direction":"desc"},"limit":10 }';
     const resized = change(bar, 320);

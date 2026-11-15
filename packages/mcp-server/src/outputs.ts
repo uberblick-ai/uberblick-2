@@ -187,7 +187,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
   ]);
 }
 const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict();
-const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line or category-bar y field without numeric values in the shown records, or a scatter group field with more than eight values; never a refusal or rollback.");
+const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line, category-bar or dot y field without numeric values in the shown records, or a scatter group field with more than eight values; never a refusal or rollback. No record values or note text are returned.");
 const chartSeries = z.array(z.object({
   field: z.string().describe("Literal y field from the mapping, in mapping order."),
   pointCount: count.describe("Plotted numeric y values; null gaps are not points."),
@@ -204,7 +204,7 @@ const tableCounts = {
 };
 const plottedCounts = {
   recordCount: chartCounts.recordCount,
-  plottedCount: count.describe("Scatter points with numeric x/y, or shown category-bar records with a category and at least one numeric y, after schema omissions, selection and the 5,000-record cap; no record values are returned."),
+  plottedCount: count.describe("Scatter points with numeric x/y, or shown category-bar or dot records with a category and at least one numeric y, after schema omissions, selection and the 5,000-record cap; no record values or note text are returned."),
 };
 const xEndpoint = z.union([z.number().finite(), z.string()])
   .describe("First or last plotted x: a number for numeric x, or an ISO date/date-time string for date x; never epoch milliseconds.");

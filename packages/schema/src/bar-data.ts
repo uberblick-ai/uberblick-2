@@ -1,9 +1,9 @@
 /** Category bars preserve one group per eligible record in a detached view. */
-import { CHART_MAX_HEIGHT, CHART_MIN_HEIGHT, CHART_RECORD_LIMIT } from "./chart-data.js";
-import { compareCodePoints } from "./data-schema.js";
-import type { DataRecord, DocData } from "./data.js";
-import { sortTableRows } from "./table-data.js";
-import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
+import { CHART_MAX_HEIGHT, CHART_MIN_HEIGHT } from "./chart-data.js";
+import type { DocData } from "./data.js";
+import { projectCategory } from "./category-data.js";
+import type { CategoryDiagnostics, CategoryRow, CategorySeries } from "./category-data.js";
+import { keys, name, numeric, object, optionalText } from "./view-data.js";
 
 export interface BarSeriesMapping {
   field: string;
@@ -25,15 +25,9 @@ export interface BarConfig {
   title?: string;
   height?: number;
 }
-export interface BarRow { id: string; label: string; values: (number | null)[] }
-export interface BarSeries { field: string; label: string; unit?: string; stack?: string }
-export interface BarDiagnostics {
-  invalidSchema: number;
-  missingCategory: number;
-  noNumericY: number;
-  limited: number;
-  series: { field: string; label: string; absent: number; null: number; missing: number; invalid: number }[];
-}
+export type BarRow = CategoryRow;
+export type BarSeries = CategorySeries;
+export type BarDiagnostics = CategoryDiagnostics;
 export interface BarReady {
   status: "ready";
   config: BarConfig;
@@ -140,66 +134,9 @@ function drawingDomain(rows: BarRow[], mappings: BarSeriesMapping[]): { domain: 
 }
 
 function projectBar(config: BarConfig, data: DocData | null): BarProjection {
-  const binding = bindCollection(data, config.collection, "Chart");
-  if (binding.status !== "ready") return binding;
-  const { collection, schema } = binding;
-  const badField = incompatible(schema, config.category.field, "text") ? config.category.field
-    : config.y.find((series) => incompatible(schema, series.field, "number"))?.field;
-  if (badField !== undefined) return {
-    status: "mapping-incompatible",
-    message: `Bar mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.`,
-  };
-  const series: BarSeries[] = config.y.map((mapping) => ({
-    field: mapping.field, label: mapping.label || mapping.field,
-    ...(mapping.unit !== undefined ? { unit: mapping.unit } : {}),
-    ...(mapping.stack !== undefined ? { stack: mapping.stack } : {}),
-  }));
-  const diagnostics: BarDiagnostics = {
-    invalidSchema: 0, missingCategory: 0, noNumericY: 0, limited: 0,
-    series: series.map((mapping) => ({ field: mapping.field, label: mapping.label, absent: 0, null: 0, missing: 0, invalid: 0 })),
-  };
-  const invalid = new Set(collection.invalidRecordIds);
-  let eligible: DataRecord[] = [];
-  for (const record of collection.records) {
-    if (invalid.has(record.id) || !object(record.value)) { diagnostics.invalidSchema += 1; continue; }
-    const category = own(record.value, config.category.field);
-    if (category === undefined || category === null) { diagnostics.missingCategory += 1; continue; }
-    eligible.push(record as DataRecord);
-  }
-  if (config.sort === undefined) eligible.sort((a, b) => compareCodePoints(a.id, b.id));
-  else eligible = sortTableRows(eligible, {
-    field: config.sort.field, format: config.sort.field === config.category.field ? "text" : "number",
-  }, config.sort.direction);
-  const limit = Math.min(config.limit ?? CHART_RECORD_LIMIT, CHART_RECORD_LIMIT);
-  const excluded = Math.max(0, eligible.length - limit);
-  const authorWindow = config.limit !== undefined && config.limit <= CHART_RECORD_LIMIT;
-  diagnostics.limited = authorWindow ? 0 : excluded;
-  const rows: BarRow[] = eligible.slice(0, limit).map((record) => {
-    const category = own(record.value, config.category.field);
-    const values = config.y.map((mapping, index) => {
-      const value = own(record.value, mapping.field);
-      if (numeric(value)) return value;
-      const count = diagnostics.series[index];
-      if (count !== undefined) {
-        if (value === undefined) { count.absent += 1; count.missing += 1; }
-        else if (value === null) { count.null += 1; count.missing += 1; }
-        else count.invalid += 1;
-      }
-      return null;
-    });
-    if (!values.some(numeric)) diagnostics.noNumericY += 1;
-    return { id: record.id, label: typeof category === "string" ? category : JSON.stringify(category), values };
-  });
-  const plottedCount = rows.length - diagnostics.noNumericY;
-  const emptyFields = new Set(config.y.filter((_, index) => !rows.some((row) => numeric(row.values[index]))).map((mapping) => mapping.field));
-  const common = {
-    config, rows, series, recordCount: collection.records.length, eligibleCount: eligible.length, plottedCount,
-    notPlotted: collection.records.length - plottedCount - (authorWindow ? excluded : 0), diagnostics,
-    warnings: [...emptyFields].map((field) => `No numeric values for series field “${field}”.`),
-    ...(excluded > 0 ? { notice: `Showing ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${eligible.length} records` } : {}),
-  };
-  if (plottedCount === 0) return { status: "no-records", message: "No plottable records in this chart collection.", ...common };
-  return { status: "ready", ...common, ...drawingDomain(rows, config.y) };
+  const projection = projectCategory(config, data, "Bar");
+  return projection.status === "ready"
+    ? { ...projection, ...drawingDomain(projection.rows, config.y) } : projection;
 }
 
 export function prepareBar(source: string, data: DocData | null): BarProjection {

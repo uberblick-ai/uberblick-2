@@ -54,6 +54,25 @@ it("publishes a valid category-bar example and its private summary on every char
   }
 });
 
+it("teaches a valid dot mapping, its row note and private summary on every chart-writing help surface", async () => {
+  const rig = await local();
+  for (const topic of ["data", "create_doc", "insert_block", "edit_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    const example = text.match(/\{"version":1,"type":"dot"[^\n`]*\}/)?.[0];
+    expect(example, topic).toBeDefined();
+    const view = prepareChartView(example!, null);
+    expect(view.type, topic).toBe("dot");
+    expect(view.projection.status, topic).toBe("collection-absent");
+    const mapping = JSON.parse(example!);
+    expect(mapping).toMatchObject({ connect: true, note: "change", y: [{ field: "wer_old" }, { field: "wer_today" }] });
+    for (const guidance of ["connect: true needs exactly two series", "first is hollow", "second filled",
+      "compact JSON, never markup", "no record values or note text", "recordCount", "plottedCount", "warnings",
+      "series field with no numeric values", "orientation, stack, a series note", "usable plot"]) {
+      expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    }
+  }
+});
+
 it("lists every concept and registered tool once, with the same Markdown through both read routes", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();
@@ -477,7 +496,7 @@ it("describes per-point notes through data and chart-block help", () => {
       "Unusually long notes can be clipped by compact chart tooltips",
       "Absent, null, empty and non-string notes add nothing",
       "Notes are plain text and never change values, axes, legend entries, reference lines, diagnostics, the text alternative or mapping-write summaries",
-      "note is invalid on x and in scatter, category-bar and table mappings",
+      "A series note is invalid on x and in scatter, category-bar, dot and table mappings",
     ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
   }
 });

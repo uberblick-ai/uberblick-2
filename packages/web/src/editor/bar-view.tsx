@@ -1,7 +1,7 @@
 /** Chart.js owns plotting and hit testing; the native select owns keyboard input. */
 import { Chart, CategoryScale } from "chart.js";
 import type { ChartConfiguration, Plugin } from "chart.js";
-import type { BarProjection, BarReady, BarRow } from "@uberblick/schema";
+import type { BarProjection, BarReady, BarRow, DotProjection } from "@uberblick/schema";
 import { createRoot } from "react-dom/client";
 import { Fragment } from "react";
 import type { ReactElement } from "react";
@@ -27,7 +27,7 @@ export function barCoordinateText(value: number, divisor: number): string {
   return `${formatChartNumber(coefficient / 10 ** adjustment)}e${power + adjustment}`;
 }
 
-export function barDiagnosticsText(result: BarProjection): string {
+export function barDiagnosticsText(result: BarProjection | DotProjection): string {
   if (!("diagnostics" in result)) return "";
   const { diagnostics: counts } = result;
   const reasons = [

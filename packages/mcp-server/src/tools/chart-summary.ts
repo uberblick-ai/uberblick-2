@@ -29,7 +29,7 @@ function summarize(source: string, data: DocData | null): ChartWriteSummary {
             firstX: xEndpoint(chart.firstX, chart.config.x.type), lastX: xEndpoint(chart.lastX, chart.config.x.type) }
         : { status: chart.status, message: chart.message, warnings, ...counts };
     }
-  } else if (view.type === "scatter" || view.type === "bar") {
+  } else if (view.type === "scatter" || view.type === "bar" || view.type === "dot") {
     const chart = view.projection;
     if (chart.status === "ready" || chart.status === "no-records") {
       warnings.push(...chart.warnings);

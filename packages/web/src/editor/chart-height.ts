@@ -1,4 +1,4 @@
-import { chartViewType, parseBarConfig, parseJsonSource, parseScatterConfig } from "@uberblick/schema";
+import { chartViewType, parseBarConfig, parseDotConfig, parseJsonSource, parseScatterConfig } from "@uberblick/schema";
 import { CHART_MAX_HEIGHT, CHART_MIN_HEIGHT, parseChartConfig } from "./chart-data.js";
 
 export interface ChartHeightEdit {
@@ -11,7 +11,8 @@ export interface ChartHeightEdit {
 export function chartHeightEdits(source: string, height: number | undefined): ChartHeightEdit[] | null {
   if (height !== undefined && (!Number.isInteger(height) || height < CHART_MIN_HEIGHT || height > CHART_MAX_HEIGHT)) return null;
   const type = chartViewType(source);
-  const config = type === "bar" ? parseBarConfig(source) : type === "scatter" ? parseScatterConfig(source) : parseChartConfig(source);
+  const config = type === "dot" ? parseDotConfig(source) : type === "bar" ? parseBarConfig(source)
+    : type === "scatter" ? parseScatterConfig(source) : parseChartConfig(source);
   if (!config.ok) return null;
   if (config.config.height === height) return [];
   const parsed = parseJsonSource(source);

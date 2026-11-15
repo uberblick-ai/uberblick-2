@@ -12,7 +12,7 @@ import {
 } from "chart.js";
 import type { ChartConfiguration, ChartDataset, Scale } from "chart.js";
 import { toFont } from "chart.js/helpers";
-import { chartViewType, parseBarConfig, parseScatterConfig, prepareChartView } from "@uberblick/schema";
+import { chartViewType, parseBarConfig, parseDotConfig, parseScatterConfig, prepareChartView } from "@uberblick/schema";
 import type { ChartView, DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
@@ -37,10 +37,11 @@ import { chartHeightEdits } from "./chart-height.js";
 import { chartHeightField } from "./chart-height-field.js";
 import { scatterView, scatterDiagnosticsText } from "./scatter-view.js";
 import { barView, barDefaultHeight, barDiagnosticsText, chartTooltipLines } from "./bar-view.js";
+import { dotView, dotDefaultHeight, dotDiagnosticsText } from "./dot-view.js";
 import { chartNotes, chartNoteRoom } from "./chart-notes.js";
 import type { NotedPoint } from "./chart-notes.js";
 
-// Both axes are linear. Epoch milliseconds plus Intl date labels require no
+// Line observation axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
 Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, Legend, Tooltip);
 type Point = NotedPoint;
@@ -51,6 +52,7 @@ const DARK = ["#93c5fd", "#fca5a5", "#6ee7b7", "#d8b4fe", "#fde047", "#67e8f9", 
 
 function projectionDiagnostics(view: ChartView): string {
   switch (view.type) {
+    case "dot": return dotDiagnosticsText(view.projection);
     case "bar": return barDiagnosticsText(view.projection);
     case "scatter": return scatterDiagnosticsText(view.projection);
     case "table": return tableDiagnosticsText(view.projection);
@@ -330,7 +332,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
     let instances: Chart<Mark, Point[]>[] = [];
-    let drawnLayout: "overlay" | "panels" | "scatter" | "bar" | null = null;
+    let drawnLayout: "overlay" | "panels" | "scatter" | "bar" | "dot" | null = null;
     let seriesPanels: { header: HTMLElement; canvas: HTMLCanvasElement }[] = [];
     let destroyed = false;
     let dirty = true;
@@ -370,6 +372,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     table.element.hidden = true;
     const scatter = scatterView(canvas);
     const bar = barView(canvas);
+    const dot = dotView(canvas);
     const message = document.createElement("p");
     message.className = "ub-chart-message";
     const diagnostics = document.createElement("p");
@@ -384,7 +387,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const probe = document.createElement("span");
     probe.className = "ub-chart-probe";
     probe.setAttribute("aria-hidden", "true");
-    panel.append(screen, scatter.element, bar.element, table.element, description, message, diagnostics, notice, probe);
+    panel.append(screen, scatter.element, bar.element, dot.element, table.element, description, message, diagnostics, notice, probe);
     const copy = copyButton(() => current.textContent);
     header.actions.append(copy.element, openButton);
     const fields = chartHeightField(saveHeight);
@@ -392,7 +395,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const coarse = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
     const storedConfig = () => {
       const type = chartViewType(current.textContent);
-      const parsed = type === "bar" ? parseBarConfig(current.textContent) : type === "scatter"
+      const parsed = type === "dot" ? parseDotConfig(current.textContent) : type === "bar" ? parseBarConfig(current.textContent) : type === "scatter"
         ? parseScatterConfig(current.textContent) : parseChartConfig(current.textContent);
       return parsed.ok ? parsed.config : null;
     };
@@ -402,7 +405,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       else screen.style.setProperty("--chart-height", `${height}px`);
     };
     const restoreHeight = (): void => showHeight(storedConfig()?.height ??
-      (prepared?.type === "bar" && prepared.projection.status === "ready" ? barDefaultHeight(prepared.projection) : undefined));
+      (prepared?.type === "dot" && prepared.projection.status === "ready" ? dotDefaultHeight(prepared.projection)
+        : prepared?.type === "bar" && prepared.projection.status === "ready" ? barDefaultHeight(prepared.projection) : undefined));
     const resize = blockResize(handle, {
       min: CHART_MIN_HEIGHT, max: CHART_MAX_HEIGHT,
       height: () => storedConfig()?.height ?? (drawnLayout === "panels" ? 150 : screen.getBoundingClientRect().height),
@@ -447,6 +451,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const releaseChart = (): void => {
       scatter.clear();
       bar.clear();
+      dot.clear();
       for (const instance of instances) instance.destroy();
       instances = [];
       drawnLayout = null;
@@ -460,6 +465,29 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const text = (element: HTMLElement, value: string): void => {
       element.textContent = value;
       element.hidden = value === "";
+    };
+    const drawCategories = (view: Extract<ChartView, { type: "bar" | "dot" }>): boolean => {
+      const result = view.projection;
+      if (result.status !== "ready") return false;
+      table.clear();
+      if (drawnLayout !== view.type) { releaseChart(); drawnLayout = view.type; }
+      text(diagnostics, projectionDiagnostics(view));
+      text(title, result.config.title ?? "");
+      text(message, "");
+      text(notice, result.notice ?? "");
+      screen.hidden = false;
+      const dark = document.documentElement.dataset.theme === "dark" ||
+        (document.documentElement.dataset.theme !== "light" && appearance?.matches === true);
+      const colors = getComputedStyle(probe), palette = dark ? DARK : LIGHT;
+      if (view.type === "dot" && view.projection.status === "ready") {
+        if (!resize.isDragging()) showHeight(result.config.height ?? dotDefaultHeight(view.projection));
+        dot.render(view.projection, colors, palette);
+      } else if (view.type === "bar" && view.projection.status === "ready") {
+        if (!resize.isDragging()) showHeight(result.config.height ?? barDefaultHeight(view.projection));
+        bar.render(view.projection, colors, palette);
+      }
+      description.textContent = chartAccessibleDescription(result);
+      return true;
     };
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One pass sets every chrome element for each projection state, so no state keeps another's output.
@@ -490,7 +518,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           dirty = false;
         }
         const result = prepared.projection;
-        notice.classList.toggle("ub-chart-limit-notice", (result.status === "ready" || (prepared.type === "bar" && result.status === "no-records")) &&
+        notice.classList.toggle("ub-chart-limit-notice", (result.status === "ready" || ((prepared.type === "bar" || prepared.type === "dot") && result.status === "no-records")) &&
           "limit" in result.config && result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
@@ -501,23 +529,11 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           description.textContent = "";
           text(title, "");
           text(message, result.message);
-          text(notice, prepared.type === "bar" && "notice" in result ? result.notice ?? "" : "");
+          text(notice, (prepared.type === "bar" || prepared.type === "dot") && "notice" in result ? result.notice ?? "" : "");
           return;
         }
         if ("rows" in result && "series" in result) {
-          table.clear();
-          if (drawnLayout !== "bar") { releaseChart(); drawnLayout = "bar"; }
-          text(diagnostics, barDiagnosticsText(result));
-          text(title, result.config.title ?? "");
-          text(message, "");
-          text(notice, result.notice ?? "");
-          screen.hidden = false;
-          if (!resize.isDragging()) showHeight(result.config.height ?? barDefaultHeight(result));
-          const dark = document.documentElement.dataset.theme === "dark" ||
-            (document.documentElement.dataset.theme !== "light" && appearance?.matches === true);
-          bar.render(result, getComputedStyle(probe), dark ? DARK : LIGHT);
-          description.textContent = chartAccessibleDescription(result);
-          succeeded = true;
+          if (prepared.type === "dot" || prepared.type === "bar") succeeded = drawCategories(prepared);
           return;
         }
         if ("rows" in result) {
@@ -640,6 +656,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       if (event.target === handle) return;
       if (drawnLayout === "scatter" && scatter.selectAt(event)) { event.preventDefault(); return; }
       if (drawnLayout === "bar" && bar.selectAt(event)) { event.preventDefault(); return; }
+      if (drawnLayout === "dot" && dot.selectAt(event)) { event.preventDefault(); return; }
       const chart = coarse?.matches === true ? instances.find(instance => instance.canvas === event.target) : undefined;
       if (chart?.getElementsAtEventForMode(event, "nearest", { axis: "x", intersect: false }, false).some(active =>
         chart.data.datasets[active.datasetIndex]?.data[active.index]?.note)) {
@@ -669,6 +686,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           table.resetSort();
           scatter.reset();
           bar.reset();
+          dot.reset();
         }
         current = updated;
         syncChrome();
@@ -687,6 +705,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         releaseChart();
         scatter.destroy();
         bar.destroy();
+        dot.destroy();
         theme.disconnect();
         appearance?.removeEventListener("change", schedule);
         screen.removeEventListener("mousedown", openDrawing);
