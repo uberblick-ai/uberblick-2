@@ -285,6 +285,11 @@ describe("chart source write summaries", () => {
     const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
     const result = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "chart", text: source }] });
     expect(result.blocks[0].chart).toEqual({ status: "ready", recordCount: 4, plottedCount: 2, warnings: [] });
+    const guided = await insert(rig, created.uuid, {
+      ...scatter, x: { ...scatter.x, reference: [81818181, 81818181] },
+      y: { ...scatter.y, reference: 95 }, diagonal: true,
+    });
+    expect(guided).toEqual(result.blocks[0].chart);
     expect(JSON.stringify(result)).not.toMatch(/42424242|PRIVATE_|private-/);
     expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
 

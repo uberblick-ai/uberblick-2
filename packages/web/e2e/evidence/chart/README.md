@@ -23,6 +23,8 @@ Views whose assertions read series or reference colours run in both:
 | Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
 | Scatter points and stored bounds, desktop | ![Light desktop scatter](scatter-desktop-light.png) | ![Dark desktop scatter](scatter-desktop-dark.png) |
 | Scatter points and selected details, iPad portrait | ![Light iPad scatter](scatter-ipad-light.png) | ![Dark iPad scatter](scatter-ipad-dark.png) |
+| Scatter references and x = y diagonal, desktop | ![Light desktop scatter references](scatter-references-desktop-light.png) | ![Dark desktop scatter references](scatter-references-desktop-dark.png) |
+| Scatter references and x = y diagonal, iPad portrait | ![Light iPad scatter references](scatter-references-ipad-light.png) | ![Dark iPad scatter references](scatter-references-ipad-dark.png) |
 | Category grouped stacks, vertical, desktop | ![Light vertical category bars](category-vertical-desktop-light.png) | ![Dark vertical category bars](category-vertical-desktop-dark.png) |
 | Category grouped stacks, horizontal, desktop | ![Light horizontal category bars](category-horizontal-desktop-light.png) | ![Dark horizontal category bars](category-horizontal-desktop-dark.png) |
 | Category grouped stacks, vertical, iPad | ![Light iPad vertical category bars](category-vertical-ipad-light.png) | ![Dark iPad vertical category bars](category-vertical-ipad-dark.png) |
@@ -101,6 +103,24 @@ that selection did not change the mapping or stored data. Desktop resize and
 the iPad source-mode Height field both save the same chart height. Detail links
 open a separate browser page. Point selection and source inspection also work
 in locked documents.
+
+The scatter reference case records stroke width, dash and paint order as well
+as geometry. Duplicate references draw once, including values beyond the data;
+vertical and horizontal references span the widened plot, and the diagonal
+ends at the overlap of the two independent ranges. Neutral dashed strokes
+paint before the one-pixel whiskers, points and point labels. Native axis
+ticks show each reference's number and unit, remain separate from nearby tick
+ink and clear 4.5:1 contrast in light and dark. Ordinary labels and full-span
+grid lines remain on both sides of references, including the 100 % tick above
+the fixture's 37 % guide. Light-only regressions also cover two references
+within a 0–1 axis, thresholds at 10 and 20 on a 0–100 axis, a reference at 21
+beside the generated 20 tick, and crowded references at 21 and 21.01. They
+verify that collision hiding preserves ordinary grids and distant labels,
+while both crowded guides still paint. Desktop pointer and iPad touch
+on a reference open source without selecting a point; points still select.
+Toggling the diagonal leaves point geometry, ticks and labels unchanged, and
+disjoint ranges draw no diagonal. References leave the legend, text alternative,
+diagnostics and native selector options unchanged.
 
 The browser suite covers source insertion and keyboard/pointer access, canvas
 names/descriptions and appearance changes. The combined chart/table journey in
@@ -194,7 +214,7 @@ appearances:
 
 ```sh
 mise run e2e -- scatter.spec.ts
-python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["scatter-desktop-light", "scatter-desktop-dark", "scatter-ipad-light", "scatter-ipad-dark"]; matches = {name: list(source.rglob("chart-" + name + ".png")) for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["scatter-desktop-light", "scatter-desktop-dark", "scatter-ipad-light", "scatter-ipad-dark", "scatter-references-desktop-light", "scatter-references-desktop-dark", "scatter-references-ipad-light", "scatter-references-ipad-dark"]; matches = {name: list(source.rglob("chart-" + name + ".png")) for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
 ```
 
 The Chromium run attaches cropped blocks named `chart-light.png` and

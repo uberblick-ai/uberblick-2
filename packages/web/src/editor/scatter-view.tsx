@@ -1,6 +1,7 @@
 /** Chart.js owns plotting and hit testing; the native select owns keyboard input. */
 import { Chart, ScatterController } from "chart.js";
-import type { ChartConfiguration, Plugin, PointStyle } from "chart.js";
+import { toFont } from "chart.js/helpers";
+import type { ChartConfiguration, LinearScaleOptions, Plugin, PointStyle, Scale } from "chart.js";
 import type { ScatterAxisMapping, ScatterPoint, ScatterProjection, ScatterReady } from "@uberblick/schema";
 import { createRoot } from "react-dom/client";
 import { Fragment } from "react";
@@ -12,6 +13,63 @@ import { formatChartNumber } from "./chart-data.js";
 
 Chart.register(ScatterController);
 const SHAPES: PointStyle[] = ["circle", "triangle", "rect", "rectRot", "cross", "crossRot", "star", "rectRounded"];
+
+function references(mapping: ScatterAxisMapping): number[] {
+  return [...new Set(Array.isArray(mapping.reference) ? mapping.reference : mapping.reference === undefined ? [] : [mapping.reference])];
+}
+
+function fitReferenceLabels(instance: Chart<"scatter">, result: ScatterReady, colors: CSSStyleDeclaration): void {
+  const font = toFont({ family: colors.fontFamily, size: Number.parseFloat(colors.fontSize), lineHeight: colors.lineHeight });
+  const { ctx } = instance;
+  ctx.save();
+  ctx.font = font.string;
+  for (const axis of ["x", "y"] as const) {
+    const scale = instance.scales[axis], values = references(result.config[axis]);
+    if (scale === undefined || values.length === 0) continue;
+    const occupied: { start: number; end: number }[] = [];
+    // Hide colliding labels only: native tick positions still supply the grid.
+    const prioritized = [...scale.ticks].sort((a, b) => Number(values.includes(b.value)) - Number(values.includes(a.value)));
+    for (const tick of prioritized) {
+      const pixel = scale.getPixelForValue(tick.value);
+      const extent = axis === "x" ? ctx.measureText(String(tick.label)).width : font.lineHeight;
+      const start = pixel - extent / 2, end = pixel + extent / 2;
+      if (occupied.some(other => start < other.end + 4 && end + 4 > other.start)) tick.label = "";
+      else occupied.push({ start, end });
+    }
+  }
+  ctx.restore();
+}
+
+function drawReferences(instance: Chart<"scatter">, result: ScatterReady, color: string): void {
+  const { ctx, scales: { x, y }, chartArea } = instance;
+  if (x === undefined || y === undefined) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+  ctx.clip();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  for (const value of references(result.config.x)) {
+    const pixel = x.getPixelForValue(value);
+    ctx.moveTo(pixel, chartArea.top); ctx.lineTo(pixel, chartArea.bottom);
+  }
+  for (const value of references(result.config.y)) {
+    const pixel = y.getPixelForValue(value);
+    ctx.moveTo(chartArea.left, pixel); ctx.lineTo(chartArea.right, pixel);
+  }
+  if (result.config.diagonal) {
+    // known limit: the diagonal compares raw values across units; revisit when unit-aware diagonals are required.
+    const lower = Math.max(x.min, y.min), upper = Math.min(x.max, y.max);
+    if (lower < upper) {
+      ctx.moveTo(x.getPixelForValue(lower), y.getPixelForValue(lower));
+      ctx.lineTo(x.getPixelForValue(upper), y.getPixelForValue(upper));
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
 
 export function scatterDiagnosticsText(result: ScatterProjection): string {
   if (!("diagnostics" in result)) return "";
@@ -114,8 +172,12 @@ export function scatterView(canvas: HTMLCanvasElement): {
   }
   const decorations: Plugin<"scatter"> = {
     id: "stored-scatter-decorations",
+    afterLayout(instance) {
+      if (result !== null) fitReferenceLabels(instance, result, colors);
+    },
     beforeDatasetsDraw(instance) {
       if (result === null) return;
+      drawReferences(instance, result, colors.color);
       const { ctx, scales } = instance;
       const xScale = scales.x;
       const yScale = scales.y;
@@ -196,16 +258,30 @@ export function scatterView(canvas: HTMLCanvasElement): {
       element.hidden = false;
       canvas.setAttribute("aria-label", next.config.title || `Scatter plot of ${next.config.y.label || next.config.y.field} by ${next.config.x.label || next.config.x.field}`);
       const font = { family: colors.fontFamily, size: Number.parseFloat(colors.fontSize), lineHeight: colors.lineHeight };
-      const scale = (axis: "x" | "y") => ({
-        type: "linear" as const,
-        ...(next.config[axis].range === undefined
-          ? { suggestedMin: next.domain[axis][0], suggestedMax: next.domain[axis][1] }
-          : { min: next.domain[axis][0], max: next.domain[axis][1] }),
-        title: { display: true, text: next.config[axis].label || next.config[axis].field, color: colors.color, font },
-        ticks: { color: colors.color, font, maxTicksLimit: 6,
-          callback: (value: string | number) => `${formatChartNumber(Number(value))}${next.config[axis].unit ? ` ${next.config[axis].unit}` : ""}` },
-        grid: { color: colors.borderTopColor }, border: { display: false },
-      });
+      const scale = (axis: "x" | "y") => {
+        const values = references(next.config[axis]);
+        return {
+          type: "linear" as const,
+          ...(next.config[axis].range === undefined
+            ? { suggestedMin: next.domain[axis][0], suggestedMax: next.domain[axis][1] }
+            : { min: next.domain[axis][0], max: next.domain[axis][1] }),
+          title: { display: true, text: next.config[axis].label || next.config[axis].field, color: colors.color, font },
+          beforeBuildTicks: (scale: Scale) => { (scale.options as LinearScaleOptions).ticks.maxTicksLimit = 6; },
+          afterBuildTicks: (scale: Scale) => {
+            if (values.length === 0) return;
+            for (const value of values) if (!scale.ticks.some(tick => tick.value === value)) scale.ticks.push({ value });
+            scale.ticks.sort((a, b) => a.value - b.value);
+            // Chart.js also uses this limit to thin grid lines after tick generation.
+            (scale.options as LinearScaleOptions).ticks.maxTicksLimit = scale.ticks.length;
+          },
+          // known limit: crowded reference labels may be skipped; revisit when every label must remain visible.
+          ticks: { color: colors.color, font, maxTicksLimit: 6,
+            ...(values.length > 0 ? { autoSkip: false, maxRotation: 0 } : {}),
+            callback: (value: string | number) => `${formatChartNumber(Number(value))}${next.config[axis].unit ? ` ${next.config[axis].unit}` : ""}` },
+          grid: { color: (context: { tick?: { value: number } }) => context.tick !== undefined && values.includes(context.tick.value) ? "transparent" : colors.borderTopColor },
+          border: { display: false },
+        };
+      };
       const configuration: ChartConfiguration<"scatter", ScatterPoint[]> = {
         type: "scatter", plugins: [decorations],
         data: { datasets: [{ data: next.points, showLine: false, pointRadius: 4, pointHitRadius: 8,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScatterConfig, prepareChartView, prepareScatter } from "../src/index.js";
+import { parseBarConfig, parseChartConfig, parseDotConfig, parseScatterConfig, prepareChartView, prepareScatter } from "../src/index.js";
 import type { DataRecord, DataSchema, DocData, JSONObject, JSONValue } from "../src/index.js";
 
 const mapping = {
@@ -37,12 +37,52 @@ describe("scatter mapping", () => {
     expect(parseScatterConfig(source({ details: Array.from({ length: 8 }, () => ({ field: "name" })) })).ok).toBe(true);
   });
 
+  it.each([0, -1.5, Number.MAX_VALUE, Number.MIN_VALUE, [], [0, 0, -2.5], Array.from({ length: 8 }, (_, index) => index)])(
+    "accepts finite scalar or bounded list references %j on either axis", (reference) => {
+      const input = { x: { field: "x", reference }, y: { field: "y", reference } };
+      expect(parseScatterConfig(source(input))).toMatchObject({ ok: true, config: input });
+    },
+  );
+
+  it.each([true, false])("accepts diagonal %j", (diagonal) => {
+    expect(parseScatterConfig(source({ diagonal }))).toMatchObject({ ok: true, config: { diagonal } });
+  });
+
+  it.each([null, "1", true, {}, [null], ["1"], [false], [[1]], [1, "2"], Array.from({ length: 9 }, () => 1)])(
+    "rejects invalid reference %j on either axis", (reference) => {
+      expect(prepareScatter(source({ x: { field: "x", reference } }), null)).toMatchObject({ status: "invalid-configuration" });
+      expect(prepareScatter(source({ y: { field: "y", reference } }), null)).toMatchObject({ status: "invalid-configuration" });
+    },
+  );
+
+  it.each(["1e999", "-1e999", "[0,1e999]", "[0,-1e999]", "NaN", "Infinity"])(
+    "rejects non-finite reference source %s", (reference) => {
+      expect(parseScatterConfig(source().replace('"field":"x"', `"field":"x","reference":${reference}`))).toMatchObject({ ok: false });
+      expect(parseScatterConfig(source().replace('"field":"y"', `"field":"y","reference":${reference}`))).toMatchObject({ ok: false });
+    },
+  );
+
+  it("keeps line, category bar and dot references restricted to a single number", () => {
+    const common = { version: 1, collection: "observations", y: [{ field: "y", reference: 1 }] };
+    const line = { ...common, type: "line", x: { field: "x", type: "number" } };
+    const bar = { ...common, type: "bar", category: { field: "label" } };
+    const dot = { ...bar, type: "dot" };
+    expect(parseChartConfig(JSON.stringify(line)).ok).toBe(true);
+    expect(parseBarConfig(JSON.stringify(bar)).ok).toBe(true);
+    expect(parseDotConfig(JSON.stringify(dot)).ok).toBe(true);
+    const list = { y: [{ field: "y", reference: [1] }] };
+    expect(parseChartConfig(JSON.stringify({ ...line, ...list })).ok).toBe(false);
+    expect(parseBarConfig(JSON.stringify({ ...bar, ...list })).ok).toBe(false);
+    expect(parseDotConfig(JSON.stringify({ ...dot, ...list })).ok).toBe(false);
+  });
+
   it.each([
     { layout: "overlay" }, { limit: 10 }, { missing: "gap" }, { reference: 1 }, { extra: true },
     { group: null }, { label: "" }, { label: null }, { x: { field: "x", type: "number" } },
     { x: { field: "x", lower: "" } }, { y: { field: "y", upper: null } },
     { x: { field: "x", range: [10, 10] } }, { x: { field: "x", range: [20, 10] } },
-    { x: { field: "x", range: [0, "10"] } }, { y: { field: "y", reference: 0 } },
+    { x: { field: "x", range: [0, "10"] } },
+    { diagonal: null }, { diagonal: 0 }, { diagonal: "true" }, { diagonal: [] }, { diagonal: {} },
     { height: 99 }, { height: 601 }, { height: 320.5 }, { height: null },
     { details: null }, { details: Array.from({ length: 9 }, () => ({ field: "name" })) },
     { details: [{ field: "name", format: null }] }, { details: [{ field: "name", format: "text", unit: "kg" }] },
@@ -114,6 +154,35 @@ describe("shared scatter projection", () => {
     expect(projection.points[1]).not.toHaveProperty("yUpper");
     expect(projection.points[2]).not.toHaveProperty("xLower");
     expect(projection.points[2]).not.toHaveProperty("yUpper");
+  });
+
+  it.each([
+    { range: {}, domain: { x: [-30, 40], y: [20, 130] } },
+    { range: { x: [-100, 100], y: [0, 100] }, domain: { x: [-100, 100], y: [0, 130] } },
+  ])("widens each axis for references while preserving minimum spans %j", ({ range, domain }) => {
+    const data = snapshot([record("a", { x: 5, y: 50, lo: -20, hi: 25, bottom: 20, top: 110 })]);
+    const axes = {
+      x: { field: "x", lower: "lo", upper: "hi", ...(range.x === undefined ? {} : { range: range.x }) },
+      y: { field: "y", lower: "bottom", upper: "top", ...(range.y === undefined ? {} : { range: range.y }) },
+    };
+    const plain = prepareScatter(source(axes), data);
+    const decorated = prepareScatter(source({
+      x: { ...axes.x, reference: [-30, 40, -30] }, y: { ...axes.y, reference: 130 },
+    }), data);
+    expect(decorated).toMatchObject({ status: "ready", domain });
+    if (plain.status !== "ready" || decorated.status !== "ready") throw new Error("Expected ready scatters");
+    expect({ ...decorated, config: plain.config, domain: plain.domain }).toEqual(plain);
+  });
+
+  it("leaves axis ranges and the projection unchanged for a diagonal and empty references", () => {
+    const data = snapshot([record("a", { x: 2, y: 100 }), record("b", { x: 4, y: 200 })]);
+    const plain = prepareScatter(source(), data);
+    const diagonal = prepareScatter(source({ diagonal: true }), data);
+    const absent = prepareScatter(source({ diagonal: false, x: { field: "x", reference: [] }, y: { field: "y", reference: [] } }), data);
+    expect(diagonal).toMatchObject({ status: "ready", domain: { x: [2, 4], y: [100, 200] } });
+    if (plain.status !== "ready" || diagonal.status !== "ready" || absent.status !== "ready") throw new Error("Expected ready scatters");
+    expect({ ...diagonal, config: plain.config }).toEqual(plain);
+    expect({ ...absent, config: plain.config }).toEqual(plain);
   });
 
   it("groups stored values consistently, keeps absent and null neutral, and warns above eight groups", () => {

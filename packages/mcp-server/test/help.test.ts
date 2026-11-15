@@ -536,20 +536,39 @@ it("teaches valid scatter mappings and value-free write summaries through data a
   const source = scatter?.match(/```json\n([\s\S]*?)\n```/)?.[1];
   expect(source).toBeDefined();
   expect(parseScatterConfig(source!)).toMatchObject({ ok: true, config: {
-    type: "scatter", label: "name", group: "tier",
-    y: { lower: "quality_low", upper: "quality_high", range: [0, 100] },
+    type: "scatter", label: "name", group: "tier", diagonal: true,
+    x: { reference: [25, 50] },
+    y: { lower: "quality_low", upper: "quality_high", range: [0, 100], reference: 80 },
     details: [{ field: "sample_size", format: "number" }, { field: "source", format: "link" }],
   } });
   const insert = toolNamed("insert_block").details!;
   const insertSource = insert.match(/`(\{"version":1,"type":"scatter"[^`]+)`/)?.[1];
   expect(insertSource).toBeDefined();
-  expect(parseScatterConfig(insertSource!)).toMatchObject({ ok: true });
+  expect(parseScatterConfig(insertSource!)).toMatchObject({ ok: true, config: {
+    x: { reference: [25, 50] }, y: { reference: 80 }, diagonal: true,
+  } });
   for (const text of [scatter, insert]) {
     expect(text).toContain("recordCount");
     expect(text).toContain("plottedCount");
     expect(text).toContain("without record values");
     expect(text).toMatch(/warning nam(?:es|ing) the group field/);
-    expect(text).toContain("layout, limit, missing, reference");
+    expect(text).toContain("layout, limit, missing");
+    expect(text).not.toContain("layout, limit, missing, reference");
+    for (const guidance of [
+      "reference is one finite number or a list of up to 8 finite numbers",
+      "an empty list draws nothing",
+      "non-number or non-finite entries and lists longer than 8 are invalid",
+      "Each distinct reference draws one neutral dashed line",
+      "vertical for x, horizontal for y",
+      "tick number format and unit",
+      "References widen their own axis with or without range",
+      "Line, category-bar and dot series still accept only one finite reference number",
+      "diagonal is true or false; false behaves like an absent key",
+      "x = y through the plotted area wherever the axis ranges overlap",
+      "without changing either range",
+      "no legend entry or selection target",
+      "point labels, the text alternative, diagnostics or mapping-write summaries",
+    ]) expect(text, guidance).toContain(guidance);
     expect(text).toContain("record-id order");
   }
 });
