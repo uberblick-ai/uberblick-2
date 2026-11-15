@@ -14,11 +14,22 @@ const tagAuthority =
   "no extra rights. Check `applied`, `synced` and `hub`: local application is not hub acknowledgement, and " +
   "a refused change is never reported as `synced: true`.";
 
+const categoryGroupGuidance =
+  "Optional group is a non-empty field name. With exactly one series, up to 8 distinct group values among the shown categories " +
+  "get palette colours in both themes and a group legend instead of the series legend, with data-table text-cell formatting. " +
+  "Colours depend only on the shown values, " +
+  "never sort or record order. Absent or null groups use a neutral style without a legend entry. With more than 8 group values, " +
+  "the chart draws as if no group were mapped; a diagnostic and write-summary warning name the group field. " +
+  "Several series keep per-series colours and legend entries. Whenever group is mapped, tooltip and keyboard category details show " +
+  "its value like a data-table text cell, alongside the category and series values; absent or null groups add nothing. " +
+  "When groups supply colours, the text alternative names the group field and groups in legend order; the accessible name stays unchanged. ";
+
 const categoryBarGuidance =
   "For named categories use type bar, for example " +
   "`{\"version\":1,\"type\":\"bar\",\"collection\":\"tickets\",\"category\":{\"field\":\"team\",\"label\":\"Team\"}," +
   "\"y\":[{\"field\":\"open\",\"stack\":\"tickets\"},{\"field\":\"closed\",\"stack\":\"tickets\"}],\"orientation\":\"horizontal\"}`. " +
   "category takes field and optional label; y has one to eight numeric series with field and optional label, unit, stack, range and reference. " +
+  categoryGroupGuidance +
   "Series sharing a stack name stack; different or absent stack names sit side by side. Bars start at zero, with negative values stacking separately. " +
   "orientation is vertical by default or horizontal. Optional sort names the category field (text order) or a series field (numeric order), " +
   "with direction asc or desc; absent, null and invalid values follow valid values in either direction, and ties keep record-id order. " +
@@ -42,6 +53,7 @@ const dotGuidance =
   "\"connect\":true,\"note\":\"change\",\"sort\":{\"field\":\"wer_today\",\"direction\":\"asc\"}}`. " +
   "A dot mapping takes version 1, type dot, collection, category with field and optional label, and one or two numeric y series " +
   "with field and optional label, unit, range and reference. Optional connect is boolean; connect: true needs exactly two series. " +
+  categoryGroupGuidance +
   "Optional note names one top-level field per row; strings appear verbatim, other non-null values as compact JSON, never markup, " +
   "and absent or null notes add nothing. Rows run down the side and values across. One series is filled; with two, the first is hollow " +
   "and the second filled, including the legend. connect joins only pairs with both values. The value axis spans plotted values, ranges " +

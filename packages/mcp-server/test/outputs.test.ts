@@ -62,7 +62,9 @@ describe("successful MCP output contracts", () => {
     const payload = {
       uuid: randomUUID(), applied: true, synced: false, hub,
       blocks: [{ id: "chart", rev: "read-rev", chart: {
-        status: "ready", recordCount: 4, plottedCount: 2, warnings: ["No numeric values for series field “empty”."],
+        status: "ready", recordCount: 4, plottedCount: 2, warnings: [
+          "No numeric values for series field “empty”.", "Bar group field “tier” has more than 8 values; colours stay per series.",
+        ],
       } }],
     };
     expect(outputSchemas.insert_block.safeParse(payload).success).toBe(true);
@@ -72,6 +74,7 @@ describe("successful MCP output contracts", () => {
     } }] };
     expect(outputSchemas.insert_block.safeParse(empty).success).toBe(true);
     for (const extra of [{ rows: [{ label: "PRIVATE_LABEL", values: [42] }] }, { category: "PRIVATE_LABEL" },
+      { group: "PRIVATE_GROUP" }, { groups: [{ key: "PRIVATE_GROUP", value: "PRIVATE_GROUP" }] },
       { note: "PRIVATE_NOTE_TEXT" }, { plottedCount: -1 }]) {
       expect(outputSchemas.insert_block.safeParse({ ...payload,
         blocks: [{ ...payload.blocks[0], chart: { ...payload.blocks[0]!.chart, ...extra } }],

@@ -187,7 +187,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
   ]);
 }
 const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict();
-const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line, category-bar or dot y field without numeric values in the shown records, or a scatter group field with more than eight values; never a refusal or rollback. No record values or note text are returned.");
+const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line, category-bar or dot y field without numeric values in the shown records, or a scatter, category-bar or dot group field with more than eight shown values; group warnings name the field. Never a refusal or rollback. No record values or note text are returned.");
 const chartSeries = z.array(z.object({
   field: z.string().describe("Literal y field from the mapping, in mapping order."),
   pointCount: count.describe("Plotted numeric y values; null gaps are not points."),

@@ -2,6 +2,7 @@
 import { CHART_MAX_HEIGHT, CHART_MIN_HEIGHT } from "./chart-data.js";
 import { projectCategory } from "./category-data.js";
 import type { CategoryDiagnostics, CategoryRow, CategorySeries } from "./category-data.js";
+import type { ChartGroup } from "./chart-groups.js";
 import type { DocData } from "./data.js";
 import { keys, name, numeric, object, optionalText } from "./view-data.js";
 
@@ -18,6 +19,7 @@ export interface DotConfig {
   collection: string;
   category: { field: string; label?: string };
   y: DotSeriesMapping[];
+  group?: string;
   connect?: boolean;
   note?: string;
   sort?: { field: string; direction: "asc" | "desc" };
@@ -33,6 +35,7 @@ export interface DotReady {
   config: DotConfig;
   rows: DotRow[];
   series: DotSeries[];
+  groups: ChartGroup[];
   domain: [number, number];
   /** Divide stored values by this optional magnitude for finite drawing coordinates. */
   coordinateDivisor?: number;
@@ -59,7 +62,7 @@ export function parseDotConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid dot configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "category", "y", "connect", "note", "sort", "limit", "title", "height"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "category", "y", "group", "connect", "note", "sort", "limit", "title", "height"]) ||
       value.version !== 1 || value.type !== "dot" || !name(value.collection) ||
       !object(value.category) || !keys(value.category, ["field", "label"]) ||
       !name(value.category.field) || !optionalText(value.category, "label") ||
@@ -70,7 +73,8 @@ export function parseDotConfig(source: string):
           numeric(series.range[0]) && numeric(series.range[1]) && series.range[0] < series.range[1])) &&
         (!Object.hasOwn(series, "reference") || numeric(series.reference))) ||
       (Object.hasOwn(value, "connect") && (typeof value.connect !== "boolean" || (value.connect && value.y.length !== 2))) ||
-      (Object.hasOwn(value, "note") && !name(value.note)) || !optionalText(value, "title") ||
+      (Object.hasOwn(value, "note") && !name(value.note)) ||
+      (Object.hasOwn(value, "group") && !name(value.group)) || !optionalText(value, "title") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "height") && (typeof value.height !== "number" || !Number.isInteger(value.height) ||
         value.height < CHART_MIN_HEIGHT || value.height > CHART_MAX_HEIGHT)) ||

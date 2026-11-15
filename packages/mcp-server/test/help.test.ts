@@ -73,6 +73,25 @@ it("teaches a valid dot mapping, its row note and private summary on every chart
   }
 });
 
+it("teaches group colours and overflow separately for bars and dots on every chart-writing help surface", async () => {
+  const rig = await local();
+  for (const topic of ["data", "create_doc", "insert_block", "edit_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    const barHelp = topic === "data" ? text.split("### Category bar charts\n")[1]?.split("### Dot plots\n")[0]
+      : text.split("For named categories use type bar")[1]?.split("For named categories whose values")[0];
+    const dotHelp = topic === "data" ? text.split("### Dot plots\n")[1]?.split("### Scatter plots\n")[0]
+      : text.split("For named categories whose values sit far from zero use type dot")[1];
+    for (const [type, section] of [["bar", barHelp], ["dot", dotHelp]]) {
+      for (const guidance of ["Optional group is a non-empty field name", "With exactly one series", "up to 8 distinct group values",
+        "both themes", "group legend instead of the series legend", "never sort or record order", "Absent or null groups use a neutral style",
+        "more than 8 group values", "as if no group were mapped", "diagnostic and write-summary warning name the group field",
+        "data-table text cell", "text alternative names the group field", "accessible name stays unchanged"]) {
+        expect(section, `${topic}: ${type}: ${guidance}`).toContain(guidance);
+      }
+    }
+  }
+});
+
 it("lists every concept and registered tool once, with the same Markdown through both read routes", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();

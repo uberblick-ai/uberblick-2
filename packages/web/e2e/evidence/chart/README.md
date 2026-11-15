@@ -29,6 +29,10 @@ Views whose assertions read series or reference colours run in both:
 | Category grouped stacks, horizontal, iPad | ![Light iPad horizontal category bars](category-horizontal-ipad-light.png) | ![Dark iPad horizontal category bars](category-horizontal-ipad-dark.png) |
 | Dot pairs, values and stored notes, desktop | ![Light desktop dots](dot-desktop-light.png) | ![Dark desktop dots](dot-desktop-dark.png) |
 | Dot pairs, values and stored notes, iPad portrait | ![Light iPad dots](dot-ipad-light.png) | ![Dark iPad dots](dot-ipad-dark.png) |
+| Single-series categories by group, bars, desktop | ![Light grouped desktop bars](category-group-bar-desktop-light.png) | ![Dark grouped desktop bars](category-group-bar-desktop-dark.png) |
+| Single-series categories by group, bars, iPad | ![Light grouped iPad bars](category-group-bar-ipad-light.png) | ![Dark grouped iPad bars](category-group-bar-ipad-dark.png) |
+| Single-series categories by group, dots, desktop | ![Light grouped desktop dots](category-group-dot-desktop-light.png) | ![Dark grouped desktop dots](category-group-dot-desktop-dark.png) |
+| Single-series categories by group, dots, iPad | ![Light grouped iPad dots](category-group-dot-ipad-light.png) | ![Dark grouped iPad dots](category-group-dot-ipad-dark.png) |
 | Point notes, overlay, desktop | ![Light desktop point notes](notes-overlay-desktop-light.png) | ![Dark desktop point notes](notes-overlay-desktop-dark.png) |
 | Point notes, panels, desktop | ![Light desktop note panels](notes-panels-desktop-light.png) | ![Dark desktop note panels](notes-panels-desktop-dark.png) |
 | Point notes, overlay, iPad | ![Light iPad point notes](notes-overlay-ipad-light.png) | ![Dark iPad point notes](notes-overlay-ipad-dark.png) |
@@ -65,6 +69,22 @@ Regenerate dot evidence with `mise run e2e -- chart.spec.ts --grep 'dot '
 --project=chromium --project=webkit-ipad`. Attachments named
 `chart-dot-{desktop,ipad}-{light,dark}.png` become the correspondingly named
 files above without the `chart-` prefix.
+
+The category group cases observe actual bar fills and filled dot arcs for two
+named groups and two neutral categories whose group is absent or null. The
+native legend and text alternative name the same groups in palette order.
+Desktop hover and iPad tap expose the group with the category and series value;
+native keyboard selection also reaches group details and omits absent/null
+groups. The same selected details persist through the appearance change.
+A live update to eight long group names at 320 pixels checks that the wrapped
+legend remains inside the canvas, below every retained category label, and all
+eight colours remain distinct. Bar tooltips wrap long group text without losing
+the field or value, and every painted line stays inside the narrow canvas.
+
+Regenerate group evidence with `mise run e2e -- chart.spec.ts --grep 'category
+group colours' --project=chromium --project=webkit-ipad`. Attachments named
+`chart-category-group-{bar,dot}-{desktop,ipad}-{light,dark}.png` become the
+correspondingly named files above without the `chart-` prefix.
 
 `scatter.spec.ts` uses synthetic observations with three named groups and an
 ungrouped record sharing another record's coordinates. Native canvas strokes

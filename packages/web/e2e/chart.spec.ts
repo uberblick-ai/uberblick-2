@@ -135,6 +135,15 @@ const DOT_RECORDS = [
   { id: "d", value: { name: "Equal", old: 12, today: 12 } },
 ];
 
+const GROUPED_CATEGORY_RECORDS = [
+  { id: "a", value: { name: "Whisper large-v3", today: 9.9, tier: "Open model" } },
+  { id: "b", value: { name: "Scribe v3", today: 6, tier: "Paid API" } },
+  { id: "c", value: { name: "Whisper turbo", today: 10, tier: "Open model" } },
+  { id: "d", value: { name: "Unclassified", today: 14.1 } },
+  { id: "e", value: { name: "Unknown tier", today: 12, tier: null } },
+  { id: "f", value: { name: "Scribe v2", today: 12.3, tier: "Paid API" } },
+];
+
 async function categoryRecords(session: McpSession, uuid: string, records: unknown[] = CATEGORY_RECORDS): Promise<void> {
   await session.call("update_data", { uuid, operations: [{ collection: "teams",
     schema: { version: 1, schema: { type: "object" } }, replaceRecords: records,
@@ -450,6 +459,170 @@ async function dotLineInk(page: Page, from: { x: number; y: number }, to: { x: n
     }
     return coverage;
   }, { from, to });
+}
+
+async function categoryGroupMarks(page: Page, type: "bar" | "dot", labels: string[]): Promise<PaintedPoint[]> {
+  const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+  const categories = probe.ink.filter(entry => labels.includes(entry.text));
+  const first = Math.min(...categories.map(entry => entry.top)) - 4;
+  const last = Math.max(...categories.map(entry => entry.bottom)) + 4;
+  if (type === "bar") return (await barGeometry(page)).filter(bar => (bar.top + bar.bottom) / 2 >= first
+    && (bar.top + bar.bottom) / 2 <= last).sort((a, b) => a.top - b.top).map(bar => ({
+    canvas: bar.canvas, x: (bar.left + bar.right) / 2, y: (bar.top + bar.bottom) / 2,
+    radius: 0, color: bar.color, stroke: bar.color,
+  }));
+  return probe.points.filter(point => point.y >= first && point.y <= last).sort((a, b) => a.y - b.y);
+}
+
+for (const type of ["bar", "dot"] as const) {
+  test(`category group colours identify single-series ${type} records through native input`, { tag: "@webkit" }, async ({ browser }, info) => {
+    const session = writer();
+    const mapping = { version: 1, type, collection: "teams", title: "Word error rate by system", group: "tier",
+      category: { field: "name", label: "System" }, y: [{ field: "today", label: "Word error rate", unit: "%" }],
+      ...(type === "bar" ? { orientation: "horizontal" } : {}),
+    };
+    const uuid = await chartDoc(session, `Grouped category ${type}`, mapping);
+    await categoryRecords(session, uuid, GROUPED_CATEGORY_RECORDS);
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: async page => { await installProbe(page, uuid); await installBarProbe(page); },
+      contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false }),
+        locale: "en-US", colorScheme: "light" },
+    });
+    await waitForDocumentDraw(page, session, uuid);
+    const image = page.getByRole("img", { name: mapping.title, exact: true });
+    const selector = page.getByRole("combobox", { name: "Select category", exact: true });
+    const details = page.locator(`.ub-${type}-details`);
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAccessibleDescription(/Groups by tier: Open model; Paid API\./);
+    const labels = GROUPED_CATEGORY_RECORDS.map(record => record.value.name);
+    let lightColours: string[] = [];
+    for (const appearance of ["light", "dark"] as const) {
+      if (appearance === "dark") {
+        if (touch) await editor(page).locator(":scope > p").first().tap();
+        await page.emulateMedia({ colorScheme: appearance });
+        await expect.poll(async () => (await categoryGroupMarks(page, type, labels)).map(mark => mark.color))
+          .not.toEqual(lightColours);
+      }
+      const marks = await categoryGroupMarks(page, type, labels);
+      expect(marks).toHaveLength(6);
+      expect(marks[0]?.color).toBe(marks[2]?.color);
+      expect(marks[1]?.color).toBe(marks[5]?.color);
+      expect(marks[3]?.color).toBe(marks[4]?.color);
+      expect(new Set(marks.map(mark => mark.color)).size).toBe(3);
+      expect(marks.every(mark => mark.color === mark.stroke && !/(?:transparent|, 0\))/.test(mark.color))).toBe(true);
+      if (appearance === "light") lightColours = marks.map(mark => mark.color);
+      const neutral = await page.locator(".ub-chart-probe").evaluate(element => {
+        const context = document.createElement("canvas").getContext("2d");
+        if (context === null) throw new Error("e2e: category group colour context absent");
+        context.fillStyle = getComputedStyle(element).color;
+        return String(context.fillStyle);
+      });
+      expect(srgb(marks[3]?.color ?? "")).toEqual(srgb(neutral));
+      const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+      const legend = probe.ink.filter(entry => entry.text === "Open model" || entry.text === "Paid API")
+        .sort((a, b) => a.y - b.y || a.x - b.x);
+      expect(legend.map(entry => entry.text)).toEqual(["Open model", "Paid API"]);
+      expect(Math.min(...legend.map(entry => entry.top))).toBeGreaterThan(Math.max(...marks.map(mark => mark.y)));
+      const rectangles = await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.bars);
+      for (const [index, label] of legend.entries()) {
+        const marker = type === "bar"
+          ? rectangles.filter(rectangle => rectangle.right - rectangle.left <= 16 && rectangle.bottom - rectangle.top <= 16
+            && rectangle.right <= label.left && (rectangle.top + rectangle.bottom) / 2 >= label.top - 2
+            && (rectangle.top + rectangle.bottom) / 2 <= label.bottom + 2).sort((a, b) => b.right - a.right)[0]
+          : probe.points.filter(point => point.x < label.left && point.y >= label.top - 2 && point.y <= label.bottom + 2)
+            .sort((a, b) => b.x - a.x)[0];
+        expect(marker?.color).toBe(marks[index]?.color);
+      }
+      await expectPaintedTextColour(page, /^(Open model|Paid API)$/);
+      if (appearance === "light") {
+        const box = await image.boundingBox(), paid = marks[1];
+        if (box === null || paid === undefined) throw new Error("e2e: grouped category target absent");
+        if (touch) await page.touchscreen.tap(box.x + paid.x, box.y + paid.y);
+        else await page.mouse.move(box.x + paid.x, box.y + paid.y);
+        await expect(selector).toHaveValue("b");
+        await expect(details.locator("dt")).toHaveText(["System", "tier", "Word error rate"]);
+        await expect(details.locator("dd")).toHaveText(["Scribe v3", "Paid API", "6 %"]);
+        await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts))
+          .toContain("tier: Paid API");
+        await expect(page.locator(".ub-chart-source")).toBeHidden();
+        if (!touch) {
+          await selector.focus();
+          await page.keyboard.press("Home");
+          await page.keyboard.press("ArrowDown");
+          await page.keyboard.press("Enter");
+          await expect(details.locator("dd")).toHaveText(["Whisper large-v3", "Open model", "9.9 %"]);
+          await page.keyboard.press("End");
+          await page.keyboard.press("ArrowUp");
+          await page.keyboard.press("Enter");
+          await expect(details.locator("dt")).toHaveText(["System", "Word error rate"]);
+          await expect(details).toContainText("Unknown tier");
+          await page.keyboard.press("ArrowUp");
+          await page.keyboard.press("Enter");
+          await expect(details.locator("dt")).toHaveText(["System", "Word error rate"]);
+          await expect(details).toContainText("Unclassified");
+          await page.keyboard.press("Home");
+          await page.keyboard.press("ArrowDown");
+          await page.keyboard.press("ArrowDown");
+          await page.keyboard.press("Enter");
+          await expect(selector).toHaveValue("b");
+          await page.keyboard.press("Tab");
+          await expect(selector).not.toBeFocused();
+          await page.mouse.move(box.x - 8, box.y);
+        }
+      }
+      await expect(details.locator("dd")).toHaveText(["Scribe v3", "Paid API", "6 %"]);
+      await canvasEvidence(page.locator(".ub-chart"), info, `chart-category-group-${type}-${touch ? "ipad" : "desktop"}-${appearance}`);
+    }
+    const narrowRecords = Array.from({ length: 8 }, (_, index) => ({ id: String(index), value: {
+      name: `System ${index}`, today: 10 + index, tier: `Group ${index} with a descriptive name`,
+    } }));
+    await categoryRecords(session, uuid, narrowRecords);
+    await waitForDocumentDraw(page, session, uuid);
+    await page.addStyleTag({ content: ".ub-chart { width: 320px; }" });
+    await expect.poll(() => image.evaluate(element => (element as HTMLCanvasElement).width / window.devicePixelRatio))
+      .toBeLessThanOrEqual(320);
+    await expect.poll(async () => {
+      const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+      return ink.filter(entry => /^System \d$/.test(entry.text)).map(entry => entry.text);
+    }).toEqual(narrowRecords.map(record => record.value.name));
+    const narrow = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+    const groupLegend = narrow.ink.filter(entry => /^Group \d with a descriptive name$/.test(entry.text));
+    expect(groupLegend.map(entry => entry.text)).toEqual(narrowRecords.map(record => record.value.tier));
+    const box = await image.boundingBox();
+    if (box === null) throw new Error("e2e: narrow grouped category absent");
+    expect(groupLegend.every(entry => entry.left >= 0 && entry.right <= box.width + 1 && entry.bottom <= box.height)).toBe(true);
+    expect(Math.min(...groupLegend.map(entry => entry.top))).toBeGreaterThan(
+      Math.max(...narrow.ink.filter(entry => /^System \d$/.test(entry.text)).map(entry => entry.bottom)));
+    const marks = await categoryGroupMarks(page, type, narrowRecords.map(record => record.value.name));
+    expect(marks).toHaveLength(8);
+    expect(new Set(marks.map(mark => mark.color)).size).toBe(8);
+    if (type === "bar") {
+      const field = "The complete classification retained for each system in the comparison";
+      await categoryRecords(session, uuid, narrowRecords.map(record => ({ ...record,
+        value: { ...record.value, [field]: record.value.tier },
+      })));
+      await editMapping(session, uuid, JSON.stringify({ ...mapping, group: field }));
+      await waitForDocumentDraw(page, session, uuid);
+      await expect.poll(() => image.evaluate(element => (element as HTMLCanvasElement).width / window.devicePixelRatio))
+        .toBeLessThanOrEqual(320);
+      const target = (await categoryGroupMarks(page, type, narrowRecords.map(record => record.value.name)))[0];
+      const bounds = await image.boundingBox();
+      if (bounds === null || target === undefined) throw new Error("e2e: long group tooltip target absent");
+      if (touch) await page.touchscreen.tap(bounds.x + target.x, bounds.y + target.y);
+      else await page.mouse.move(bounds.x + target.x, bounds.y + target.y);
+      const groupLines = async (): Promise<PaintedText[]> => page.evaluate(() => {
+        const ink = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink;
+        return ink.slice(ink.findLastIndex(entry => entry.text === "System 0") + 1)
+          .filter(entry => entry.text !== "Word error rate: 10 %");
+      });
+      await expect.poll(async () => (await groupLines()).map(entry => entry.text).join(""))
+        .toBe(`${field}: ${narrowRecords[0]?.value.tier}`);
+      await expect.poll(async () => (await groupLines()).length).toBeGreaterThan(1);
+      const lines = await groupLines();
+      expect(lines.every(entry => entry.left >= 0 && entry.right <= bounds.width + 1)).toBe(true);
+    }
+  });
 }
 
 for (const orientation of ["vertical", "horizontal"] as const) {

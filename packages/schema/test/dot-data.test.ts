@@ -27,6 +27,9 @@ describe("dot mapping", () => {
     };
     expect(parseDotConfig(source(options))).toEqual({ ok: true, config: { ...mapping, ...options } });
     for (const note of ["event.note", "__proto__", "↻"]) expect(parseDotConfig(source({ note })).ok).toBe(true);
+    for (const group of ["kind", "event.kind", "__proto__", "↻"]) {
+      expect(parseDotConfig(source({ group }))).toMatchObject({ ok: true, config: { group } });
+    }
   });
 
   it.each([
@@ -41,6 +44,7 @@ describe("dot mapping", () => {
     { y: [{ field: "old", range: [0, "4"] }] }, { y: [{ field: "old", reference: "5" }] },
     { y: [{ field: "old", unit: 4 }] }, { y: [{ field: "old", label: null }] },
     { note: "" }, { note: null }, { note: false }, { note: 1 }, { note: "\ud800" },
+    { group: "" }, { group: null }, { group: false }, { group: 1 }, { group: [] }, { group: {} }, { group: "\ud800" },
     { limit: 0 }, { limit: 1.5 }, { height: 99 }, { height: 601 }, { height: 101.5 },
     { sort: { field: "change", direction: "asc" } }, { sort: { field: "name", direction: "up" } },
     { sort: { field: "name", direction: "asc", format: "number" } },
@@ -50,6 +54,37 @@ describe("dot mapping", () => {
 });
 
 describe("shared dot projection", () => {
+  it("shares grouped rows, group order and overflow with bars while retaining two-series notes", () => {
+    const data = snapshot([
+      record("a", { name: "A", old: 2, new: 4, kind: "Paid API", change: "+2" }),
+      record("b", { name: "B", old: 3, new: 5, kind: "Open model", change: "+2" }),
+      record("c", { name: "C", old: 4, new: 6, kind: null }),
+    ]);
+    const options = { group: "kind", y: [{ field: "old" }, { field: "new" }] };
+    const dot = prepareDot(source(options), data);
+    const bar = prepareBar(source({ ...options, type: "bar" }), data);
+    if (dot.status !== "ready" || bar.status !== "ready") throw new Error("Expected grouped category projections");
+    expect({ ...dot, config: bar.config, domain: bar.domain }).toEqual(bar);
+    expect(dot.groups.map(group => group.value)).toEqual(["Open model", "Paid API"]);
+    expect(prepareDot(source({ ...options, connect: true, note: "change" }), data)).toMatchObject({
+      status: "ready", rows: [{ groupValue: "Paid API", note: "+2" }, { groupValue: "Open model", note: "+2" }, { id: "c" }],
+    });
+    const overflow = snapshot(Array.from({ length: 9 }, (_, index) => record(String(index), { name: index, old: index, kind: index })));
+    expect(prepareDot(source({ group: "kind" }), overflow)).toMatchObject({
+      status: "ready", groups: [], diagnostics: { groupOverflow: true },
+      warnings: ["Dot group field “kind” has more than 8 values; colours stay per series."],
+    });
+    const schema: DataSchema = {
+      type: "object", additionalProperties: false,
+      properties: { name: { type: "string" }, old: { type: "number" }, kind: { type: "boolean" } },
+    };
+    expect(prepareDot(source({ group: "missing" }), snapshot([], schema))).toMatchObject({
+      status: "mapping-incompatible", message: expect.stringContaining("field “missing”"),
+    });
+    expect(prepareDot(source({ group: "kind" }), snapshot([record("a", { name: "A", old: 2, kind: false })], schema)))
+      .toMatchObject({ status: "ready", groups: [{ key: "false", value: false }] });
+  });
+
   it("preserves separate equal categories, stored values and text-cell notes without mutation", () => {
     const data = snapshot([
       record("f", { name: "Same", old: 9.9, new: 12.5, change: "<b>+2.6</b>\nfull note" }),

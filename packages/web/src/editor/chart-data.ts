@@ -47,8 +47,18 @@ export function chartAccessibleName(config: ChartConfig | BarConfig | DotConfig)
   const kind = bars === config.y.length ? "Bar" : bars > 0 ? "Line and bar" : "Line";
   return config.title || `${kind} chart of ${config.y.map((series) => series.label || series.field).join(", ")} by ${config.x.label || config.x.field}`;
 }
+export function categoryGroupColors(chart: BarReady | DotReady): boolean {
+  return chart.config.group !== undefined && chart.series.length === 1 && !chart.diagnostics.groupOverflow;
+}
+export function chartGroupText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+export function categoryGroupValue(chart: BarReady | DotReady, row: BarReady["rows"][number]): { label: string; value: string }[] {
+  return chart.config.group === undefined || row.groupValue === undefined ? []
+    : [{ label: chart.config.group, value: chartGroupText(row.groupValue) }];
+}
 export function chartAccessibleDescription(chart: ChartReady | BarReady | DotReady, locale?: string): string {
-  if ("rows" in chart) return `${chart.plottedCount} plotted ${chart.plottedCount === 1 ? "record" : "records"} in ${chart.rows.length} categories. Select a category to read its full label and numeric series values${chart.config.type === "dot" && chart.config.note !== undefined ? " and note" : ""}.`;
+  if ("rows" in chart) return `${chart.plottedCount} plotted ${chart.plottedCount === 1 ? "record" : "records"} in ${chart.rows.length} categories. Select a category to read its full label and numeric series values${chart.config.type === "dot" && chart.config.note !== undefined ? " and note" : ""}.${categoryGroupColors(chart) ? ` Groups by ${chart.config.group}: ${chart.groups.map(group => chartGroupText(group.value)).join("; ")}.` : ""}`;
   const latest = chart.series.map((series) => {
     const point = series.points.findLast((candidate) => candidate.y !== null);
     return `${series.label}: ${point?.y !== undefined && point.y !== null ? `${formatChartNumber(point.y, locale)}${series.unit ? ` ${series.unit}` : ""}` : "no plotted value"}`;
