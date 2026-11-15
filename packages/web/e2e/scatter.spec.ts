@@ -445,7 +445,7 @@ test("scatter references and diagonal paint beneath observations without becomin
             : Math.abs(line.from.y - pixelY(value)) < 0.001 && near(line.from, { x: pixelX(0), y: pixelY(value) }) && near(line.to, { x: pixelX(1), y: pixelY(value) })),
           `${example.axis} reference at ${value}`).toHaveLength(1);
         }
-        expect(drawing.texts.map(entry => entry.text)).toEqual(expect.arrayContaining(example.labels));
+        expect(drawing.texts.map(entry => entry.text)).toEqual(expect.arrayContaining([...example.labels]));
         if (example.axis === "y" && referenceValues.includes(21)) {
           expect(drawing.texts.map(entry => entry.text)).not.toContain("20 %");
           expect(drawing.texts.filter(entry => entry.text === "21 %" || entry.text === "21.01 %")).toHaveLength(1);
