@@ -1,6 +1,7 @@
 /** Scatter points retain record identity and only show stored numeric values. */
 import { CHART_MAX_HEIGHT, CHART_MIN_HEIGHT, CHART_RECORD_LIMIT } from "./chart-data.js";
-import { canonicalJson, compareCodePoints } from "./data-schema.js";
+import { chartGroups } from "./chart-groups.js";
+import { compareCodePoints } from "./data-schema.js";
 import type { JSONValue } from "./data-schema.js";
 import type { DataRecord, DocData } from "./data.js";
 import { tableColumn } from "./table-data.js";
@@ -174,7 +175,6 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
   }
   eligible.sort((a, b) => compareCodePoints(a.id, b.id));
   const points = eligible.slice(0, CHART_RECORD_LIMIT);
-  const groupValues = new Map<string, JSONValue>();
   for (const point of points) {
     const { record, x, y } = point;
     const xLower = bound(record, config.x, "lower", x, diagnostics.axes.x);
@@ -185,18 +185,13 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
     if (xUpper !== undefined) point.xUpper = xUpper;
     if (yLower !== undefined) point.yLower = yLower;
     if (yUpper !== undefined) point.yUpper = yUpper;
-    const groupValue = config.group === undefined ? undefined : own(record.value, config.group);
-    if (groupValue !== undefined && groupValue !== null) {
-      point.groupKey = canonicalJson(groupValue);
-      groupValues.set(point.groupKey, groupValue as JSONValue);
-    }
   }
   diagnostics.limited = eligible.length - points.length;
-  diagnostics.groupOverflow = groupValues.size > 8;
+  const { groups, groupOverflow } = chartGroups(points, (point) =>
+    config.group === undefined ? undefined : own(point.record.value, config.group));
+  diagnostics.groupOverflow = groupOverflow;
   const warnings = diagnostics.groupOverflow
     ? [`Scatter group field “${config.group}” has more than 8 values; all points use a neutral style.`] : [];
-  const groups = diagnostics.groupOverflow ? [] : [...groupValues.entries()]
-    .sort(([a], [b]) => compareCodePoints(a, b)).map(([key, value]) => ({ key, value }));
   const common = {
     config, points, groups, recordCount: collection.records.length, eligibleCount: eligible.length,
     plottedCount: points.length, notPlotted: collection.records.length - points.length, diagnostics, warnings,

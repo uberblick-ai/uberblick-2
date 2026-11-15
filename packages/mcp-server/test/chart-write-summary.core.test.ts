@@ -395,6 +395,42 @@ describe("chart source write summaries", () => {
     expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
   });
 
+  it.each([bar, dot])("summarizes grouped $type writes and warns on shown-group overflow without disclosing values", async (mapping) => {
+    const rig = await local();
+    const limited = { ...mapping, group: "tier", limit: 8 };
+    const source = JSON.stringify(limited);
+    const created = await rig.ok("create_doc", {
+      title: "Grouped category feedback", description: "Group values remain private to the document.",
+      blocks: [{ type: "chart", text: source }],
+    });
+    expect(created.blocks[0].chart).toEqual({
+      status: "collection-absent", message: "Chart collection “observations” is absent.",
+      collections: [], warnings: [expect.any(String)],
+    });
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: { type: "object" } },
+      upsert: Array.from({ length: 9 }, (_, index) => ({ id: `private-${index}`,
+        value: { team: `PRIVATE_LABEL_${index}`, count: 42424242, tier: { name: `PRIVATE_GROUP_${index}` } } })),
+    }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, blocks: [{ type: "chart", text: source }] });
+    expect(inserted.blocks[0].chart).toEqual({ status: "ready", recordCount: 9, plottedCount: 8, warnings: [] });
+    const edited = await rig.ok("edit_block", {
+      uuid: created.uuid, block_id: inserted.blocks[0].id, rev: inserted.blocks[0].rev,
+      old_text: source, new_text: JSON.stringify({ ...limited, limit: 9 }),
+    });
+    expect(edited.block.chart).toEqual({
+      status: "ready", recordCount: 9, plottedCount: 9, warnings: [expect.stringContaining("tier")],
+    });
+    const severalSeries = await insert(rig, created.uuid, { ...mapping, group: "tier", y: [{ field: "count" }, { field: "count" }] });
+    expect(severalSeries).toEqual({
+      status: "ready", recordCount: 9, plottedCount: 9, warnings: [expect.stringContaining("tier")],
+    });
+    expect(JSON.stringify({ inserted, edited, severalSeries })).not.toMatch(/42424242|PRIVATE_|private-/);
+    expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
+  });
+
   it("reports bound empty line, scatter, bar, dot and table collections with counts", async () => {
     const rig = await local();
     const { uuid } = await create(rig);

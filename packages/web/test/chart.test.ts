@@ -278,6 +278,32 @@ describe("chart height controls", () => {
 });
 
 describe("category bar composition", () => {
+  it.each(["bar", "dot"])("shows literal group text in %s selection details through data updates with several series", async type => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ version: 1, type, collection: "trend", group: "kind",
+      category: { field: "name", label: "System" }, y: [{ field: "value" }, { field: "other" }] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { name: "First", value: 2, other: 3, kind: "<b>Paid</b>" } },
+      { id: "b", value: { name: "Second", value: 4, kind: null } },
+    ] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const details = mounted.editor.view.dom.querySelector<HTMLElement>(`.ub-${type}-details`)!;
+    const selector = within(details).getByRole<HTMLSelectElement>("combobox", { name: "Select category" });
+    await act(async () => fireEvent.change(selector, { target: { value: "a" } }));
+    expect([...details.querySelectorAll("dt")].map(term => [term.textContent, term.nextElementSibling?.textContent])).toEqual([
+      ["System", "First"], ["kind", "<b>Paid</b>"], ["value", "2"], ["other", "3"],
+    ]);
+    expect(details.querySelector("b")).toBeNull();
+    await act(async () => { applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "a", value: { name: "First", value: 2, kind: { api: true } } }] }]); flush(); });
+    expect(details.querySelector("dl")?.textContent).toBe('SystemFirstkind{"api":true}value2');
+    await act(async () => fireEvent.change(selector, { target: { value: "b" } }));
+    expect(details.querySelector("dl")?.textContent).toBe("SystemSecondvalue4");
+    await act(async () => mounted.editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
   it.each(["bar", "dot"])("retains the limit note and diagnostics for a %s window with no numeric values", async (type) => {
     const { doc, directory, id } = fixture();
     const source = JSON.stringify({ version: 1, type, collection: "trend", category: { field: "name" }, y: [{ field: "value" }], limit: 1 });

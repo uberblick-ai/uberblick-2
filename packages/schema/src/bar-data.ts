@@ -3,6 +3,7 @@ import { CHART_MAX_HEIGHT, CHART_MIN_HEIGHT } from "./chart-data.js";
 import type { DocData } from "./data.js";
 import { projectCategory } from "./category-data.js";
 import type { CategoryDiagnostics, CategoryRow, CategorySeries } from "./category-data.js";
+import type { ChartGroup } from "./chart-groups.js";
 import { keys, name, numeric, object, optionalText } from "./view-data.js";
 
 export interface BarSeriesMapping {
@@ -19,6 +20,7 @@ export interface BarConfig {
   collection: string;
   category: { field: string; label?: string };
   y: BarSeriesMapping[];
+  group?: string;
   orientation: "vertical" | "horizontal";
   sort?: { field: string; direction: "asc" | "desc" };
   limit?: number;
@@ -33,6 +35,7 @@ export interface BarReady {
   config: BarConfig;
   rows: BarRow[];
   series: BarSeries[];
+  groups: ChartGroup[];
   domain: [number, number];
   /** Divide stored values by this optional magnitude for finite drawing coordinates. */
   coordinateDivisor?: number;
@@ -59,7 +62,7 @@ export function parseBarConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid bar configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "category", "y", "orientation", "sort", "limit", "title", "height"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "category", "y", "group", "orientation", "sort", "limit", "title", "height"]) ||
       value.version !== 1 || value.type !== "bar" || !name(value.collection) ||
       !object(value.category) || !keys(value.category, ["field", "label"]) ||
       !name(value.category.field) || !optionalText(value.category, "label") ||
@@ -69,7 +72,7 @@ export function parseBarConfig(source: string):
         (!Object.hasOwn(series, "range") || (Array.isArray(series.range) && series.range.length === 2 &&
           numeric(series.range[0]) && numeric(series.range[1]) && series.range[0] < series.range[1])) &&
         (!Object.hasOwn(series, "reference") || numeric(series.reference))) ||
-      !optionalText(value, "title") ||
+      (Object.hasOwn(value, "group") && !name(value.group)) || !optionalText(value, "title") ||
       (Object.hasOwn(value, "orientation") && value.orientation !== "vertical" && value.orientation !== "horizontal") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "height") && (typeof value.height !== "number" || !Number.isInteger(value.height) ||

@@ -8,7 +8,7 @@ import { Fragment } from "react";
 import type { ReactElement } from "react";
 import { NativeSelect } from "../ui/shadcn/native-select.js";
 import { barAxisLabel, barCoordinateText, chartTooltipLines } from "./bar-view.js";
-import { chartAccessibleName, formatChartNumber, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT } from "./chart-data.js";
+import { categoryGroupColors, categoryGroupValue, chartGroupText, chartAccessibleName, formatChartNumber, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT } from "./chart-data.js";
 
 export { barDiagnosticsText as dotDiagnosticsText } from "./bar-view.js";
 
@@ -21,7 +21,7 @@ function textWidth(ctx: CanvasRenderingContext2D, text: string): number {
 }
 
 export function dotDefaultHeight(result: DotReady): number {
-  return Math.min(CHART_MAX_HEIGHT, Math.max(CHART_MIN_HEIGHT, 80 + (result.rows.length + result.series.length) * 24));
+  return Math.min(CHART_MAX_HEIGHT, Math.max(CHART_MIN_HEIGHT, 80 + (result.rows.length + (categoryGroupColors(result) ? result.groups.length : result.series.length)) * 24));
 }
 
 export function dotCategoryValues(result: DotReady, row: DotRow): { key: string; label: string; value: string }[] {
@@ -51,6 +51,7 @@ function Details({ result, selected, select }: {
     </NativeSelect>
     {row !== undefined && <dl>
       <dt>{result.config.category.label || result.config.category.field}</dt><dd>{row.label}</dd>
+      {categoryGroupValue(result, row).map(({ label, value }) => <Fragment key="group"><dt>{label}</dt><dd>{value}</dd></Fragment>)}
       {dotCategoryValues(result, row).map(({ key, label, value }) => <Fragment key={key}>
         <dt>{label}</dt><dd>{value}</dd>
       </Fragment>)}
@@ -170,6 +171,8 @@ export function dotConfiguration(result: DotReady, colors: CSSStyleDeclaration, 
   const units = new Set(result.series.map(series => series.unit || ""));
   const unit = units.size === 1 ? result.series[0]?.unit || "" : "";
   const divisor = result.coordinateDivisor ?? 1;
+  const grouped = categoryGroupColors(result);
+  const groupColor = (index: number): string => palette[result.groups.findIndex(group => group.key === result.rows[index]?.groupKey)] ?? colors.color;
   const declared = result.config.y.flatMap(series => series.range === undefined ? [] : [[series.range[0] / divisor, series.range[1] / divisor] as [number, number]]);
   return {
     type: "line", plugins: [decorationPlugin ?? decorations(() => result, () => colors)],
@@ -178,8 +181,8 @@ export function dotConfiguration(result: DotReady, colors: CSSStyleDeclaration, 
       datasets: result.series.map((series, index) => ({
         label: series.label, data: result.rows.map(row => row.values[index] == null ? null : (row.values[index] as number) / divisor),
         showLine: false, pointRadius: 4, pointHitRadius: 8, pointHoverRadius: 5,
-        pointStyle: "circle", borderColor: palette[index],
-        backgroundColor: result.series.length === 2 && index === 0 ? "transparent" : palette[index],
+        pointStyle: "circle", borderColor: grouped ? context => groupColor(context.dataIndex) : palette[index],
+        backgroundColor: grouped ? context => groupColor(context.dataIndex) : result.series.length === 2 && index === 0 ? "transparent" : palette[index],
         borderWidth: 1.5, pointBorderWidth: 1.5,
       })),
     },
@@ -226,7 +229,12 @@ export function dotConfiguration(result: DotReady, colors: CSSStyleDeclaration, 
       plugins: {
         legend: { display: true, position: "bottom", align: "start", onClick: () => {},
           ...(result.config.height === undefined ? { maxHeight: CHART_MAX_HEIGHT } : {}),
-          labels: { color: colors.color, font, usePointStyle: true, pointStyle: "circle", boxWidth: 12, boxHeight: 12 } },
+          labels: { color: colors.color, font, usePointStyle: true, pointStyle: "circle", boxWidth: 12, boxHeight: 12,
+            ...(grouped ? { generateLabels: () => result.groups.map((group, index) => ({
+              text: chartGroupText(group.value), fontColor: colors.color, pointStyle: "circle" as const,
+              fillStyle: palette[index] ?? colors.color, strokeStyle: palette[index] ?? colors.color,
+            })) } : {}),
+          } },
         tooltip: { titleFont: font, bodyFont: font, displayColors: false,
           filter: (_item, index) => index === 0,
           callbacks: {
@@ -244,6 +252,7 @@ export function dotConfiguration(result: DotReady, colors: CSSStyleDeclaration, 
               const ctx = this.chart.ctx;
               ctx.save(); ctx.font = `${font.size}px ${font.family}`;
               const lines = [
+                ...categoryGroupValue(result, row).map(({ label, value }) => `${label}: ${value}`),
                 ...dotCategoryValues(result, row).map(({ label, value }) => `${label}: ${value}`),
                 ...(row.note === undefined ? [] : [row.note]),
               ].flatMap(text => chartTooltipLines(text, Math.max(40, this.chart.width - 32), text => ctx.measureText(text).width));

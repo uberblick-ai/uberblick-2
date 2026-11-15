@@ -6,15 +6,15 @@ import { createRoot } from "react-dom/client";
 import { Fragment } from "react";
 import type { ReactElement } from "react";
 import { NativeSelect } from "../ui/shadcn/native-select.js";
-import { chartAccessibleName, formatChartNumber, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT } from "./chart-data.js";
+import { categoryGroupColors, categoryGroupValue, chartGroupText, chartAccessibleName, formatChartNumber, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT } from "./chart-data.js";
 
 Chart.register(CategoryScale);
 type BarValues = (number | null)[];
 
 export function barDefaultHeight(result: BarReady): number | undefined {
   return result.config.orientation === "horizontal"
-    // Reserve one legend row per series, including a narrow document column.
-    ? Math.min(CHART_MAX_HEIGHT, Math.max(CHART_MIN_HEIGHT, 80 + (result.rows.length + result.series.length) * 24))
+    // Reserve one row per legend entry, including a narrow document column.
+    ? Math.min(CHART_MAX_HEIGHT, Math.max(CHART_MIN_HEIGHT, 80 + (result.rows.length + (categoryGroupColors(result) ? result.groups.length : result.series.length)) * 24))
     : undefined;
 }
 
@@ -72,6 +72,7 @@ function Details({ result, selected, select }: {
     </NativeSelect>
     {row !== undefined && <dl>
       <dt>{result.config.category.label || result.config.category.field}</dt><dd>{row.label}</dd>
+      {categoryGroupValue(result, row).map(({ label, value }) => <Fragment key="group"><dt>{label}</dt><dd>{value}</dd></Fragment>)}
       {barCategoryValues(result, row).map(({ key, label, value }) => <Fragment key={key}>
         <dt>{label}</dt><dd>{value}</dd>
       </Fragment>)}
@@ -140,6 +141,8 @@ export function barConfiguration(result: BarReady, colors: CSSStyleDeclaration, 
   const units = new Set(result.series.map(series => series.unit || ""));
   const unit = units.size === 1 ? result.series[0]?.unit || "" : "";
   const divisor = result.coordinateDivisor ?? 1;
+  const grouped = categoryGroupColors(result);
+  const groupColor = (index: number): string => palette[result.groups.findIndex(group => group.key === result.rows[index]?.groupKey)] ?? colors.color;
   const declared = result.config.y.flatMap(series => series.range === undefined ? [] : [[series.range[0] / divisor, series.range[1] / divisor] as [number, number]]);
   const valueScale = {
     type: "linear" as const, stacked: true, beginAtZero: true,
@@ -160,7 +163,8 @@ export function barConfiguration(result: BarReady, colors: CSSStyleDeclaration, 
         label: series.label, data: result.rows.map(row => row.values[index] == null ? null : (row.values[index] as number) / divisor),
         // Disjoint namespaces keep every unstacked series separate from author names.
         stack: series.stack === undefined ? `series:${index}` : `stack:${series.stack}`,
-        borderColor: palette[index], backgroundColor: palette[index], borderWidth: 0,
+        borderColor: grouped ? context => groupColor(context.dataIndex) : palette[index],
+        backgroundColor: grouped ? context => groupColor(context.dataIndex) : palette[index], borderWidth: 0,
       })),
     },
     options: {
@@ -195,7 +199,12 @@ export function barConfiguration(result: BarReady, colors: CSSStyleDeclaration, 
       plugins: {
         legend: { display: true, position: "bottom", align: "start", onClick: () => {},
           ...(horizontal && result.config.height === undefined ? { maxHeight: CHART_MAX_HEIGHT } : {}),
-          labels: { color: colors.color, font, boxWidth: 12, boxHeight: 12 } },
+          labels: { color: colors.color, font, boxWidth: 12, boxHeight: 12,
+            ...(grouped ? { generateLabels: () => result.groups.map((group, index) => ({
+              text: chartGroupText(group.value), fontColor: colors.color,
+              fillStyle: palette[index] ?? colors.color, strokeStyle: palette[index] ?? colors.color,
+            })) } : {}),
+          } },
         tooltip: { titleFont: font, bodyFont: font, displayColors: false,
           filter: (_item, index) => index === 0,
           callbacks: {
@@ -210,7 +219,7 @@ export function barConfiguration(result: BarReady, colors: CSSStyleDeclaration, 
             },
             label: item => {
               const row = result.rows[item.dataIndex];
-              return row === undefined ? [] : barCategoryValues(result, row).map(({ label, value }) => `${label}: ${value}`);
+              return row === undefined ? [] : [...categoryGroupValue(result, row), ...barCategoryValues(result, row)].map(({ label, value }) => `${label}: ${value}`);
             },
           },
         },

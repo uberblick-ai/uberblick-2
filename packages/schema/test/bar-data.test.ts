@@ -29,6 +29,9 @@ describe("category bar mapping", () => {
     };
     expect(parseBarConfig(source(input))).toEqual({ ok: true, config: { ...mapping, ...input } });
     expect(parseBarConfig(source({ y: Array.from({ length: 8 }, () => ({ field: "count" })) })).ok).toBe(true);
+    for (const group of ["kind", "event.kind", "__proto__", "↻"]) {
+      expect(parseBarConfig(source({ group }))).toMatchObject({ ok: true, config: { group } });
+    }
   });
 
   it.each([
@@ -42,6 +45,7 @@ describe("category bar mapping", () => {
     { y: [{ field: "count", range: [0, "4"] }] }, { y: [{ field: "count", reference: "5" }] },
     { orientation: null }, { orientation: "diagonal" }, { limit: 0 }, { limit: 1.5 },
     { height: 99 }, { height: 601 }, { height: 101.5 }, { height: null },
+    { group: "" }, { group: null }, { group: false }, { group: 1 }, { group: [] }, { group: {} }, { group: "\ud800" },
     { sort: { field: "other", direction: "asc" } }, { sort: { field: "name", direction: "up" } },
     { sort: { field: "name", direction: "asc", format: "number" } },
   ])("rejects unsupported or invalid bar options %j", (options) => {
@@ -50,6 +54,81 @@ describe("category bar mapping", () => {
 });
 
 describe("shared category bar projection", () => {
+  it("assigns stable canonical group identities from the shown value set and retains stored text-cell values", () => {
+    const records = [
+      record("a", { name: "A", count: 6, kind: "Paid API" }),
+      record("b", { name: "B", count: 4, kind: "Open model" }),
+      record("c", { name: "C", count: 2, kind: "Open model" }),
+      record("d", { name: "D", count: 5, kind: { b: 2, a: 1 } }),
+      record("e", { name: "E", count: 3, kind: { a: 1, b: 2 } }),
+      record("f", { name: "F", count: 0, kind: false }),
+      record("g", { name: "G", kind: 0 }),
+      record("h", { name: "H", count: 1, kind: "" }),
+      record("i", { name: "I", count: 1, kind: null }),
+      record("j", { name: "J", count: 1 }),
+    ];
+    const data = snapshot(records);
+    const before = structuredClone(data);
+    const first = prepareBar(source({ group: "kind" }), data);
+    if (first.status !== "ready") throw new Error("Expected grouped bars");
+    expect(first.groups).toEqual([
+      { key: '""', value: "" }, { key: '"Open model"', value: "Open model" },
+      { key: '"Paid API"', value: "Paid API" }, { key: "0", value: 0 }, { key: "false", value: false },
+      { key: '{"a":1,"b":2}', value: { a: 1, b: 2 } },
+    ]);
+    expect(first.rows.find(row => row.id === "d")).toMatchObject({ groupKey: '{"a":1,"b":2}', groupValue: { b: 2, a: 1 } });
+    expect(first.rows.find(row => row.id === "e")?.groupKey).toBe(first.rows.find(row => row.id === "d")?.groupKey);
+    for (const id of ["i", "j"]) {
+      expect(first.rows.find(row => row.id === id)).not.toHaveProperty("groupKey");
+      expect(first.rows.find(row => row.id === id)).not.toHaveProperty("groupValue");
+    }
+    for (const options of [
+      {}, { sort: { field: "name", direction: "desc" } }, { sort: { field: "count", direction: "asc" } },
+    ]) {
+      const sorted = prepareBar(source({ group: "kind", ...options }), snapshot([...records].reverse()));
+      if (sorted.status !== "ready") throw new Error("Expected grouped bars");
+      expect(sorted.groups).toEqual(first.groups);
+      expect(sorted.rows.map(row => [row.id, row.groupKey]).sort()).toEqual(first.rows.map(row => [row.id, row.groupKey]).sort());
+    }
+    expect(first).toMatchObject({ diagnostics: { groupOverflow: false }, warnings: [] });
+    expect(data).toEqual(before);
+  });
+
+  it("caps group colours at eight shown values and names the field without leaking values", () => {
+    const records = Array.from({ length: 9 }, (_, index) => record(String(index), {
+      name: `Category ${index}`, count: index, kind: `private-group-${index}`,
+    }));
+    records.push(record("invalid", { name: "Invalid", count: 0, kind: "invalid-value" }));
+    records.push(record("no-category", { count: 0, kind: "no-category-value" }));
+    const data = snapshot(records);
+    data.collections[0]!.invalidRecordIds = ["invalid"];
+    const overflow = prepareBar(source({ group: "kind" }), data);
+    expect(overflow).toMatchObject({ status: "ready", groups: [], diagnostics: { groupOverflow: true }, warnings: [
+      "Bar group field “kind” has more than 8 values; colours stay per series.",
+    ] });
+    if (overflow.status !== "ready") throw new Error("Expected grouped bars");
+    expect(overflow.rows[0]).toMatchObject({ groupKey: '"private-group-0"', groupValue: "private-group-0" });
+    const limited = prepareBar(source({ group: "kind", limit: 8 }), data);
+    if (limited.status !== "ready") throw new Error("Expected grouped bars");
+    expect(limited.groups).toHaveLength(8);
+    expect(limited.diagnostics.groupOverflow).toBe(false);
+    expect(limited.warnings).toEqual([]);
+    expect(prepareBar(source({ group: "kind", y: [{ field: "count" }, { field: "count" }] }), data))
+      .toMatchObject({ status: "ready", diagnostics: { groupOverflow: true }, warnings: overflow.warnings });
+  });
+
+  it("checks group fields against closed schemas with text-cell compatibility", () => {
+    const schema: DataSchema = {
+      type: "object", additionalProperties: false,
+      properties: { name: { type: "string" }, count: { type: "number" }, kind: { type: "object" } },
+    };
+    expect(prepareBar(source({ group: "missing" }), snapshot([], schema))).toMatchObject({
+      status: "mapping-incompatible", message: expect.stringContaining("field “missing”"),
+    });
+    expect(prepareBar(source({ group: "kind" }), snapshot([record("a", { name: "A", count: 2, kind: { nested: true } })], schema)))
+      .toMatchObject({ status: "ready", groups: [{ key: '{"nested":true}', value: { nested: true } }] });
+  });
+
   it("keeps record identity, equal category labels, empty groups and table text formatting without mutation", () => {
     const data = snapshot([
       record("z", { name: "Same", count: 0 }), record("a", { name: "Same", count: 3 }),
@@ -126,7 +205,7 @@ describe("shared category bar projection", () => {
 
   it("takes the first 5,000 categories after sorting, including empty groups, and reports the cap", () => {
     const records = Array.from({ length: 5_002 }, (_, index) => record(String(index).padStart(4, "0"), {
-      name: `Category ${index}`, count: index === 0 ? null : index,
+      name: `Category ${index}`, count: index === 0 ? null : index, kind: index < 5_000 ? "kept" : index,
     }));
     const data = snapshot(records.reverse());
     const result = prepareBar(source({ limit: 10_000 }), data);
@@ -138,6 +217,9 @@ describe("shared category bar projection", () => {
     expect(result.rows).toHaveLength(5_000);
     expect(result.rows[0]).toEqual({ id: "0000", label: "Category 0", values: [null] });
     expect(result.rows[4_999]?.id).toBe("4999");
+    expect(prepareBar(source({ group: "kind" }), data)).toMatchObject({
+      status: "ready", groups: [{ key: '"kept"', value: "kept" }], diagnostics: { groupOverflow: false },
+    });
     expect(prepareBar(source({ sort: { field: "count", direction: "desc" }, limit: 1 }), data)).toMatchObject({
       status: "ready", rows: [{ id: "5001", values: [5_001] }], notice: "Showing 1 of 5002 records",
     });

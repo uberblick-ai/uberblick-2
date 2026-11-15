@@ -1,6 +1,8 @@
 /** Category charts share record eligibility, row windows and value diagnostics. */
 import { CHART_RECORD_LIMIT } from "./chart-data.js";
+import { chartGroups } from "./chart-groups.js";
 import { compareCodePoints } from "./data-schema.js";
+import type { JSONValue } from "./data-schema.js";
 import type { DataRecord, DocData } from "./data.js";
 import { sortTableRows } from "./table-data.js";
 import { bindCollection, incompatible, numeric, object, own } from "./view-data.js";
@@ -9,16 +11,18 @@ interface CategoryConfig {
   collection: string;
   category: { field: string; label?: string };
   y: { field: string; label?: string; unit?: string; stack?: string }[];
+  group?: string;
   sort?: { field: string; direction: "asc" | "desc" };
   limit?: number;
 }
-export interface CategoryRow { id: string; label: string; values: (number | null)[] }
+export interface CategoryRow { id: string; label: string; values: (number | null)[]; groupKey?: string; groupValue?: JSONValue }
 export interface CategorySeries { field: string; label: string; unit?: string; stack?: string }
 export interface CategoryDiagnostics {
   invalidSchema: number;
   missingCategory: number;
   noNumericY: number;
   limited: number;
+  groupOverflow: boolean;
   series: { field: string; label: string; absent: number; null: number; missing: number; invalid: number }[];
 }
 
@@ -28,7 +32,8 @@ export function projectCategory<C extends CategoryConfig>(config: C, data: DocDa
   const { collection, schema } = binding;
   const badField = incompatible(schema, config.category.field, "text") ? config.category.field
     : config.y.find((series) => incompatible(schema, series.field, "number"))?.field
-      ?? (note !== undefined && incompatible(schema, note, "text") ? note : undefined);
+      ?? (note !== undefined && incompatible(schema, note, "text") ? note : undefined)
+      ?? (config.group !== undefined && incompatible(schema, config.group, "text") ? config.group : undefined);
   if (badField !== undefined) return {
     status: "mapping-incompatible" as const,
     message: `${label} mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.`,
@@ -39,7 +44,7 @@ export function projectCategory<C extends CategoryConfig>(config: C, data: DocDa
     ...(mapping.stack !== undefined ? { stack: mapping.stack } : {}),
   }));
   const diagnostics: CategoryDiagnostics = {
-    invalidSchema: 0, missingCategory: 0, noNumericY: 0, limited: 0,
+    invalidSchema: 0, missingCategory: 0, noNumericY: 0, limited: 0, groupOverflow: false,
     series: series.map((mapping) => ({ field: mapping.field, label: mapping.label, absent: 0, null: 0, missing: 0, invalid: 0 })),
   };
   const invalid = new Set(collection.invalidRecordIds);
@@ -73,19 +78,26 @@ export function projectCategory<C extends CategoryConfig>(config: C, data: DocDa
     });
     if (!values.some(numeric)) diagnostics.noNumericY += 1;
     const storedNote = note === undefined ? undefined : own(record.value, note);
+    const groupValue = config.group === undefined ? undefined : own(record.value, config.group);
     return {
       id: record.id, label: typeof category === "string" ? category : JSON.stringify(category), values,
+      ...(groupValue === undefined || groupValue === null ? {} : { groupValue: groupValue as JSONValue }),
       ...(storedNote === undefined || storedNote === null ? {} : {
         note: typeof storedNote === "string" ? storedNote : JSON.stringify(storedNote),
       }),
     };
   });
+  const { groups, groupOverflow } = chartGroups(rows, (row) => row.groupValue);
+  diagnostics.groupOverflow = groupOverflow;
   const plottedCount = rows.length - diagnostics.noNumericY;
   const emptyFields = new Set(config.y.filter((_, index) => !rows.some((row) => numeric(row.values[index]))).map((mapping) => mapping.field));
   const common = {
-    config, rows, series, recordCount: collection.records.length, eligibleCount: eligible.length, plottedCount,
+    config, rows, series, groups, recordCount: collection.records.length, eligibleCount: eligible.length, plottedCount,
     notPlotted: collection.records.length - plottedCount - (authorWindow ? excluded : 0), diagnostics,
-    warnings: [...emptyFields].map((field) => `No numeric values for series field “${field}”.`),
+    warnings: [
+      ...[...emptyFields].map((field) => `No numeric values for series field “${field}”.`),
+      ...(groupOverflow ? [`${label} group field “${config.group}” has more than 8 values; colours stay per series.`] : []),
+    ],
     ...(excluded > 0 ? { notice: `Showing ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${eligible.length} records` } : {}),
   };
   if (plottedCount === 0) return { status: "no-records" as const, message: "No plottable records in this chart collection.", ...common };
