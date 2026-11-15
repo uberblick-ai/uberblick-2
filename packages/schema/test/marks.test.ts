@@ -487,7 +487,7 @@ describe("inline marks in the document", () => {
       "Not bold: \\*\\*this\\*\\* is literal.",
       "A backslash \\\\ and a backtick \\` stay put.",
       "Tilde \\~\\~pair\\~\\~, path ~/.config, snake_case and \\_\\_underscores\\_\\_.",
-      "\\[not a link](https://example.com) and \\[not one either](./relative.md).",
+      "\\[not a link](ftp://example.com) and \\[not one either](./relative.md).",
     ];
     for (const source of literals) {
       const imported = importMarkdown(source);

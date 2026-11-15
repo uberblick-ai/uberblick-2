@@ -14,6 +14,7 @@ import {
   isProseBlockType,
   isCalloutVariant,
   isCalloutIcon,
+  linkifyInline,
   InvalidCalloutError,
   parseTableCell,
   parseTableInput,
@@ -409,7 +410,9 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
     validateBlockTargets(block.type, block.text ?? "");
     return toBlockInput(
       block,
-      isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
+      isProseBlockType(block.type)
+        ? linkifyInline(resolveInline(block.inline) ?? [{ text: block.text ?? "", marks: {} }])
+        : undefined,
     );
   };
 

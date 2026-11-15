@@ -11,7 +11,7 @@ export const inputSchema = strictInput({
   uuid: uuidArg,
   block_id: z.string().min(1),
   old_text: z.string().describe("The block's whole text as get_doc returns it, not a fragment. Asserted before the splice."),
-  new_text: z.string().describe("Replacement text. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."),
+  new_text: z.string().describe("Replacement text. Newly written bare web addresses in prose become external links. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."),
   column_widths: columnWidthsArg,
   list: listStyleArg.optional().describe("New list style on an existing list item; omitted keeps its style. Refused on other block types."),
   indent: listIndentArg.optional().describe("New list depth, an integer from 0 to 3, on an existing list item; omitted keeps its depth. Refused on other block types."),
@@ -39,6 +39,7 @@ export const editBlockOperation = documentOperation({ content: true, contentDura
   if (current !== null && current.text === old_text &&
       (rev === undefined || current.rev === rev)) validateBlockTargets(current.type, new_text, old_text, table_mapping);
   preservingOpenAnchors(replica.doc, block_id, draft => editBlock(draft, block_id, old_text, new_text, {
+    autolink: true,
     ...(rev === undefined ? {} : { rev }),
     ...(list === undefined ? {} : { list }),
     ...(indent === undefined ? {} : { indent: indent as ListIndent }),

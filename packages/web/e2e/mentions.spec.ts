@@ -1,6 +1,7 @@
 /** One member-backed @ picker across prose and plain-text comment fields. */
 import { devices, expect, test } from "@playwright/test";
 import type { Browser, Locator, Page } from "@playwright/test";
+import { renderMarkdownLink } from "@uberblick/schema";
 import { activateControl, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import type { McpAgent, McpSession } from "./mcp-agent.js";
@@ -27,7 +28,7 @@ function writer(): McpSession {
 }
 
 async function fixture(session: McpSession) {
-  const title = docTitle("other-admin reference");
+  const title = docTitle("other-admin <reference>");
   const target = await session.call<StoredDoc>("create_doc", {
     title, description: "A document offered beside an offline member.",
     blocks: [{ type: "paragraph", text: "Reference destination" }],
@@ -42,7 +43,7 @@ async function fixture(session: McpSession) {
   });
   const first = source.blocks[0];
   if (first === undefined) throw new Error("e2e: mention paragraph is missing");
-  const storedLink = `[${title}](${target.uuid})`;
+  const storedLink = renderMarkdownLink(title, target.uuid);
   await session.call("annotate", { uuid: source.uuid, block_id: first.id, start: 0, end: 5,
     text: `Agent @other-admin ${storedLink} **plain** [external](https://example.com)` });
   return { source, target, title, storedLink };
@@ -74,7 +75,7 @@ async function selectParagraph(paragraph: Locator): Promise<void> {
 
 test("members pick people and documents in prose, new comments and replies while stored text stays portable", async ({ browser }) => {
   const session = writer();
-  const { source, target, title, storedLink } = await fixture(session);
+  const { source, title, storedLink } = await fixture(session);
   const page = await open(browser, source.uuid);
   const prose = editor(page).locator(":scope > p");
   await expect(prose.first().locator(".ub-person-pill")).toHaveText("@other-admin");
@@ -111,11 +112,11 @@ test("members pick people and documents in prose, new comments and replies while
   await field.press("Enter");
   await expect(field).toBeVisible();
   await expect(page.locator(".ub-thread-card")).toHaveCount(1);
-  await field.pressSequentially(" @other");
+  await field.pressSequentially("@other");
   await field.press("ArrowDown");
   await field.press("Tab");
   await expect(field).toBeFocused();
-  await expect(field).toHaveValue(new RegExp(`^Review @other-admin\\s+\\[${title}\\]\\(${target.uuid}\\)\\s*$`));
+  await expect(field).toHaveValue(`Review @other-admin ${storedLink} `);
   const commentText = (await field.inputValue()).trim();
   await field.pressSequentially(" @bro");
   await expect(menu(page)).toBeVisible();

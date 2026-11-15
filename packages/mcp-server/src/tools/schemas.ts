@@ -91,6 +91,7 @@ export const documentStatusArg = z
 const INLINE_RUNS =
   "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, " +
   "inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. " +
+  "Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. " +
   "Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline " +
   "Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's " +
   "current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally " +
@@ -153,7 +154,7 @@ export const columnWidthsArg = z.unknown().meta({
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, " +
+    "Prose with automatic links for bare web addresses (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, " +
       "or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, " +
       "buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
   ),

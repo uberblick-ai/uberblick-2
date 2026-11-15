@@ -213,7 +213,7 @@
                 ]
               },
               "text": {
-                "description": "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
+                "description": "Prose with automatic links for bare web addresses (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -249,7 +249,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
+                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -873,7 +873,7 @@
         },
         "new_text": {
           "type": "string",
-          "description": "Replacement text. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."
+          "description": "Replacement text. Newly written bare web addresses in prose become external links. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."
         },
         "column_widths": {
           "description": "Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
@@ -1025,7 +1025,7 @@
                 ]
               },
               "text": {
-                "description": "Plain prose (`inline` supplies formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
+                "description": "Prose with automatic links for bare web addresses (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -1061,7 +1061,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
+                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
                 "type": "array",
                 "items": {
                   "type": "object",

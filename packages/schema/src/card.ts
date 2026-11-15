@@ -38,7 +38,7 @@ export function parseCardButton(source: string): CardButton {
   if (link === null || !isCardButtonHref(link.href)) {
     throw new InvalidCardError("The button must be one link to https://, claude://code/new, claude-cli://open or codex://new, optionally followed by style and color");
   }
-  const runs = parseInline(link.label);
+  const runs = parseInline(link.label, { autolinks: false });
   const text = inlinePlainText(runs);
   if (text.trim() === "" || /[\r\n]/.test(text) || runs.some((run) => Object.keys(run.marks).length !== 0)) {
     throw new InvalidCardError("The button text must be nonempty plain text, without formatting or document links");
