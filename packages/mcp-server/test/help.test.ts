@@ -480,6 +480,15 @@ it("documents the table mapping through both help routes and accepts its source 
       "in panels it sizes each plot below its label and latest value",
       "Without height, overlay stays at 2:1 between 200 and 300 pixels, and each panel plot stays at 150 pixels",
       "layout and height are invalid for table mappings",
+      "has exactly two keys: fields, a non-empty list of distinct field names, and better, lower or higher",
+      "Each field must be displayed by at least one column",
+      "every column displaying it must have format number and no bar",
+      "Missing or unknown shade keys, empty or duplicate fields, undisplayed fields, non-number or bar columns, and other better values make the mapping invalid",
+      "Selected columns share one scale from the lowest to highest numeric value among the shown rows",
+      "With better lower, the lowest value is faintest and the highest strongest; better higher reverses that",
+      "Both themes use one hue, with every number readable and equal values shaded equally",
+      "Absent, null and invalid values keep their markers without shade; unlisted columns stay unchanged",
+      "Shading never changes a value, its text or its sort order",
     ]) expect(help, guidance).toContain(guidance);
   }
   for (const guidance of [

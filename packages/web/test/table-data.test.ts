@@ -122,6 +122,42 @@ describe("table mapping", () => {
   it("refuses a nonfinite bar maximum even when JSON parses it as a number", () => {
     expect(parseTableConfig('{"version":1,"type":"table","collection":"observations","columns":[{"field":"value","format":"number","bar":{"max":1e309}}]}').ok).toBe(false);
   });
+
+  it.each(["lower", "higher"] as const)("accepts one shared shade for distinct number fields with better %s", (better) => {
+    const config = { ...mapping, columns: [
+      { field: "value", format: "number", decimals: 1 },
+      { field: "other", format: "number" },
+      { field: "value", format: "number", unit: "%" },
+      { field: "unshaded", format: "number", bar: true },
+    ], shade: { fields: ["value", "other"], better } };
+    expect(parseTableConfig(JSON.stringify(config))).toEqual({ ok: true, config });
+  });
+
+  it.each([
+    null, true, [], "value", {}, { fields: ["value"] }, { better: "lower" },
+    { fields: ["value"], better: "lower", extra: true },
+    { fields: [], better: "lower" }, { fields: "value", better: "lower" },
+    { fields: ["value", "value"], better: "lower" },
+    { fields: ["value", "missing"], better: "lower" },
+    { fields: [""], better: "lower" }, { fields: ["\ud800"], better: "lower" },
+    { fields: [null], better: "lower" }, { fields: [1], better: "lower" },
+    { fields: ["value"], better: "ascending" }, { fields: ["value"], better: null },
+  ])("rejects invalid shade %j through the existing configuration problem", (shade) => {
+    expect(prepareTable(JSON.stringify({ ...mapping, columns: [{ field: "value", format: "number" }], shade }), null)).toMatchObject({
+      status: "invalid-configuration", message: expect.stringContaining("Invalid table configuration"),
+    });
+  });
+
+  it.each([
+    { field: "value" }, { field: "value", format: "text" },
+    { field: "value", format: "date" }, { field: "value", format: "link" },
+    { field: "value", format: "number", bar: true },
+    { field: "value", format: "number", bar: { max: 100 } },
+  ])("checks every repeated shaded column, including %j", (column) => {
+    for (const columns of [[column], [{ field: "value", format: "number" }, column], [column, { field: "value", format: "number" }]]) {
+      expect(prepareTable(JSON.stringify({ ...mapping, columns, shade: { fields: ["value"], better: "lower" } }), null).status).toBe("invalid-configuration");
+    }
+  });
 });
 
 const formatTableCell = (column: TableColumnMapping, record: DataRecord, locale?: string) =>
@@ -198,6 +234,50 @@ describe("table cell values", () => {
 });
 
 describe("table projection and ordering", () => {
+  it("shares a shade scale across selected fields in the limited window, independent of header order", () => {
+    const config: TableConfig = { ...mapping, limit: 2, pageSize: 1, sort: { field: "value", direction: "asc" }, columns: [
+      { field: "value", format: "number" }, { field: "other", format: "number" },
+      { field: "value", format: "number" }, { field: "unshaded", format: "number" },
+    ], shade: { fields: ["value", "other"], better: "lower" } };
+    const { doc, data } = fixture([
+      { id: "a", value: { value: 2, other: -8, unshaded: -1000 } },
+      { id: "b", value: { value: 3, other: 10, unshaded: 1000 } },
+      { id: "z-hidden", value: { value: 100, other: -100 } },
+    ]);
+    const before = getDocDataEntries(doc);
+    const table = frozen(ready(frozen(data), config));
+    expect(table.shadeScale).toEqual({ min: -8, max: 10 });
+    for (const direction of ["asc", "desc"] as const) {
+      const sorted = sortTableRows(table.rows, config.columns[1]!, direction);
+      expect(sorted.map(({ id }) => id)).toEqual(direction === "asc" ? ["a", "b"] : ["b", "a"]);
+      expect(table.shadeScale).toEqual({ min: -8, max: 10 });
+    }
+    expect(ready(data, { ...config, shade: { ...config.shade!, better: "higher" } }).shadeScale).toEqual(table.shadeScale);
+    expect(ready(data, { ...config, limit: 3 }).shadeScale).toEqual({ min: -100, max: 100 });
+    expect(getDocDataEntries(doc)).toEqual(before);
+
+    applyDocData(doc, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "b", value: { value: 3, other: 5 } }] }]);
+    const updated = readDocData(doc);
+    if (updated === null) throw new Error("Updated data is absent");
+    expect(ready(updated, config).shadeScale).toEqual({ min: -8, max: 5 });
+    expect(table.rows.map(({ value }) => value.value)).toEqual([2, 3]);
+  });
+
+  it("ignores absent, null and invalid shade cells and handles equal and extreme numbers", () => {
+    const config: TableConfig = { ...mapping, columns: [{ field: "value", format: "number" }], shade: { fields: ["value"], better: "lower" } };
+    const invalid = [
+      { id: "absent", value: {} }, { id: "null", value: { value: null } },
+      { id: "invalid", value: { value: "-100" } },
+    ];
+    expect(ready(fixture(invalid).data, config).shadeScale).toBeNull();
+    expect(prepareTable(JSON.stringify(config), fixture([]).data)).toMatchObject({ status: "no-records", shadeScale: null });
+    expect(ready(fixture([...invalid, { id: "zero", value: { value: 0 } }, { id: "same", value: { value: 0 } }]).data, config).shadeScale).toEqual({ min: 0, max: 0 });
+    expect(ready(fixture([
+      { id: "low", value: { value: -Number.MAX_VALUE } }, { id: "high", value: { value: Number.MAX_VALUE } },
+    ]).data, config).shadeScale).toEqual({ min: -Number.MAX_VALUE, max: Number.MAX_VALUE });
+    expect(ready(fixture([{ id: "plain", value: { value: 1 } }]).data).shadeScale).toBeNull();
+  });
+
   it("scales bars from the mapping window and updates every column's shared scale with live data", () => {
     const config: TableConfig = { ...mapping, limit: 2, columns: [
       { field: "value", format: "number" },

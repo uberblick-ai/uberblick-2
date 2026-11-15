@@ -215,13 +215,15 @@ describe("chart source write summaries", () => {
     });
   });
 
-  it("keeps table summaries identical with automatic or fixed in-cell bars across all chart writes", async () => {
+  it("keeps table summaries identical with bars or shared-scale shading across all chart writes", async () => {
     const rig = await local();
     const mappings = [table, { ...table, columns: [{ field: "count", format: "number", bar: true }] },
-      { ...table, columns: [{ field: "count", format: "number", bar: { max: 100 } }] }];
+      { ...table, columns: [{ field: "count", format: "number", bar: { max: 100 } }] },
+      { ...table, shade: { fields: ["count"], better: "lower" } },
+      { ...table, shade: { fields: ["count"], better: "higher" } }];
     const sources = mappings.map(mapping => JSON.stringify({ ...mapping, limit: 2 }));
     const created = await rig.ok("create_doc", {
-      title: "Table bar feedback", description: "Decorative bars do not add values or scale details to summaries.",
+      title: "Table decoration feedback", description: "Bars and shades do not add values or scale details to summaries.",
       blocks: sources.map(text => ({ type: "chart", text })),
     });
     const absent = {
@@ -246,7 +248,7 @@ describe("chart source write summaries", () => {
 
     let block = inserted.blocks[0];
     let oldText = sources[0];
-    for (const newText of [sources[1], sources[2], sources[0]]) {
+    for (const newText of [...sources.slice(1), sources[0]]) {
       const edited = await rig.ok("edit_block", {
         uuid: created.uuid, block_id: block.id, rev: block.rev, old_text: oldText, new_text: newText,
       });

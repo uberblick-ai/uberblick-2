@@ -11,7 +11,7 @@ const config: TableConfig = {
 };
 function ready(rows: DataRecord[], mapping = config): TableReady {
   return { status: "ready", config: mapping, rows, recordCount: rows.length, invalidSchema: 0,
-    barScales: mapping.columns.map(() => null) };
+    barScales: mapping.columns.map(() => null), shadeScale: null };
 }
 function rows(view: ReturnType<typeof dataTableView>): HTMLTableRowElement[] {
   return [...view.element.querySelectorAll<HTMLTableRowElement>("tbody tr")];
@@ -32,6 +32,57 @@ function barTable(records: DataRecord[], mapping: TableConfig): TableReady {
 }
 
 describe("continuous native table rendering", () => {
+  it("rescales every shaded field in unchanged rows and keeps text, unlisted cells and header sorting", () => {
+    const mapping: TableConfig = { ...config, limit: 2, columns: [
+      { field: "value", format: "number" }, { field: "other", format: "number" },
+      { field: "value", format: "number" }, { field: "plain", format: "number" },
+    ], shade: { fields: ["value", "other"], better: "lower" } };
+    const a: DataRecord = { id: "a", value: { value: 10, other: 20, plain: 30 } };
+    const b: DataRecord = { id: "b", value: { value: 0, other: 40, plain: 1000 } };
+    const hidden: DataRecord = { id: "c", value: { value: -1000 } };
+    const view = dataTableView();
+    view.render(barTable([a, b, hidden], mapping));
+    const original = rows(view);
+    const cell = original[0]!.cells[0]!;
+    const text = cell.firstChild?.firstChild;
+    const plain = original[0]!.cells[3]!.firstChild;
+    const strengths = () => [...original[0]!.cells].map(cell => cell.style.getPropertyValue("--ub-data-shade-strength"));
+    expect(strengths()).toEqual(["0.25", "0.5", "0.25", ""]);
+    const button = getAllByRole(view.element, "button", { name: "value" })[0]!;
+    button.click();
+    expect(rows(view)).toEqual([original[1], original[0]]);
+    expect(strengths()).toEqual(["0.25", "0.5", "0.25", ""]);
+    view.render(barTable([a, { ...b, value: { ...b.value, other: 80 } }, hidden], mapping));
+    expect(strengths()).toEqual(["0.125", "0.25", "0.125", ""]);
+    expect(rows(view)).toEqual([original[1], original[0]]);
+    expect(cell.firstChild?.firstChild).toBe(text);
+    expect(original[0]!.cells[3]!.firstChild).toBe(plain);
+    expect(cell.textContent).toBe("10");
+    expect(cell.querySelector("[aria-label], [aria-hidden], svg, canvas")).toBeNull();
+    expect(button.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+    view.render(barTable([a, b], { ...mapping, shade: { fields: ["other"], better: "higher" } }));
+    expect(rows(view).find(row => row.cells[0]?.textContent === "10")?.cells[0]?.hasAttribute("data-shade")).toBe(false);
+  });
+
+  it("shades equal and extreme finite values consistently and clears shade when a cell becomes a marker", () => {
+    const mapping: TableConfig = { ...config, columns: [{ field: "value", format: "number" }],
+      shade: { fields: ["value"], better: "higher" } };
+    const view = dataTableView();
+    view.render(barTable([record("a", -Number.MAX_VALUE), record("b", 0), record("c", Number.MAX_VALUE)], mapping));
+    const strengths = () => rows(view).map(row => row.cells[0]!.style.getPropertyValue("--ub-data-shade-strength"));
+    expect(strengths()).toEqual(["1", "0.5", "0"]);
+    view.render(barTable([record("a", 7), record("b", 7)], mapping));
+    expect(strengths()).toEqual(["0.5", "0.5"]);
+    const cell = rows(view)[0]!.cells[0]!;
+    for (const value of [{}, { value: null }, { value: "7" }]) {
+      view.render(barTable([{ id: "a", value }, record("b", 7)], mapping));
+      expect(rows(view)[0]!.cells[0]).toBe(cell);
+      expect(cell.hasAttribute("data-shade")).toBe(false);
+      expect(cell.style.getPropertyValue("--ub-data-shade-strength")).toBe("");
+    }
+    expect(cell.textContent).toBe("Invalid: 7");
+  });
+
   it("rescales unchanged bar cells through live windows without replacing their text or reader sort", () => {
     const mapping: TableConfig = { ...config, limit: 2, columns: [
       { field: "value", format: "number", bar: true }, { field: "link", format: "link" },

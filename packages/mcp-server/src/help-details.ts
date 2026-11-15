@@ -694,7 +694,17 @@ export const toolHelpDetails = {
     "limit and live updates can change the scale, but header sorting cannot. max fixes that scale, clipping larger magnitudes to a full bar " +
     "without changing their number. If any shown value is negative, all bars share a middle zero line, with negatives left and positives right; " +
     "otherwise zero is at the left edge. Absent, null and invalid values keep their markers without bars, and zero has no visible bar. " +
-    "Screen readers and copied text get only the number. Optional title " +
+    "Screen readers and copied text get only the number. " +
+    "Optional table-level shade, for example {\"fields\":[\"error_a\",\"error_b\"],\"better\":\"lower\"}, has exactly two keys: " +
+    "fields, a non-empty list of distinct field names, and better, lower or higher. Each field must be displayed by at least one column, " +
+    "and every column displaying it must have format number and no bar. Missing or unknown shade keys, empty or duplicate fields, " +
+    "undisplayed fields, non-number or bar columns, and other better values make the mapping invalid. " +
+    "Selected columns share one scale from the lowest to highest numeric value among the shown rows. " +
+    "With better lower, the lowest value is faintest and the highest strongest; better higher reverses that. " +
+    "Both themes use one hue, with every number readable and equal values shaded equally. " +
+    "limit and live updates can change the scale, but header sorting cannot. " +
+    "Absent, null and invalid values keep their markers without shade; unlisted columns stay unchanged. " +
+    "Shading never changes a value, its text or its sort order. Screen readers and copied text get only the number. Optional title " +
     "supplies only the table's accessible name, and sort (one column field, direction asc or desc) orders rows. " +
     "Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order " +
     "(record-id order without sort). Without limit, every valid record appears in one continuous native table, " +

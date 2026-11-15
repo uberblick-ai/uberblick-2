@@ -59,7 +59,7 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
 });
 
-it("teaches table-only numeric bars, their scale and invalid forms in the data help", async () => {
+it("teaches table-only numeric bars and shades, their scales and invalid forms in the data help", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "data" });
   for (const guidance of [
@@ -68,12 +68,27 @@ it("teaches table-only numeric bars, their scale and invalid forms in the data h
     "False, null, empty objects, nonpositive maxima, extra keys, other formats and scatter details are invalid",
     "largest absolute numeric value among the shown rows", "header sorting cannot", "max fixes that scale",
     "all bars share a middle zero line", "zero has no visible bar", "Screen readers and copied text get only the number",
+    "has exactly two keys: fields, a non-empty list of distinct field names, and better, lower or higher",
+    "every column displaying it must have format number and no bar",
+    "Missing or unknown shade keys, empty or duplicate fields, undisplayed fields, non-number or bar columns, and other better values make the mapping invalid",
+    "Selected columns share one scale from the lowest to highest numeric value among the shown rows",
+    "With better lower, the lowest value is faintest and the highest strongest; better higher reverses that",
+    "Both themes use one hue, with every number readable and equal values shaded equally",
+    "Absent, null and invalid values keep their markers without shade; unlisted columns stay unchanged",
+    "Shading never changes a value, its text or its sort order",
   ]) expect(text, guidance).toContain(guidance);
   const source = text.match(/\{"version":1,"type":"table"[^`\n]+/)?.[0];
   expect(source).toBeDefined();
   expect(parseTableConfig(source!)).toMatchObject({ ok: true, config: {
     columns: expect.arrayContaining([{ field: "count", label: "Count", format: "number", bar: true, decimals: 0 }]),
   } });
+  const shade = text.match(/\{"fields":\["error_a","error_b"\],"better":"lower"\}/)?.[0];
+  expect(shade).toBeDefined();
+  expect(parseTableConfig(JSON.stringify({
+    version: 1, type: "table", collection: "errors",
+    columns: [{ field: "error_a", format: "number" }, { field: "error_b", format: "number" }],
+    shade: JSON.parse(shade!),
+  }))).toMatchObject({ ok: true, config: { shade: { fields: ["error_a", "error_b"], better: "lower" } } });
 });
 
 it("documents inline icon names, source preservation, card labels and literal MCP emoji names", async () => {
