@@ -648,7 +648,7 @@ function validateListAttributes(type: BlockType, options: EditBlockOptions): voi
     throw new InvalidListAttributesError("list and indent apply only to list-item blocks");
   }
   if (options.list !== undefined && !isListStyle(options.list)) {
-    throw new InvalidListAttributesError("list must be bullet or ordered");
+    throw new InvalidListAttributesError("list must be bullet, ordered, unchecked or checked");
   }
   if (options.indent !== undefined && (!Number.isInteger(options.indent) || options.indent < 0 || options.indent > MAX_LIST_INDENT)) {
     throw new InvalidListAttributesError("indent must be an integer from 0 to 3");

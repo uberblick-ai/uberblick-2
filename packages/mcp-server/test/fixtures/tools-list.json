@@ -227,11 +227,13 @@
                 "type": "string"
               },
               "list": {
-                "description": "List style. List items only; omitted means bullet.",
+                "description": "List style: bullet, ordered, unchecked (- [ ]) or checked (- [x]). List items only; omitted means bullet.",
                 "type": "string",
                 "enum": [
                   "bullet",
-                  "ordered"
+                  "ordered",
+                  "unchecked",
+                  "checked"
                 ]
               },
               "indent": {
@@ -891,11 +893,13 @@
           }
         },
         "list": {
-          "description": "New list style on an existing list item; omitted keeps its style. Refused on other block types.",
+          "description": "New list style: bullet, ordered, unchecked (- [ ]) or checked (- [x]). Existing list items only; omitted keeps its style.",
           "type": "string",
           "enum": [
             "bullet",
-            "ordered"
+            "ordered",
+            "unchecked",
+            "checked"
           ]
         },
         "indent": {
@@ -1039,11 +1043,13 @@
                 "type": "string"
               },
               "list": {
-                "description": "List style. List items only; omitted means bullet.",
+                "description": "List style: bullet, ordered, unchecked (- [ ]) or checked (- [x]). List items only; omitted means bullet.",
                 "type": "string",
                 "enum": [
                   "bullet",
-                  "ordered"
+                  "ordered",
+                  "unchecked",
+                  "checked"
                 ]
               },
               "indent": {

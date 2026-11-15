@@ -724,6 +724,66 @@ describe("lists and quotes", () => {
     expect(deep.blocks.map((block) => block.indent)).toEqual([0, 1, 2, 3, 3]);
   });
 
+  it.each(["-", "*", "+"])("round-trips %s task markers, formatting and state at every depth", (marker) => {
+    const states = [[" ", "unchecked"], ["x", "checked"], ["X", "checked"]] as const;
+    const source = states.flatMap(([state]) => Array.from({ length: 4 }, (_, indent) =>
+      `${"    ".repeat(indent)}${marker} [${state}] an **important** task`,
+    )).join("\n");
+    const imported = importMarkdown(source);
+    expect(imported.blocks).toEqual(states.flatMap(([, list]) => Array.from({ length: 4 }, (_, indent) => ({
+      type: "list-item", text: "an important task", list, indent,
+      inline: [
+        { text: "an ", marks: {} },
+        { text: "important", marks: { bold: true } },
+        { text: " task", marks: {} },
+      ],
+    }))));
+    const doc = docFrom(source);
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe(`${states.flatMap(([state]) => Array.from({ length: 4 }, (_, indent) =>
+      `${"    ".repeat(indent)}- [${state.toLowerCase()}] an **important** task`,
+    )).join("\n")}\n`);
+    expect(importMarkdown(exported).blocks).toEqual(imported.blocks);
+    doc.destroy();
+  });
+
+  it("round-trips empty task items without trailing whitespace", () => {
+    const source = "- [ ]\n    - [x]\n- [X]\n";
+    const expected = [
+      { type: "list-item", text: "", list: "unchecked", indent: 0 },
+      { type: "list-item", text: "", list: "checked", indent: 1 },
+      { type: "list-item", text: "", list: "checked", indent: 0 },
+    ];
+    expect(importMarkdown(source).blocks).toEqual(expected);
+    const doc = docFrom(source);
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe("- [ ]\n    - [x]\n- [x]\n");
+    expect(importMarkdown(exported).blocks).toEqual(expected);
+    doc.destroy();
+  });
+
+  it.each([" ", "x", "X"])("keeps a bullet's literal [%s] prefix through export and import", (state) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Literal task marker" });
+    appendBlock(doc, { type: "list-item", text: `[${state}] item`, list: "bullet" });
+    const exported = exportMarkdown(doc, { frontmatter: false });
+    expect(exported).toBe(`- \\[${state}] item\n`);
+    expect(importMarkdown(exported).blocks).toEqual([
+      { type: "list-item", text: `[${state}] item`, list: "bullet", indent: 0 },
+    ]);
+    doc.destroy();
+  });
+
+  it("leaves ordered task markers and incomplete task syntax as literal text", () => {
+    expect(importMarkdown("1. [ ] item\n2. [x] item\n3. [X] item\n- [y] item\n- [x]item").blocks).toEqual([
+      { type: "list-item", text: "[ ] item", list: "ordered", indent: 0 },
+      { type: "list-item", text: "[x] item", list: "ordered", indent: 0 },
+      { type: "list-item", text: "[X] item", list: "ordered", indent: 0 },
+      { type: "list-item", text: "[y] item", list: "bullet", indent: 0 },
+      { type: "list-item", text: "[x]item", list: "bullet", indent: 0 },
+    ]);
+  });
+
   /**
    * Depth is not "further right than the line above": an item is nested only
    * when it reaches the column where the item above it starts its *content* —
@@ -777,7 +837,7 @@ describe("lists and quotes", () => {
    * the writer counts. A run that changes style, or a level that is re-entered,
    * starts again at one — which is what the markdown means anyway.
    */
-  it("numbers ordered items per level, restarting where the run does", () => {
+  it.each(["bullet", "unchecked", "checked"] as const)("numbers ordered items per level, restarting after %s", (style) => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Numbers" });
     for (const [text, list, indent] of [
@@ -785,7 +845,7 @@ describe("lists and quotes", () => {
       ["one.one", "ordered", 1],
       ["one.two", "ordered", 1],
       ["two", "ordered", 0],
-      ["bullet", "bullet", 0],
+      ["bullet", style, 0],
       ["one again", "ordered", 0],
     ] as const) {
       appendBlock(doc, { type: "list-item", text, list, indent });
@@ -799,7 +859,7 @@ describe("lists and quotes", () => {
         "    1. one.one",
         "    2. one.two",
         "2. two",
-        "- bullet",
+        style === "unchecked" ? "- [ ] bullet" : style === "checked" ? "- [x] bullet" : "- bullet",
         "1. one again",
         "",
         "After.",
@@ -816,14 +876,14 @@ describe("lists and quotes", () => {
    * editor draws the same numbers from the same rule (`listNumbers`), which is
    * what keeps the markers a reader sees and the markdown they export in step.
    */
-  it("keeps an outer ordered run counting across a nested bullet", () => {
+  it.each(["bullet", "unchecked", "checked"] as const)("keeps an outer ordered run counting across a nested %s", (style) => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Mixed" });
     for (const [text, list, indent] of [
       ["parent", "ordered", 0],
-      ["child", "bullet", 1],
+      ["child", style, 1],
       ["parent two", "ordered", 0],
-      ["child two", "bullet", 1],
+      ["child two", style, 1],
       ["parent three", "ordered", 0],
     ] as const) {
       appendBlock(doc, { type: "list-item", text, list, indent });
@@ -832,9 +892,9 @@ describe("lists and quotes", () => {
     expect(exportMarkdown(doc, { frontmatter: false })).toBe(
       [
         "1. parent",
-        "    - child",
+        style === "unchecked" ? "    - [ ] child" : style === "checked" ? "    - [x] child" : "    - child",
         "2. parent two",
-        "    - child two",
+        style === "unchecked" ? "    - [ ] child two" : style === "checked" ? "    - [x] child two" : "    - child two",
         "3. parent three",
         "",
       ].join("\n"),

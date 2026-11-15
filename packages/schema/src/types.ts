@@ -50,7 +50,7 @@ export type CalloutVariant = (typeof CALLOUT_VARIANTS)[number];
 /**
  * A list is adjacent flat list-item blocks; no list container node is stored.
  */
-export const LIST_STYLES = ["bullet", "ordered"] as const;
+export const LIST_STYLES = ["bullet", "ordered", "unchecked", "checked"] as const;
 
 export type ListStyle = (typeof LIST_STYLES)[number];
 

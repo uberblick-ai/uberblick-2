@@ -159,7 +159,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   invalid_list_attributes: {
     recoveryClass: "manual",
-    guidance: "Supply list or indent only when editing a list-item block, with list bullet or ordered and indent an integer from 0 to 3. Nothing was written.",
+    guidance: "Supply list or indent only on a list-item block, with list bullet, ordered, unchecked (- [ ]) or checked (- [x]) and indent an integer from 0 to 3. Nothing was written.",
   },
   invalid_callout: {
     recoveryClass: "manual",

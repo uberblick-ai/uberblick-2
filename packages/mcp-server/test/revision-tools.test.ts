@@ -437,6 +437,8 @@ describe("historical reads through the MCP boundary", () => {
       { type: "table", text: `| Label | Reference |\n| :--- | ---: |\n| **Earlier** | [Target](${target.uuid}) |` },
       { type: "card", text: "footer: Foot\ntitle: **Earlier card**\nlabel: Label\n\nA *body*." },
       { type: "figma", text: "height: 560\ntitle: Earlier design\nurl: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345\n\nA **caption**." },
+      { type: "list-item", text: "Earlier unchecked", list: "unchecked", indent: 1 },
+      { type: "list-item", text: "Earlier checked", list: "checked", indent: 3 },
     ] });
     await rig.ok("annotate", { uuid, block_id: inserted.blocks[0].id, start: 0, end: 7, text: "Excluded comment" });
     await rig.ok("update_data", { uuid, operations: [{ collection: "observations", schema: textSchema, upsert: [
@@ -484,6 +486,11 @@ describe("historical reads through the MCP boundary", () => {
       .toBe("label: Label\ntitle: **Earlier card**\nfooter: Foot\n\nA *body*.");
     expect(historical.blocks.find((block: { type: string }) => block.type === "figma").figma)
       .toEqual({ kind: "frame", file: "k3Lm9QzT2x", fileName: "Checkout flow", node: "12:345" });
+    expect(historical.blocks.filter((block: { type: string }) => block.type === "list-item"))
+      .toEqual([
+        { id: inserted.blocks[4].id, type: "list-item", text: "Earlier unchecked", list: "unchecked", indent: 1 },
+        { id: inserted.blocks[5].id, type: "list-item", text: "Earlier checked", list: "checked", indent: 3 },
+      ]);
     expect(await rig.ok("get_data", { uuid, revision })).toEqual({ ...earlierData, revision, history: historical.history });
     const first = await rig.ok("get_data", { uuid, revision, collection: "observations", limit: 1 });
     expect(first).toMatchObject({ uuid, revision, recordCount: 3, records: [{ id: "a", value: { text: "earlier a" } }], complete: false, next_after: "a" });

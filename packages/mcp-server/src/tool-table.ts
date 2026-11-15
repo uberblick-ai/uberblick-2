@@ -189,7 +189,7 @@ export const tools: readonly Tool[] = [
       title: "Release checklist",
       description: "The steps and checks used to prepare a product release.",
       blocks: [{
-        type: "list-item", text: "Review the release notes before publishing.", list: "ordered", indent: 0,
+        type: "list-item", text: "Review the release notes before publishing.", list: "unchecked", indent: 0,
       }],
     },
     related: proseContracts,
@@ -420,6 +420,7 @@ export const tools: readonly Tool[] = [
       old_text: "Confirm the final checks passed.",
       new_text: "Confirm the final checks passed.",
       rev: "revision-from-get_doc",
+      list: "checked",
       indent: 1,
     },
     related: proseContracts,
@@ -446,7 +447,7 @@ export const tools: readonly Tool[] = [
       blocks: [{
         type: "list-item",
         text: "Confirm the final checks passed.",
-        list: "ordered",
+        list: "unchecked",
         indent: 2,
       }],
     },

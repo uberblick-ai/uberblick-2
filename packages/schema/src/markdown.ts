@@ -523,7 +523,8 @@ function escapeParagraphLines(text: string): string {
  */
 function listMarker(block: Block, number: number | null): string {
   const indent = Math.min(block.indent ?? 0, MAX_LIST_INDENT);
-  const marker = number === null ? "- " : `${number}. `;
+  const marker = block.list === "unchecked" ? "- [ ] " : block.list === "checked" ? "- [x] "
+    : number === null ? "- " : `${number}. `;
   return `${LIST_INDENT_UNIT.repeat(indent)}${marker}`;
 }
 
@@ -1634,9 +1635,13 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // Gaps above four columns imply indented code; nesting then uses a one-space
       // gap rather than the full gap, matching CommonMark content columns.
       const contentColumn = afterMarker + (gap > 4 ? 1 : gap);
+      const source = (listLine[4] ?? "").trim();
+      const ordered = /^\d/.test(marker);
+      // Read task markers before inline unescaping, so escaped brackets stay text.
+      const task = ordered ? null : /^\[([ xX])\](?:[ \t]+|$)/.exec(source);
       blocks.push({
-        ...proseBlock("list-item", (listLine[4] ?? "").trim()),
-        list: /^\d/.test(marker) ? "ordered" : "bullet",
+        ...proseBlock("list-item", task === null ? source : source.slice(task[0].length)),
+        list: ordered ? "ordered" : task === null ? "bullet" : task[1] === " " ? "unchecked" : "checked",
         indent: listLevel(column, contentColumn),
       });
       continue;

@@ -7,7 +7,7 @@ import { MAX_LIST_INDENT } from "./types.js";
 export interface ListMarkerInput {
   /** The block's type name. Anything but `"list-item"` ends the run. */
   type: string;
-  /** `"ordered"` or `"bullet"`; anything else reads as a bullet. */
+  /** Only `"ordered"` receives a number; other styles group like bullets. */
   list?: string | undefined;
   /** Nesting depth; clamped to 0–{@link MAX_LIST_INDENT}. */
   indent?: number | undefined;
@@ -21,7 +21,7 @@ interface OpenLevel {
 /**
  * Numbers are display state, never stored on list items. A counter per depth
  * restarts on entry or style change; a non-list block ends all counters.
- * Results parallel `blocks`, with null for bullets and non-list blocks.
+ * Results parallel `blocks`, with null for non-numbered items and non-list blocks.
  */
 export function listNumbers(
   blocks: readonly ListMarkerInput[],

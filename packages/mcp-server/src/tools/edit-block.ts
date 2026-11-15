@@ -13,7 +13,7 @@ export const inputSchema = strictInput({
   old_text: z.string().describe("The block's whole text as get_doc returns it, not a fragment. Asserted before the splice."),
   new_text: z.string().describe("Replacement text. Newly written bare web addresses in prose become external links. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."),
   column_widths: columnWidthsArg,
-  list: listStyleArg.optional().describe("New list style on an existing list item; omitted keeps its style. Refused on other block types."),
+  list: listStyleArg.optional().describe("New list style: bullet, ordered, unchecked (- [ ]) or checked (- [x]). Existing list items only; omitted keeps its style."),
   indent: listIndentArg.optional().describe("New list depth, an integer from 0 to 3, on an existing list item; omitted keeps its depth. Refused on other block types."),
   variant: z.string().optional().describe("New callout variant: note, tip, important, warning or caution; omitted keeps it. Refused on other block types."),
   icon: z.string().optional().describe("New callout icon: one emoji character or a curated :name: icon; an empty value restores the default. Omitted keeps it. Refused on other block types."),
