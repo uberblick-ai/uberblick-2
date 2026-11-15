@@ -1943,7 +1943,7 @@ h6.ub-heading {
 }
 .ub-data-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--muted-foreground); }
 .ub-data-table td[data-shade="true"] {
-  background: light-dark(hsl(215 65% calc(97% - var(--ub-data-shade-strength) * 39%)), hsl(215 65% calc(17% + var(--ub-data-shade-strength) * 30%)));
+  background: light-dark(hsl(210 65% calc(97% - var(--ub-data-shade-strength) * 43%)), hsl(210 65% calc(17% + var(--ub-data-shade-strength) * 29%)));
   color: var(--data-shade-foreground);
 }
 .ub-data-table th { max-width: 32rem; }
