@@ -4,6 +4,7 @@ import { createPrivateKey, createPublicKey, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout } from "node:timers/promises";
 import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -442,29 +443,38 @@ describe("ub auth logout retires devices", () => {
     await signedIn(remote);
     const { box, login } = await signedIn(remote);
     const before = readFileSync(credentialPath(box));
+    // Healthy replies before self-revocation can exceed the suite's 400 ms ceiling.
+    const managementEnv = { UB_TEST_MAX_WAIT_MS: "10000" };
+    remote.controls.onManagement = async body => {
+      if (body.operation !== "revoke-device" || body.deviceId !== login.credential.record.deviceId) {
+        await setTimeout(500);
+      }
+      return undefined;
+    };
     remote.controls.transform = (path, status, result, body) => path === "/auth/manage"
       && body.operation === "revoke-device" && body.deviceId === login.credential.record.deviceId
       ? { status: 502, result: { status: "failed" } } : { status, result };
-    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
-    expect(run.status).toBe(1);
-    expect(run.stdout).toContain(`confirmed  1 revocations on ${remote.origin}\n`);
-    expect(run.stderr).toMatch(/uncertain/i);
-    expect(run.stderr).toMatch(/login.*may.*(work|valid)|may.*no longer work/i);
-    expect(run.stderr).toContain(`ub auth login ${remote.origin}`);
-    expect(run.stderr).toMatch(/still signed in/i);
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box, managementEnv);
+    expect(run.status, run.stderr).toBe(1);
+    expect(run.stdout, run.stderr).toContain(`confirmed  1 revocations on ${remote.origin}\n`);
+    expect(run.stderr, run.stderr).toMatch(/uncertain/i);
+    expect(run.stderr, run.stderr).toMatch(/login.*may.*(work|valid)|may.*no longer work/i);
+    expect(run.stderr, run.stderr).toContain(`ub auth login ${remote.origin}`);
+    expect(run.stderr, run.stderr).toMatch(/still signed in/i);
     expect(readFileSync(credentialPath(box)).equals(before), "the stored login was kept byte-for-byte").toBe(true);
     expect(privateDeviceRows(remote.databasePath).every(row => row.revoked_at !== null)).toBe(true);
+    remote.controls.onManagement = undefined;
     remote.controls.transform = undefined;
-    const retry = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
-    expect(retry.status).toBe(1);
-    expect(retry.stdout).toContain(`confirmed  0 revocations on ${remote.origin}\n`);
-    expect(retry.stderr).toMatch(/sign.in.required|sign in again|refus/i);
+    const retry = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box, managementEnv);
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stdout, retry.stderr).toContain(`confirmed  0 revocations on ${remote.origin}\n`);
+    expect(retry.stderr, retry.stderr).toMatch(/sign.in.required|sign in again|refus/i);
     expect(readFileSync(credentialPath(box)).equals(before), "the stored login was kept byte-for-byte").toBe(true);
     const renewed = await runInProcess(["auth", "login", remote.origin], box);
     expect(renewed.status, renewed.stderr).toBe(0);
-    const recovered = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
+    const recovered = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box, managementEnv);
     expect(recovered.status, recovered.stderr).toBe(0);
-    expect(recovered.stdout).toContain(`revoked    1 devices of ${USERNAME}`);
+    expect(recovered.stdout, recovered.stderr).toContain(`revoked    1 devices of ${USERNAME}`);
   });
 
   it("all-devices includes confirmed closure failures in its count and continues to the current device", async () => {
