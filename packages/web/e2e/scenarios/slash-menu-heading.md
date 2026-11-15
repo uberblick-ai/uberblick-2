@@ -21,7 +21,7 @@ names it back. The Playwright assertions check the behavior described here.
 
 - The slash menu converts only an *empty* paragraph — a non-empty one is not
   offered the gesture at all. That is current product truth, stated in
-  *Using the web editor* (`8c00fba4-4c81-4eb4-9ce5-c4bbd9427efd`), and this
+  *Editing in the web editor* (`e7e14266-3b08-4877-bd3d-700a98aa094c`), and this
   scenario would be wrong the day that changed.
 - `/he` matches the three heading levels and Checklist, so the count in step 4
   is four. Heading 2 remains the second entry.
