@@ -185,7 +185,7 @@ test("rich answer controls stay inside the modal on desktop keyboard and pointer
   await page.keyboard.type("/");
   const menu = dialog(page).getByRole("listbox", { name: "Block types", exact: true });
   await expect.poll(() => menu.getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("aria-label"))))
-    .toEqual(["Paragraph", "Bullet list", "Numbered list", "Code", "Table"]);
+    .toEqual(["Paragraph", "Bullet list", "Numbered list", "Checklist", "Code", "Table"]);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
