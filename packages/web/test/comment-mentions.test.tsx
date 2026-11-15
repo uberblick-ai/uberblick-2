@@ -184,6 +184,12 @@ it("renders current-member pills, formatting and external links while keeping do
 });
 
 describe("comment inline Markdown", () => {
+  it.each(["A <-> B", "Array<T> notes"])("displays an inserted document label %s literally", (title) => {
+    const view = render(<CommentText text={renderMarkdownLink(title, TARGET)} docLinks={directory().context} />);
+    expect(screen.getByRole("link", { name: title }).getAttribute("href")).toBe(`/workspace/${TARGET}`);
+    expect(view.container.textContent).toBe(title);
+  });
+
   it("keeps www addresses as plain comment text", () => {
     const view = render(<CommentText text="See www.example.com and <ftp://example.com>" docLinks={null} />);
     expect(view.container.textContent).toBe("See www.example.com and <ftp://example.com>");

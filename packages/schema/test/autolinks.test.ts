@@ -45,7 +45,7 @@ describe("structured Markdown writes", () => {
     initDoc(doc, { uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Links" });
     const id = appendBlock(doc, { type, text: source });
     const part = structuredInlineParts(findBlockElement(doc, id)!).find(({ texts }) =>
-      texts.some((text) => readInlineRuns(text).some((run) => run.text.includes("https://old.example.com"))))!;
+      texts.some((text) => readInlineRuns(text).some((run) => run.text === "https://old.example.com/_next/a")))!;
     const text = part.texts[0]!;
     expect(readInlineRuns(text)).toContainEqual({ text: "https://old.example.com/_next/a", marks: { link: "https://old.example.com/_next/a" } });
     text.format(7, "https://old.example.com/_next/a".length, { link: null });

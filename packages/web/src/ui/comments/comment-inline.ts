@@ -47,7 +47,7 @@ function withCommentLinks(source: string, documentLinks: boolean): string {
       const original = tail.slice(0, link.next);
       const docId = canonicalDocumentUuid(link.href);
       // Document labels keep the existing literal-label display contract.
-      const label = link.label.replace(/\\(.)/g, (escaped, character: string) => "\\`*[]~_".includes(character) ? character : escaped);
+      const label = link.label.replace(/\\(.)/g, (escaped, character: string) => "\\`*[]~_<".includes(character) ? character : escaped);
       result += docId !== null && documentLinks ? renderMarkdownLink(label, docId)
         : isExternalHref(link.href) ? original : original.replace(/[\\`*_[\]~]/g, "\\$&");
       index += link.next;
