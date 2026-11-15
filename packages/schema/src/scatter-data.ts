@@ -13,6 +13,7 @@ export interface ScatterAxisMapping {
   label?: string;
   unit?: string;
   range?: [number, number];
+  reference?: number | number[];
   lower?: string;
   upper?: string;
 }
@@ -24,6 +25,7 @@ export interface ScatterConfig {
   y: ScatterAxisMapping;
   label: string;
   group?: string;
+  diagonal?: boolean;
   details: TableColumnMapping[];
   title?: string;
   height?: number;
@@ -79,10 +81,12 @@ interface ScatterProblem {
 export type ScatterProjection = ScatterReady | ScatterNoRecords | ScatterProblem;
 
 function axis(value: unknown): boolean {
-  return object(value) && keys(value, ["field", "label", "unit", "range", "lower", "upper"]) &&
+  return object(value) && keys(value, ["field", "label", "unit", "range", "reference", "lower", "upper"]) &&
     name(value.field) && optionalText(value, "label") && optionalText(value, "unit") &&
     (!Object.hasOwn(value, "lower") || name(value.lower)) &&
     (!Object.hasOwn(value, "upper") || name(value.upper)) &&
+    (!Object.hasOwn(value, "reference") || numeric(value.reference) ||
+      (Array.isArray(value.reference) && value.reference.length <= 8 && value.reference.every(numeric))) &&
     (!Object.hasOwn(value, "range") || (Array.isArray(value.range) && value.range.length === 2 &&
       numeric(value.range[0]) && numeric(value.range[1]) && value.range[0] < value.range[1]));
 }
@@ -92,10 +96,11 @@ export function parseScatterConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid scatter configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "label", "group", "details", "title", "height"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "label", "group", "diagonal", "details", "title", "height"]) ||
       value.version !== 1 || value.type !== "scatter" || !name(value.collection) ||
       !axis(value.x) || !axis(value.y) || !name(value.label) ||
       (Object.hasOwn(value, "group") && !name(value.group)) ||
+      (Object.hasOwn(value, "diagonal") && typeof value.diagonal !== "boolean") ||
       (Object.hasOwn(value, "details") && (!Array.isArray(value.details) || value.details.length > 8 || !value.details.every(tableColumn))) ||
       !optionalText(value, "title") ||
       (Object.hasOwn(value, "height") && (typeof value.height !== "number" || !Number.isInteger(value.height) ||
@@ -135,6 +140,12 @@ function bound(record: DataRecord, mapping: ScatterAxisMapping, side: "lower" | 
 function domain(points: ScatterPoint[], dimension: "x" | "y", mapping: ScatterAxisMapping): [number, number] {
   let lower = mapping.range?.[0] ?? Infinity;
   let upper = mapping.range?.[1] ?? -Infinity;
+  const references = Array.isArray(mapping.reference) ? mapping.reference
+    : mapping.reference === undefined ? [] : [mapping.reference];
+  for (const reference of references) {
+    lower = Math.min(lower, reference);
+    upper = Math.max(upper, reference);
+  }
   for (const point of points) {
     lower = Math.min(lower, point[dimension], point[dimension === "x" ? "xLower" : "yLower"] ?? Infinity);
     upper = Math.max(upper, point[dimension], point[dimension === "x" ? "xUpper" : "yUpper"] ?? -Infinity);

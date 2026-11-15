@@ -1,6 +1,6 @@
 /** Chart.js owns plotting and hit testing; the native select owns keyboard input. */
 import { Chart, ScatterController } from "chart.js";
-import type { ChartConfiguration, Plugin, PointStyle } from "chart.js";
+import type { ChartConfiguration, Plugin, PointStyle, Scale } from "chart.js";
 import type { ScatterAxisMapping, ScatterPoint, ScatterProjection, ScatterReady } from "@uberblick/schema";
 import { createRoot } from "react-dom/client";
 import { Fragment } from "react";
@@ -12,6 +12,41 @@ import { formatChartNumber } from "./chart-data.js";
 
 Chart.register(ScatterController);
 const SHAPES: PointStyle[] = ["circle", "triangle", "rect", "rectRot", "cross", "crossRot", "star", "rectRounded"];
+
+function references(mapping: ScatterAxisMapping): number[] {
+  return [...new Set(Array.isArray(mapping.reference) ? mapping.reference : mapping.reference === undefined ? [] : [mapping.reference])];
+}
+
+function drawReferences(instance: Chart<"scatter">, result: ScatterReady, color: string): void {
+  const { ctx, scales: { x, y }, chartArea } = instance;
+  if (x === undefined || y === undefined) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+  ctx.clip();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  for (const value of references(result.config.x)) {
+    const pixel = x.getPixelForValue(value);
+    ctx.moveTo(pixel, chartArea.top); ctx.lineTo(pixel, chartArea.bottom);
+  }
+  for (const value of references(result.config.y)) {
+    const pixel = y.getPixelForValue(value);
+    ctx.moveTo(chartArea.left, pixel); ctx.lineTo(chartArea.right, pixel);
+  }
+  if (result.config.diagonal) {
+    // known limit: the diagonal compares raw values across units; revisit when unit-aware diagonals are required.
+    const lower = Math.max(x.min, y.min), upper = Math.min(x.max, y.max);
+    if (lower < upper) {
+      ctx.moveTo(x.getPixelForValue(lower), y.getPixelForValue(lower));
+      ctx.lineTo(x.getPixelForValue(upper), y.getPixelForValue(upper));
+    }
+  }
+  ctx.stroke();
+  ctx.restore();
+}
 
 export function scatterDiagnosticsText(result: ScatterProjection): string {
   if (!("diagnostics" in result)) return "";
@@ -116,6 +151,7 @@ export function scatterView(canvas: HTMLCanvasElement): {
     id: "stored-scatter-decorations",
     beforeDatasetsDraw(instance) {
       if (result === null) return;
+      drawReferences(instance, result, colors.color);
       const { ctx, scales } = instance;
       const xScale = scales.x;
       const yScale = scales.y;
@@ -196,16 +232,26 @@ export function scatterView(canvas: HTMLCanvasElement): {
       element.hidden = false;
       canvas.setAttribute("aria-label", next.config.title || `Scatter plot of ${next.config.y.label || next.config.y.field} by ${next.config.x.label || next.config.x.field}`);
       const font = { family: colors.fontFamily, size: Number.parseFloat(colors.fontSize), lineHeight: colors.lineHeight };
-      const scale = (axis: "x" | "y") => ({
-        type: "linear" as const,
-        ...(next.config[axis].range === undefined
-          ? { suggestedMin: next.domain[axis][0], suggestedMax: next.domain[axis][1] }
-          : { min: next.domain[axis][0], max: next.domain[axis][1] }),
-        title: { display: true, text: next.config[axis].label || next.config[axis].field, color: colors.color, font },
-        ticks: { color: colors.color, font, maxTicksLimit: 6,
-          callback: (value: string | number) => `${formatChartNumber(Number(value))}${next.config[axis].unit ? ` ${next.config[axis].unit}` : ""}` },
-        grid: { color: colors.borderTopColor }, border: { display: false },
-      });
+      const scale = (axis: "x" | "y") => {
+        const values = references(next.config[axis]);
+        return {
+          type: "linear" as const,
+          ...(next.config[axis].range === undefined
+            ? { suggestedMin: next.domain[axis][0], suggestedMax: next.domain[axis][1] }
+            : { min: next.domain[axis][0], max: next.domain[axis][1] }),
+          title: { display: true, text: next.config[axis].label || next.config[axis].field, color: colors.color, font },
+          afterBuildTicks: (scale: Scale) => {
+            for (const tick of scale.ticks) tick.major = values.includes(tick.value);
+            for (const value of values) if (!scale.ticks.some(tick => tick.value === value)) scale.ticks.push({ value, major: true });
+            scale.ticks.sort((a, b) => a.value - b.value);
+          },
+          // known limit: crowded reference labels may be skipped; revisit when every label must remain visible.
+          ticks: { color: colors.color, font, maxTicksLimit: Math.max(6, values.length), major: { enabled: values.length > 0 },
+            callback: (value: string | number) => `${formatChartNumber(Number(value))}${next.config[axis].unit ? ` ${next.config[axis].unit}` : ""}` },
+          grid: { color: (context: { tick?: { major?: boolean } }) => context.tick?.major ? "transparent" : colors.borderTopColor },
+          border: { display: false },
+        };
+      };
       const configuration: ChartConfiguration<"scatter", ScatterPoint[]> = {
         type: "scatter", plugins: [decorations],
         data: { datasets: [{ data: next.points, showLine: false, pointRadius: 4, pointHitRadius: 8,

@@ -662,21 +662,30 @@ export const toolHelpDetails = {
     "A declared range replaces the zero-baseline rule for line-only axes and panel unit groups. " +
     "Axes and panel unit groups containing bars always include zero. A reference draws a horizontal line across the plot; " +
     "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
-    "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
+    "For line mappings, range and reference are invalid on x; both are also invalid in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
     categoryBarGuidance + dotGuidance +
     "A scatter plot uses type scatter, for example " +
-    "`{\"version\":1,\"type\":\"scatter\",\"collection\":\"options\",\"x\":{\"field\":\"cost\"}," +
-    "\"y\":{\"field\":\"quality\",\"unit\":\"%\",\"lower\":\"quality_low\",\"upper\":\"quality_high\",\"range\":[0,100]}," +
-    "\"label\":\"name\",\"group\":\"tier\",\"details\":[{\"field\":\"source\",\"format\":\"link\"}]}`. " +
-    "Both axes are numeric: each takes field and optional label, unit, range, lower and upper. " +
+    "`{\"version\":1,\"type\":\"scatter\",\"collection\":\"options\",\"x\":{\"field\":\"cost\",\"reference\":[25,50]}," +
+    "\"y\":{\"field\":\"quality\",\"unit\":\"%\",\"lower\":\"quality_low\",\"upper\":\"quality_high\",\"range\":[0,100],\"reference\":80}," +
+    "\"label\":\"name\",\"group\":\"tier\",\"diagonal\":true,\"details\":[{\"field\":\"source\",\"format\":\"link\"}]}`. " +
+    "Both axes are numeric: each takes field and optional label, unit, range, reference, lower and upper. " +
     "The required label field uses table text-cell formatting; colliding on-plot labels are hidden. " +
     "A numeric bound on the correct side draws a whisker and widens the domain; absent or null bounds draw nothing, " +
-    "and wrong-type or wrong-side bounds are omitted and counted. range remains a minimum span widened by points and bounds. " +
+    "and wrong-type or wrong-side bounds are omitted and counted. range remains a minimum span widened by points, bounds and references. " +
+    "On each scatter axis, reference is one finite number or a list of up to 8 finite numbers; an empty list draws nothing. " +
+    "Other values, non-number or non-finite entries and lists longer than 8 are invalid. " +
+    "Each distinct reference draws one neutral dashed line across the plot, stronger than the grid: vertical for x, horizontal for y, " +
+    "labelled on its own axis in that axis's tick number format and unit. References widen their own axis with or without range. " +
+    "Line, category-bar and dot series still accept only one finite reference number. " +
+    "Optional top-level diagonal is true or false; false behaves like an absent key, and other values are invalid. " +
+    "With true, an unlabelled neutral dashed line follows x = y through the plotted area wherever the axis ranges overlap, " +
+    "without changing either range. References and the diagonal add no legend entry or selection target and do not change " +
+    "point labels, the text alternative, diagnostics or mapping-write summaries. " +
     "Optional group assigns up to eight values distinct colour and shape pairs with a legend; points without a value are neutral. " +
     "More than eight values makes every point neutral and adds a warning naming the group field. " +
     "Optional details accepts at most eight table-column mappings. Optional title and height behave as for a line overlay. " +
-    "layout, limit, missing, reference and unknown keys are invalid for scatter. Each schema-valid record with numeric x and y " +
+    "layout, limit, missing and unknown keys are invalid for scatter. Each schema-valid record with numeric x and y " +
     "draws one unconnected point; no values are coerced, aggregated or calculated. At most 5,000 points appear in record-id order, " +
     "with shown/total counts when capped and omissions counted by reason. Every point can be selected by click, tap or keyboard, " +
     "including points with identical coordinates. Other plot clicks and Open chart source open the source in editable and read-only documents. " +
