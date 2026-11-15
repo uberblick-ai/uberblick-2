@@ -518,8 +518,9 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           dirty = false;
         }
         const result = prepared.projection;
-        notice.classList.toggle("ub-chart-limit-notice", (result.status === "ready" || result.status === "no-records") &&
-          (result.config.filter !== undefined || ("limit" in result.config && result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT)));
+        const filtered = "config" in result && result.config.filter !== undefined;
+        notice.classList.toggle("ub-chart-limit-notice", (result.status === "ready" || ((filtered || prepared.type === "bar" || prepared.type === "dot") && result.status === "no-records")) &&
+          (filtered || ("limit" in result.config && result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT)));
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
           table.clear();
@@ -529,7 +530,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           description.textContent = "";
           text(title, "");
           text(message, result.message);
-          const count = "notice" in result ? result.notice ?? "" : "";
+          const count = (filtered || prepared.type === "bar" || prepared.type === "dot") && "notice" in result ? result.notice ?? "" : "";
           text(notice, tableSource && count ? `Generated from document data · read-only · ${count}` : count);
           return;
         }

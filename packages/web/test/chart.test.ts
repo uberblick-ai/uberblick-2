@@ -278,6 +278,31 @@ describe("chart height controls", () => {
 });
 
 describe("filtered view composition", () => {
+  it("preserves the unfiltered line empty state while retaining a filtered window notice", async () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), limit: 1 });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "a", value: { day: 1, value: null, reference: "baseline" } },
+      { id: "b", value: { day: 2, value: null, reference: "baseline" } },
+    ] }]);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    const notice = root.querySelector<HTMLElement>(".ub-chart-notice")!;
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(notice.hidden).toBe(true);
+    expect(notice.classList.contains("ub-chart-limit-notice")).toBe(false);
+    const filtered = JSON.stringify({ ...JSON.parse(source), filter: { reference: "baseline" } });
+    await act(async () => { editBlock(doc, id, source, filtered); flush(); });
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe("Showing the latest 1 of 2 records");
+    await act(async () => editor.destroy());
+    doc.destroy(); directory.destroy();
+  });
+
   it.each(["line", "scatter", "bar", "dot", "table"])("keeps %s selection counts through no-match and live updates without writing source", async type => {
     const { doc, directory, id } = fixture();
     const source = JSON.stringify({ version: 1, type, collection: "trend", filter: { reference: "baseline" },
