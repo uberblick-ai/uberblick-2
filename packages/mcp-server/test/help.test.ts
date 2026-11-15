@@ -501,7 +501,7 @@ it("documents the table mapping through both help routes and accepts its source 
     "sort (one column field, direction asc or desc)", "supplies only the table's accessible name",
     "Without limit, every valid record appears in one continuous native table", "Generated from document data · read-only",
     "Open table source appears on hover or keyboard focus and stays reachable without hover",
-    "Unknown mapping keys and options are invalid", "contain no record values",
+    "Unknown mapping keys and options are invalid", "never write collection records",
   ]) expect(constraints, guidance).toContain(guidance);
   const insertSource = constraints?.match(/`(\{"version":1,"type":"table"[^`]+)`/)?.[1];
   expect(insertSource).toBeDefined();

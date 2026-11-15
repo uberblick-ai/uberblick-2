@@ -24,6 +24,18 @@ const categoryGroupGuidance =
   "its value like a data-table text cell, alongside the category and series values; absent or null groups add nothing. " +
   "When groups supply colours, the text alternative names the group field and groups in legend order; the accessible name stays unchanged. ";
 
+const viewFilterGuidance =
+  "Line, scatter, category-bar, dot and table mappings accept optional filter, an object with at least one entry, " +
+  "for example {\"reference\":\"baseline-a\"}. Each literal top-level field maps to a string, finite number, boolean or null. " +
+  "Every entry must match the stored field's JSON type and value exactly; strings compare exactly and nothing is coerced. " +
+  "An absent field never matches, even null. Empty objects, non-objects, array or object values are invalid configurations. " +
+  "A filter field ruled out by the collection schema is incompatible. Sort, limits, the chart's 5,000-record cap, " +
+  "axes, groups, scales and diagnostics use only selected records; live updates re-evaluate the filter. " +
+  "When a filter hides records, the chart notice or table footnote says how many it selects, such as 8 of 16 records; " +
+  "limit and cap notices count within that selection. No matches show a distinct no-records message and summary warning. " +
+  "Write-summary recordCount remains the collection total; plottedCount, series pointCount, rowCount and invalidRecordCount " +
+  "count only selected records. ";
+
 const categoryBarGuidance =
   "For named categories use type bar, for example " +
   "`{\"version\":1,\"type\":\"bar\",\"collection\":\"tickets\",\"category\":{\"field\":\"team\",\"label\":\"Team\"}," +
@@ -143,7 +155,7 @@ export const toolHelpDetails = {
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Chart seeds return a `chart` summary beside each block's id and rev, using this replica's current data. " +
     "A new document has no data yet: a valid mapping reports collection-absent, and invalid JSON reports " +
-    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " + categoryBarGuidance + dotGuidance +
+    "invalid-configuration. These are warnings that leave creation applied. See data for summary fields. " + viewFilterGuidance + categoryBarGuidance + dotGuidance +
     "Ablauf and wireframe code seeds return a `drawing` summary with the diagnostics the web editor lists; " +
     "they never refuse creation either. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
@@ -460,7 +472,7 @@ export const toolHelpDetails = {
     "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
     "includes its first and last x, with no other record values. A bound scatter mapping reports recordCount " +
     "and plottedCount without record values, and warns when its group field has more than eight values. Warnings and summary failures never refuse " +
-    "or roll back the edit, or change its durability result. See data for the full summary contract. " + categoryBarGuidance + dotGuidance +
+    "or roll back the edit, or change its durability result. See data for the full summary contract. " + viewFilterGuidance + categoryBarGuidance + dotGuidance +
     "Editing an ablauf or wireframe code block returns a `drawing` summary instead: `status` and the " +
     "diagnostics the web editor lists, advisory like the chart summary.\n\n" +
     "For an existing list item, optional `list` (`bullet`, `ordered`, `unchecked` or `checked`) and `indent` (integer 0–3) change " +
@@ -635,7 +647,7 @@ export const toolHelpDetails = {
     "A terminal's text is a " +
     "transcript in which a line beginning `$ ` is a command typed out and every other line is output shown " +
     "whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. A chart's " +
-    "text is a JSON mapping, for example " +
+    "text is a JSON mapping. " + viewFilterGuidance + "For example " +
     "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
     "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
     "and y has one to eight numeric series. Optional y series type is line or bar, default line. " +
@@ -726,7 +738,7 @@ export const toolHelpDetails = {
     "total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing " +
     "notice and diagnostics when N exceeds 5,000. update_data recomputes a limited window without changing its source. " +
     "Unknown mapping keys and options are invalid. All views only " +
-    "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
+    "read their document's collection and never write collection records; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:
     "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links`, `code_check` and decision `discussion` " +

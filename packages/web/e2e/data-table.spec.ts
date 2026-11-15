@@ -933,6 +933,89 @@ test("heat maps preserve native copying and sorting while live scales refresh un
   expect(new Set(await equal.evaluateAll(elements => elements.map(element => getComputedStyle(element).backgroundColor))).size).toBe(1);
 });
 
+test("filtered chart and table views show subset counts and follow live membership", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const filter = { reference: "baseline-a" };
+  const tableMapping = {
+    version: 1, type: "table", collection: "measurements", title: "Filtered evidence", filter, limit: 2,
+    columns: [{ field: "name", label: "Name" }, { field: "value", label: "Value", format: "number" }],
+    sort: { field: "value", direction: "asc" },
+  };
+  const chartMapping = {
+    version: 1, type: "line", collection: "measurements", title: "Filtered evidence trend", filter, limit: 2,
+    x: { field: "day", type: "date", label: "Day" }, y: [{ field: "value", label: "Value" }],
+  };
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Filtered live views", description: "Two views select the same records from one collection.",
+    blocks: [
+      { type: "paragraph", text: "These views share a collection." },
+      { type: "chart", text: JSON.stringify(tableMapping) },
+      { type: "chart", text: JSON.stringify(chartMapping) },
+    ],
+  });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "Alpha", value: 10, day: "2026-01-01", reference: "baseline-a" } },
+    { id: "b", value: { name: "Beta", value: 20, day: "2026-01-02", reference: "baseline-a" } },
+    { id: "c", value: { name: "Gamma", value: 30, day: "2026-01-03", reference: "baseline-a" } },
+    { id: "d", value: { name: "Delta", value: 10_000, day: "2026-01-04", reference: "baseline-b" } },
+    { id: "e", value: { name: "Hidden invalid", value: "invalid", day: "invalid", reference: "baseline-b" } },
+  ] }] });
+  let page: Page | undefined;
+  for (const appearance of ["light", "dark"] as const) {
+    page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+      colorScheme: appearance, locale: "en-US", hasTouch: info.project.use.hasTouch === true,
+      isMobile: info.project.use.isMobile === true,
+      ...(info.project.use.viewport === undefined ? {} : { viewport: info.project.use.viewport }),
+      ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+      ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+    } });
+    await waitForDocumentDraw(page, session, uuid, { index: "all" });
+    await page.evaluate(() => document.fonts.ready);
+    const table = page.getByRole("table", { name: "Filtered evidence", exact: true });
+    await expect(table.locator("tbody tr td:first-child")).toHaveText(["Alpha", "Beta"]);
+    const canvas = page.getByRole("img", { name: "Filtered evidence trend", exact: true });
+    await expect(canvas).toHaveAccessibleDescription(/2 plotted records\. First Day: Jan 2, 2026\. Last: Jan 3, 2026\./);
+    const tableNotice = page.locator(".ub-chart[data-view='table'] .ub-chart-notice");
+    await expect(tableNotice).toHaveText("Generated from document data · read-only · 3 of 5 records · Showing 2 of 3 records");
+    await expect(page.locator(".ub-chart[data-view='line'] .ub-chart-notice")).toHaveText("3 of 5 records · Showing the latest 2 of 3 records");
+    await expect(page.locator(".ub-chart-diagnostics:visible")).toHaveCount(0);
+    for (const notice of await page.locator(".ub-chart-notice").all()) {
+      expect(await notice.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+      await expect(notice).not.toHaveAttribute("aria-live", /.*/);
+    }
+    const readings = await renderedText(page, ".ub-chart-notice");
+    expect(readings.length).toBeGreaterThan(0);
+    for (const reading of readings) {
+      expect(reading.ratio, `${appearance}: ${reading.where}`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+  if (page === undefined) throw new Error("e2e: filtered views were not opened");
+  const table = page.getByRole("table", { name: "Filtered evidence", exact: true });
+  const canvas = page.getByRole("img", { name: "Filtered evidence trend", exact: true });
+  await activateControl(table.getByRole("button", { name: "Value", exact: true }), { touch: info.project.use.hasTouch === true });
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["Beta", "Alpha"]);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "a", value: { name: "Alpha", value: 10, day: "2026-01-01", reference: "baseline-b" } },
+    { id: "d", value: { name: "Delta", value: 40, day: "2026-01-04", reference: "baseline-a" } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["Gamma", "Beta"]);
+  await expect(canvas).toHaveAccessibleDescription(/2 plotted records\. First Day: Jan 3, 2026\. Last: Jan 4, 2026\./);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "b", value: { name: "Beta", value: 20, day: "2026-01-02", reference: "baseline-b" } },
+    { id: "c", value: { name: "Gamma", value: 30, day: "2026-01-03", reference: "baseline-b" } },
+    { id: "d", value: { name: "Delta", value: 40, day: "2026-01-04", reference: "baseline-b" } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid, { index: "all", outcome: "error" });
+  const panels = page.locator(".ub-chart-panel");
+  await expect(panels).toHaveCount(2);
+  for (const panel of await panels.all()) await expect(panel).toHaveAttribute("data-state", "no-records");
+  await expect(page.locator(".ub-chart-message")).toHaveText(["No records match the filter.", "No records match the filter."]);
+  await expect(page.locator(".ub-chart[data-view='table'] .ub-chart-notice")).toHaveText("Generated from document data · read-only · 0 of 5 records");
+  await expect(page.locator(".ub-chart[data-view='line'] .ub-chart-notice")).toHaveText("0 of 5 records");
+});
+
 test("every header sorts through native pointer and keyboard input without moving the document selection", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const mapping = { ...MAPPING, sort: { field: "day", direction: "desc" } };

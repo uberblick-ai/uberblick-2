@@ -20,6 +20,33 @@ export function optionalText(value: Record<string, unknown>, key: string): boole
 export function numeric(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
 export function own(value: JSONObject, key: string): unknown { return Object.hasOwn(value, key) ? value[key] : undefined; }
 
+export type ViewFilter = Record<string, string | number | boolean | null>;
+
+export function optionalFilter(value: Record<string, unknown>): boolean {
+  if (!Object.hasOwn(value, "filter")) return true;
+  return object(value.filter) && Object.keys(value.filter).length > 0 &&
+    Object.entries(value.filter).every(([field, expected]) => name(field) &&
+      (expected === null || typeof expected === "string" || typeof expected === "boolean" || numeric(expected)));
+}
+
+export function filterRecords(records: DataCollection["records"], filter?: ViewFilter): DataCollection["records"] {
+  if (filter === undefined) return records;
+  const entries = Object.entries(filter);
+  return records.filter((record) => {
+    const value = record.value;
+    return object(value) && entries.every(([field, expected]) => Object.hasOwn(value, field) && value[field] === expected);
+  });
+}
+
+export function filterField(schema: DataSchema, filter?: ViewFilter): string | undefined {
+  return Object.keys(filter ?? {}).find((field) => incompatible(schema, field, "text"));
+}
+
+export function viewNotice(selected: number, total: number, window?: string): { notice?: string } {
+  const parts = [...(selected < total ? [`${selected} of ${total} records`] : []), ...(window === undefined ? [] : [window])];
+  return parts.length === 0 ? {} : { notice: parts.join(" · ") };
+}
+
 interface CollectionProblem {
   status: "collection-absent" | "collection-unusable";
   message: string;

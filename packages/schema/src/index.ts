@@ -26,6 +26,7 @@ export {
 export type { DataCollection, DataCollectionChange, DataOperation, DataRecord, DocData } from "./data.js";
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
+export type { ViewFilter } from "./view-data.js";
 export {
   CHART_RECORD_LIMIT, CHART_MIN_HEIGHT, CHART_MAX_HEIGHT, chartDate,
   parseChartConfig, prepareChart,

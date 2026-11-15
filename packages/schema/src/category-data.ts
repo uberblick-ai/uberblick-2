@@ -5,10 +5,12 @@ import { compareCodePoints } from "./data-schema.js";
 import type { JSONValue } from "./data-schema.js";
 import type { DataRecord, DocData } from "./data.js";
 import { sortTableRows } from "./table-data.js";
-import { bindCollection, incompatible, numeric, object, own } from "./view-data.js";
+import { bindCollection, filterField, filterRecords, incompatible, numeric, object, own, viewNotice } from "./view-data.js";
+import type { ViewFilter } from "./view-data.js";
 
 interface CategoryConfig {
   collection: string;
+  filter?: ViewFilter;
   category: { field: string; label?: string };
   y: { field: string; label?: string; unit?: string; stack?: string }[];
   group?: string;
@@ -33,7 +35,8 @@ export function projectCategory<C extends CategoryConfig>(config: C, data: DocDa
   const badField = incompatible(schema, config.category.field, "text") ? config.category.field
     : config.y.find((series) => incompatible(schema, series.field, "number"))?.field
       ?? (note !== undefined && incompatible(schema, note, "text") ? note : undefined)
-      ?? (config.group !== undefined && incompatible(schema, config.group, "text") ? config.group : undefined);
+      ?? (config.group !== undefined && incompatible(schema, config.group, "text") ? config.group : undefined)
+      ?? filterField(schema, config.filter);
   if (badField !== undefined) return {
     status: "mapping-incompatible" as const,
     message: `${label} mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.`,
@@ -48,8 +51,9 @@ export function projectCategory<C extends CategoryConfig>(config: C, data: DocDa
     series: series.map((mapping) => ({ field: mapping.field, label: mapping.label, absent: 0, null: 0, missing: 0, invalid: 0 })),
   };
   const invalid = new Set(collection.invalidRecordIds);
+  const records = filterRecords(collection.records, config.filter);
   let eligible: DataRecord[] = [];
-  for (const record of collection.records) {
+  for (const record of records) {
     if (invalid.has(record.id) || !object(record.value)) { diagnostics.invalidSchema += 1; continue; }
     const category = own(record.value, config.category.field);
     if (category === undefined || category === null) { diagnostics.missingCategory += 1; continue; }
@@ -93,13 +97,15 @@ export function projectCategory<C extends CategoryConfig>(config: C, data: DocDa
   const emptyFields = new Set(config.y.filter((_, index) => !rows.some((row) => numeric(row.values[index]))).map((mapping) => mapping.field));
   const common = {
     config, rows, series, groups, recordCount: collection.records.length, eligibleCount: eligible.length, plottedCount,
-    notPlotted: collection.records.length - plottedCount - (authorWindow ? excluded : 0), diagnostics,
+    notPlotted: records.length - plottedCount - (authorWindow ? excluded : 0), diagnostics,
     warnings: [
       ...[...emptyFields].map((field) => `No numeric values for series field “${field}”.`),
       ...(groupOverflow ? [`${label} group field “${config.group}” has more than 8 values; colours stay per series.`] : []),
     ],
-    ...(excluded > 0 ? { notice: `Showing ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${eligible.length} records` } : {}),
+    ...viewNotice(records.length, collection.records.length,
+      excluded > 0 ? `Showing ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${eligible.length} records` : undefined),
   };
-  if (plottedCount === 0) return { status: "no-records" as const, message: "No plottable records in this chart collection.", ...common };
+  if (plottedCount === 0) return { status: "no-records" as const, message: config.filter !== undefined && records.length === 0
+    ? "No records match the filter." : "No plottable records in this chart collection.", ...common };
   return { status: "ready" as const, ...common };
 }

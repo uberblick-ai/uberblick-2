@@ -4,7 +4,8 @@ import { projectCategory } from "./category-data.js";
 import type { CategoryDiagnostics, CategoryRow, CategorySeries } from "./category-data.js";
 import type { ChartGroup } from "./chart-groups.js";
 import type { DocData } from "./data.js";
-import { keys, name, numeric, object, optionalText } from "./view-data.js";
+import { keys, name, numeric, object, optionalFilter, optionalText } from "./view-data.js";
+import type { ViewFilter } from "./view-data.js";
 
 export interface DotSeriesMapping {
   field: string;
@@ -17,6 +18,7 @@ export interface DotConfig {
   version: 1;
   type: "dot";
   collection: string;
+  filter?: ViewFilter;
   category: { field: string; label?: string };
   y: DotSeriesMapping[];
   group?: string;
@@ -62,7 +64,7 @@ export function parseDotConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid dot configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "category", "y", "group", "connect", "note", "sort", "limit", "title", "height"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "filter", "category", "y", "group", "connect", "note", "sort", "limit", "title", "height"]) || !optionalFilter(value) ||
       value.version !== 1 || value.type !== "dot" || !name(value.collection) ||
       !object(value.category) || !keys(value.category, ["field", "label"]) ||
       !name(value.category.field) || !optionalText(value.category, "label") ||
