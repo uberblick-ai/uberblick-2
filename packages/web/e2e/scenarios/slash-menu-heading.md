@@ -20,9 +20,8 @@ names it back. The Playwright assertions check the behavior described here.
 ## Assumptions this rests on
 
 - The slash menu converts only an *empty* paragraph — a non-empty one is not
-  offered the gesture at all. That is current product truth, stated in
-  *Editing in the web editor* (`e7e14266-3b08-4877-bd3d-700a98aa094c`), and this
-  scenario would be wrong the day that changed.
+  offered the gesture at all. `slashTriggerAt` in `src/editor/block-menu.ts`
+  enforces this condition.
 - `/he` matches the three heading levels and Checklist, so the count in step 4
   is four. Heading 2 remains the second entry.
 - Chromium only, at Playwright's `Desktop Chrome` viewport. The scenario says
