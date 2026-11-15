@@ -285,19 +285,19 @@ it("renders each tool's prose with an accepted example and owning-topic links, w
   }
 });
 
-it("creates and re-indents list items using the published help examples", async () => {
+it("creates, ticks and re-indents checklist items using the published help examples", async () => {
   const rig = await local();
   const createHelp = await rig.ok("get_help", { topic: "create_doc" });
   const created = await rig.ok("create_doc", jsonSection(createHelp.text, "Example"));
   const seed = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
-  expect(seed).toMatchObject({ type: "list-item", list: "ordered", indent: 0 });
+  expect(seed).toMatchObject({ type: "list-item", list: "unchecked", indent: 0 });
 
   const insertHelp = await rig.ok("get_help", { topic: "insert_block" });
   const inserted = await rig.ok("insert_block", {
     ...jsonSection(insertHelp.text, "Example"), uuid: created.uuid, after_block_id: seed.id,
   });
   const [insertedRead] = await readBlocks(rig, created.uuid, inserted.blocks);
-  expect(insertedRead).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
+  expect(insertedRead).toMatchObject({ type: "list-item", list: "unchecked", indent: 2 });
 
   const editHelp = await rig.ok("get_help", { topic: "edit_block" });
   const edited = await rig.ok("edit_block", {
@@ -306,7 +306,10 @@ it("creates and re-indents list items using the published help examples", async 
   });
   expect(edited.block).toEqual({ id: inserted.blocks[0].id, rev: expect.any(String) });
   expect(edited.block.rev).not.toBe(inserted.blocks[0].rev);
-  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, { ...insertedRead, indent: 1, rev: edited.block.rev }]);
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, { ...insertedRead, list: "checked", indent: 1, rev: edited.block.rev }]);
+  const markdown = (await rig.ok("get_help", { topic: "markdown" })).text;
+  for (const guidance of ['list: "unchecked"', 'list: "checked"', "- [ ] item", "- [x] item", "- [X] item", "1. [ ] item"])
+    expect(markdown).toContain(guidance);
 });
 
 it("advertises the server identity and instructions in initialize", async () => {

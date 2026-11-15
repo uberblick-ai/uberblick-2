@@ -169,7 +169,7 @@ export const blockShape = {
     .string()
     .optional()
     .describe("Code language, e.g. \"ts\". Code blocks only. Drawings are code blocks too, with language \"ablauf\" or \"wireframe\"."),
-  list: listStyleArg.optional().describe("List style. List items only; omitted means bullet."),
+  list: listStyleArg.optional().describe("List style: bullet, ordered, unchecked (- [ ]) or checked (- [x]). List items only; omitted means bullet."),
   indent: listIndentArg.optional().describe("List depth, an integer from 0 to 3. List items only; omitted means 0."),
   variant: z.string().optional().describe("Callout variant: note, tip, important, warning or caution; omitted means note. Ignored for other block types."),
   icon: z.string().optional().describe("Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types."),

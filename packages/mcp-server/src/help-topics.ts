@@ -148,13 +148,15 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, setext headings underlined with \`===\` (level 1) or \`---\` (level 2), bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, setext headings underlined with \`===\` (level 1) or \`---\` (level 2), bullet, ordered and checklist items, \`>\` quotes, fenced code with an optional language, and GFM tables. A special \`terminal\` fence preserves that source-block type. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it.
 
 Write \`---\` with a blank line above it for a divider, or use \`type: "divider"\` with empty text over MCP. Text directly above \`---\` becomes a level-2 heading.
 
 Blocks of the retired Mermaid block type are deleted automatically, including in archived documents and decision records; their source is not retained. This never touches a code block with language \`mermaid\`. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
 The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import, except a callout's icon comment described below. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
+
+Checklist items import as \`list: "unchecked"\` from \`- [ ] item\`, or \`list: "checked"\` from \`- [x] item\` and \`- [X] item\`; \`*\` and \`+\` bullet markers work too, at every supported depth. The marker is not part of the text. Export uses \`- [ ]\` and \`- [x]\`. Ordered \`1. [ ] item\` keeps the marker as literal text. A bullet whose text starts with a checklist marker exports with the opening bracket escaped so it imports as the same bullet text. Through MCP, set \`list\` on \`create_doc\` seeds or \`insert_block\`; repeat \`old_text\` as \`new_text\` in \`edit_block\` and set \`list\` to tick or untick an item.
 
 A \`json-tree\` fence is an ordinary code block that the web editor shows as a foldable JSON tree. Use it for API responses, tool results and settings files; keep small snippets in a \`json\` fence. Import, export and MCP preserve its literal source.
 
