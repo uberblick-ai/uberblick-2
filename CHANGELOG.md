@@ -5,6 +5,23 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.18 — 2026-11-15
+
+Charts, tables and Markdown: bar charts over named categories, notes on line-chart points, in-cell bars in data tables, checklists people and agents can tick, and web addresses that become links as you write.
+
+### Added
+
+- Bar charts over named categories, stacked or grouped, vertical or horizontal, with the table's sorting and first-N limits. Tooltips, bar selection and a keyboard selector show each category's full value (#2697).
+- Line-chart series can carry a `note` per point. Notes appear as short muted labels beside the point and in full in its tooltip; on iPad, tapping an annotated point shows its tooltip (#2699).
+- Number columns in data tables can show in-cell bars, scaled to the visible rows or to a fixed maximum. The exact number stays readable beside the bar (#2700).
+- Checklists: items with a checkbox that people tick by click, tap or Cmd+Enter (Ctrl+Enter off Apple keyboards), each tick its own Undo step. Checklists survive Markdown import and export at any depth, agents read and tick them through MCP, and checkboxes stay disabled for readers who can't edit (#2708, #2709).
+- The hub logs a `hub.metrics` line about once a minute with connections, loaded rooms, event-loop delay, write time, database size and each workspace's stored bytes and document count (#2702).
+
+### Improved
+
+- Bare `http(s)://`, `www.` and `<https://…>` addresses become links when typed, pasted, imported from Markdown or written through MCP. Addresses already stored stay as they are, and the conversion has its own web Undo step (#2701).
+- MCP decision help asks for answers that stay true when vendors, versions and fallbacks change (#2704).
+
 ## v0.4.17 — 2026-11-08
 
 Easier hub setup, with a Tailscale option and independent hubs on one machine. New workspaces start with Writing pages, and GitHub links show the live state of their issue or pull request.
