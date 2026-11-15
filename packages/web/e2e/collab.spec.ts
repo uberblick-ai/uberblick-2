@@ -16,7 +16,7 @@ import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 import { expect, test } from "@playwright/test";
 import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helpers.js";
 import type { Browser, Page } from "@playwright/test";
-import { placeCaret } from "./harness.js";
+import { placeCaret, placeCaretIn } from "./harness.js";
 import { fastForwardPageTimers, installPageTimers, setPageTime, withPageTimers } from "./page-timers.js";
 
 const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-document-sidebar", beforeNavigate: installPageTimers } });
@@ -71,6 +71,31 @@ test("two contexts typing into different ranges of one block converge byte-ident
   const converged = `${left}${seed}${right}`;
   await expect.poll(() => blockText(a)).toBe(converged);
   await expect.poll(() => blockText(b)).toBe(converged);
+});
+
+test("a checklist toggle reaches a second client and its caret shortcut reaches back", async ({ browser }) => {
+  const title = docTitle("Checklist collaboration");
+  const a = await openApp(browser);
+  await createDoc(a, title);
+  await placeCaret(a);
+  await a.keyboard.type("/check");
+  await a.getByRole("option", { name: "Checklist", exact: true }).click();
+  await a.keyboard.type("A shared task");
+  const b = await openApp(browser, new URL(a.url()).pathname);
+  const itemA = editor(a).getByRole("listitem");
+  const itemB = editor(b).getByRole("listitem");
+  const boxA = itemA.getByRole("checkbox", { name: "Checklist item", exact: true });
+  const boxB = itemB.getByRole("checkbox", { name: "Checklist item", exact: true });
+  await expect(itemB).toContainText("A shared task");
+  await expect(boxB).not.toBeChecked();
+  await boxA.click();
+  await expect(boxB).toBeChecked();
+  await placeCaretIn(itemB);
+  const modifier = await b.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await b.keyboard.press(`${modifier}+Enter`);
+  await expect(boxA).not.toBeChecked();
+  await expect(itemA).toContainText("A shared task");
+  await expect(itemB).toContainText("A shared task");
 });
 
 test("a TL;DR added from the menu and edited inline follows in the other client", { tag: "@webkit" }, async ({

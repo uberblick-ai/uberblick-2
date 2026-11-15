@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { editBlock, getBlocks, getMeta, setStatus } from "@uberblick/schema";
+import type { BlockInput } from "@uberblick/schema";
 import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -40,7 +41,7 @@ function session(): McpSession {
 async function record(
   writer: McpSession,
   status: "open" | "decided",
-  blocks = [{ type: "paragraph", text: "Selected words remain readable after deciding." }],
+  blocks: BlockInput[] = [{ type: "paragraph", text: "Selected words remain readable after deciding." }],
 ): Promise<string> {
   const result = await writer.call<{ uuid: string }>("create_doc", {
     title: "Decided editor",
@@ -200,6 +201,44 @@ test("touch selection on a decided record starts a thread and its highlight open
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });
 
+test("an open answer checklist ticks until remote settlement disables the same control", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const touch = info.project.use.hasTouch === true;
+  const writer = session();
+  const uuid = await record(writer, "open", [{ type: "list-item", list: "unchecked", indent: 1, text: "Keep the agreed answer" }]);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
+  const item = editor(page).getByRole("listitem");
+  const checkbox = item.getByRole("checkbox", { name: "Checklist item", exact: true });
+  await expect(checkbox).toBeEnabled();
+  await activateControl(checkbox, { touch });
+  await expect(checkbox).toBeChecked();
+  await expectMcp(() => writer.call<{ blocks: Array<{ list?: string }> }>("get_doc", { uuid }), saved => {
+    expect(saved.blocks[0]?.list).toBe("checked");
+  });
+  const originalControl = await checkbox.elementHandle();
+  if (originalControl === null) throw new Error("e2e: missing checklist control");
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  peers.push(peer);
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  for (const status of ["decided", "rejected", "withdrawn"] as const) {
+    peer.decide(status);
+    await expect(page.locator(".ub-decision-answer-header .ub-decision-answer-state"))
+      .toHaveAttribute("data-state", status === "decided" ? "in-force" : status);
+    await expect(checkbox).toBeDisabled();
+    expect(await originalControl.evaluate(element => element === document.querySelector('.ub-editor input[type="checkbox"]'))).toBe(true);
+    if (touch) await checkbox.tap({ force: true });
+    else await checkbox.click({ force: true });
+    await activateControl(item, { touch });
+    await page.keyboard.press(`${modifier}+Enter`);
+    await expect(checkbox).toBeChecked();
+    await expect(item).toHaveAttribute("data-indent", "1");
+    await expect(item).toHaveText("Keep the agreed answer");
+  }
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => writer.call<{ blocks: Array<{ list?: string; text: string; indent?: number }> }>("get_doc", { uuid }), saved => {
+    expect(saved.blocks).toMatchObject([{ list: "checked", text: "Keep the agreed answer", indent: 1 }]);
+  });
+});
+
 test("an open answer edits and saves before remote settlement locks the same view and its native input", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const touch = info.project.use.hasTouch === true;
   const writer = session();
@@ -241,7 +280,7 @@ test("an open answer edits and saves before remote settlement locks the same vie
   await activateControl(page.getByRole("button", { name: "Insert block below", exact: true }), { touch });
   const menu = page.getByRole("listbox", { name: "Block types", exact: true });
   await expect.poll(() => menu.getByRole("option").evaluateAll((options) => options.map((option) => option.getAttribute("aria-label"))))
-    .toEqual(["Paragraph", "Bullet list", "Numbered list", "Code", "Table"]);
+    .toEqual(["Paragraph", "Bullet list", "Numbered list", "Checklist", "Code", "Table"]);
   await activateControl(menu.getByRole("option", { name: "Paragraph", exact: true }), { touch });
   await expect(view.locator(":scope > p")).toHaveCount(1);
   const code = view.locator("pre > code");

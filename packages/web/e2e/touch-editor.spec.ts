@@ -4,6 +4,9 @@
  */
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { appendBlock, initDoc } from "@uberblick/schema";
+import * as Y from "yjs";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret, placeCaretIn } from "./harness.js";
 
@@ -184,6 +187,77 @@ test("the xl touch gutter fits beside the docked sidebar without moving prose", 
     });
   })).toEqual([true, true, true, true]);
   expect(await pane.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
+test("checklist markers keep their depth and paint in both appearances and toggle once by tap", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const source = new Y.Doc();
+  const uuid = randomUUID();
+  try {
+    initDoc(source, { uuid, title: "Touch checklist" });
+    appendBlock(source, { type: "list-item", list: "unchecked", indent: 0, text: "Pack the bag" });
+    appendBlock(source, { type: "list-item", list: "checked", indent: 1, text: "Bring the map" });
+    appendBlock(source, { type: "list-item", list: "unchecked", indent: 2, text: "Check the route" });
+    appendBlock(source, { type: "list-item", list: "checked", indent: 3, text: "Save the address" });
+    appendBlock(source, { type: "list-item", list: "bullet", text: "Ordinary bullet" });
+    appendBlock(source, { type: "list-item", list: "ordered", text: "Ordinary number" });
+    await harness().seedDocument(source);
+  } finally { source.destroy(); }
+  const page = await touchPage(browser, info);
+  await page.goto(`${harness().appUrl}${harness().workspace}/${uuid}`);
+  const view = editor(page);
+  const items = view.locator(":scope > li");
+  await expect(items).toHaveCount(6);
+  const boxes = view.getByRole("checkbox", { name: "Checklist item", exact: true });
+  await expect(boxes).toHaveCount(4);
+  await expect(boxes.nth(0)).not.toBeChecked();
+  await expect(boxes.nth(1)).toBeChecked();
+  await boxes.nth(0).tap();
+  await expect(boxes.nth(0)).toBeChecked();
+  await expect(items).toHaveText(["Pack the bag", "Bring the map", "Check the route", "Save the address", "Ordinary bullet", "Ordinary number"]);
+  await expect.poll(() => items.evaluateAll(elements => elements.slice(0, 4).map(element => element.getAttribute("data-indent"))))
+    .toEqual(["0", "1", "2", "3"]);
+
+  for (const scheme of ["light", "dark"] as const) {
+    await page.evaluate(theme => document.documentElement.setAttribute("data-theme", theme), scheme);
+    await page.evaluate(() => document.fonts.ready);
+    await expect(boxes.first()).toHaveCSS("color-scheme", scheme);
+    await minimumTargets(view.locator(".ub-checklist-control"), 44, true);
+    const positions = await items.evaluateAll(elements => elements.slice(0, 4).map(element => {
+      const checkbox = element.querySelector('input[type="checkbox"]');
+      if (!(checkbox instanceof HTMLInputElement)) throw new Error("e2e: missing checklist checkbox");
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const text = walker.nextNode();
+      if (text === null) throw new Error("e2e: missing checklist text");
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const marker = checkbox.getBoundingClientRect();
+      const prose = range.getBoundingClientRect();
+      return { markerRight: marker.right, proseLeft: prose.left, markerTop: marker.top, proseTop: prose.top, markerHeight: marker.height, proseHeight: prose.height };
+    }));
+    for (const position of positions) {
+      expect(position.markerRight).toBeLessThanOrEqual(position.proseLeft);
+      expect(Math.abs(position.markerTop + position.markerHeight / 2 - position.proseTop - position.proseHeight / 2)).toBeLessThan(4);
+    }
+    const textStarts = positions.map(position => position.proseLeft);
+    expect(new Set(textStarts).size).toBe(4);
+    expect(textStarts).toEqual([...textStarts].sort((left, right) => left - right));
+    const ordinaryMarkers = await items.evaluateAll(elements => elements.slice(4).map(element => getComputedStyle(element, "::before").content));
+    expect(ordinaryMarkers.every(content => content !== "none" && content !== "normal")).toBe(true);
+    await expect(boxes.nth(0)).toBeChecked();
+    await expect(boxes.nth(1)).toBeChecked();
+    await expect(boxes.nth(2)).not.toBeChecked();
+    await expect(boxes.nth(3)).toBeChecked();
+  }
+  await page.getByRole("button", { name: "Document actions", exact: true }).tap();
+  await page.getByRole("menuitem", { name: "Archive document", exact: true }).tap();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).tap();
+  await expect(boxes.first()).toBeDisabled();
+  await boxes.first().tap({ force: true });
+  await items.first().tap();
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect(boxes.first()).toBeChecked();
+  await expect(items.first()).toHaveText("Pack the bag");
 });
 
 test("a touch caret exposes a 44px gutter without moving prose, follows edits, and inserts by tap", { tag: "@webkit-touch" }, async ({ browser }, info) => {
