@@ -190,21 +190,21 @@ const writtenBlock = z.object({ id: z.string(), rev: blockFields.rev }).strict()
 const chartWarnings = z.array(z.string()).describe("Warnings about a problem view, a line, category-bar or dot y field without numeric values in the shown records, or a scatter, category-bar or dot group field with more than eight shown values; group warnings name the field. Never a refusal or rollback. No record values or note text are returned.");
 const chartSeries = z.array(z.object({
   field: z.string().describe("Literal y field from the mapping, in mapping order."),
-  pointCount: count.describe("Plotted numeric y values; null gaps are not points."),
+  pointCount: count.describe("Plotted numeric y values after the mapping's filter and window; null gaps are not points."),
 }).strict());
 const chartCounts = {
-  recordCount: count.describe("Total records in the bound collection on this replica."),
-  plottedCount: count.describe("Selected records with a valid x and at least one numeric y."),
+  recordCount: count.describe("Total records in the bound collection on this replica, before the mapping's filter."),
+  plottedCount: count.describe("Records selected by the mapping's filter and window with a valid x and at least one numeric y."),
   series: chartSeries,
 };
 const tableCounts = {
   recordCount: chartCounts.recordCount,
-  rowCount: count.describe("Rows shown after schema omissions, sorting and the mapping's limit."),
-  invalidRecordCount: count.describe("Schema-invalid records omitted from the table."),
+  rowCount: count.describe("Rows shown after the mapping's filter, schema omissions, sorting and limit."),
+  invalidRecordCount: count.describe("Schema-invalid records selected by the mapping's filter and omitted from the table."),
 };
 const plottedCounts = {
   recordCount: chartCounts.recordCount,
-  plottedCount: count.describe("Scatter points with numeric x/y, or shown category-bar or dot records with a category and at least one numeric y, after schema omissions, selection and the 5,000-record cap; no record values or note text are returned."),
+  plottedCount: count.describe("Scatter points with numeric x/y, or shown category-bar or dot records with a category and at least one numeric y, after the mapping's filter, schema omissions, selection and the 5,000-record cap; no record values or note text are returned."),
 };
 const xEndpoint = z.union([z.number().finite(), z.string()])
   .describe("First or last plotted x: a number for numeric x, or an ISO date/date-time string for date x; never epoch milliseconds.");

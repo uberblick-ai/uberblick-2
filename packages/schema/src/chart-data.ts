@@ -2,7 +2,8 @@
 import { compareCodePoints } from "./data-schema.js";
 import type { DocData } from "./data.js";
 import type { JSONObject } from "./data-schema.js";
-import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
+import { bindCollection, filterField, filterRecords, incompatible, keys, name, numeric, object, optionalFilter, optionalText, own, viewNotice } from "./view-data.js";
+import type { ViewFilter } from "./view-data.js";
 
 export const CHART_RECORD_LIMIT = 5_000;
 export const CHART_MIN_HEIGHT = 100;
@@ -21,6 +22,7 @@ export interface ChartConfig {
   version: 1;
   type: "line";
   collection: string;
+  filter?: ViewFilter;
   x: { field: string; type: "number" | "date"; label?: string };
   y: ChartSeriesMapping[];
   title?: string;
@@ -71,7 +73,7 @@ export function parseChartConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid chart configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "title", "missing", "limit", "layout", "height"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "filter", "x", "y", "title", "missing", "limit", "layout", "height"]) || !optionalFilter(value) ||
       value.version !== 1 || value.type !== "line" || !name(value.collection) ||
       !object(value.x) || !keys(value.x, ["field", "type", "label"]) ||
       !name(value.x.field) || (value.x.type !== "number" && value.x.type !== "date") ||
@@ -153,7 +155,7 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
     : config.y.flatMap((series) => [
       { field: series.field, format: "number" as const },
       ...(series.note === undefined ? [] : [{ field: series.note, format: "text" as const }]),
-    ]).find((mapping) => incompatible(schema, mapping.field, mapping.format))?.field;
+    ]).find((mapping) => incompatible(schema, mapping.field, mapping.format))?.field ?? filterField(schema, config.filter);
   if (badField !== undefined) return { status: "mapping-incompatible", message: `Chart mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.` };
 
   const diagnostics: ChartDiagnostics = {
@@ -161,8 +163,9 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
     series: config.y.map((series) => ({ label: series.label || series.field, missing: 0, invalid: 0 })),
   };
   const invalid = new Set(collection.invalidRecordIds);
+  const records = filterRecords(collection.records, config.filter);
   const rows: { id: string; x: number; values: unknown[]; notes: unknown[]; hasY: boolean }[] = [];
-  for (const record of collection.records) {
+  for (const record of records) {
     if (invalid.has(record.id) || !object(record.value)) { diagnostics.invalidSchema += 1; continue; }
     const rawX = own(record.value as JSONObject, config.x.field);
     if (rawX === undefined || rawX === null) { diagnostics.missingX += 1; continue; }
@@ -203,12 +206,14 @@ function projectChart(config: ChartConfig, data: DocData | null): ChartProjectio
     }),
   }));
   const plotted = selected.filter((row) => row.hasY);
-  const notice = excluded > 0 ? { notice: `Showing the latest ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${rows.length} records` } : {};
-  const notPlotted = collection.records.length - plotted.length - (authorWindow ? excluded : 0);
+  const notice = viewNotice(records.length, collection.records.length,
+    excluded > 0 ? `Showing the latest ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${rows.length} records` : undefined);
+  const notPlotted = records.length - plotted.length - (authorWindow ? excluded : 0);
   const first = plotted[0];
   const last = plotted[plotted.length - 1];
   if (first === undefined || last === undefined) return {
-    status: "no-records", message: "No plottable records in this chart collection.",
+    status: "no-records", message: config.filter !== undefined && records.length === 0
+      ? "No records match the filter." : "No plottable records in this chart collection.",
     config, series, recordCount: collection.records.length, eligibleCount: rows.length,
     plottedCount: 0, diagnostics, notPlotted, ...notice,
   };

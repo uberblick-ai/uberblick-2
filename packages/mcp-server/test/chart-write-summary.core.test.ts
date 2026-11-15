@@ -145,6 +145,63 @@ describe("chart source write summaries", () => {
     expect(paragraph.block).not.toHaveProperty("chart");
   });
 
+  it.each([line, scatter, bar, dot, table])("keeps $type summaries within the filter across chart writes", async mapping => {
+    const rig = await local();
+    const filtered = { ...mapping, filter: { reference: "PRIVATE_SELECTION" },
+      ...(mapping.type === "scatter" ? {} : { limit: 1 }) };
+    const source = JSON.stringify(filtered);
+    const created = await rig.ok("create_doc", {
+      title: "Filtered chart feedback", description: "Filters keep the collection total while selecting view counts.",
+      blocks: [{ type: "chart", text: source }],
+    });
+    expect(created.blocks[0].chart).toEqual({
+      status: "collection-absent", message: `${mapping.type === "table" ? "Table" : "Chart"} collection “observations” is absent.`,
+      collections: [], warnings: [expect.any(String)],
+    });
+    const values = { team: "PRIVATE_CATEGORY", cost: 42424242, quality: 82, name: "PRIVATE_LABEL" };
+    await rig.ok("update_data", { uuid: created.uuid, operations: [{
+      collection: "observations", schema: { version: 1, schema: {
+        type: "object", properties: { count: { type: "number" } }, required: ["count"],
+      } },
+      upsert: [
+        { id: "a-hidden", value: { ...values, day: "2099-01-01", count: 42424242, reference: "PRIVATE_OTHER" } },
+        { id: "b-absent", value: { ...values, day: "2099-01-02", count: 42424242 } },
+        { id: "selected-a", value: { ...values, day: "2026-09-10", count: 1, reference: "PRIVATE_SELECTION" } },
+        { id: "selected-b", value: { ...values, day: "2026-09-11", count: 2, reference: "PRIVATE_SELECTION" } },
+      ],
+    }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    doc.getMap(DATA_KEY).set(JSON.stringify(["record", "observations", "invalid-selected"]),
+      { ...values, count: "PRIVATE_INVALID", reference: "PRIVATE_SELECTION" });
+    doc.getMap(DATA_KEY).set(JSON.stringify(["record", "observations", "invalid-hidden"]),
+      { ...values, count: "PRIVATE_INVALID", reference: "PRIVATE_OTHER" });
+    const before = JSON.stringify(doc.getMap(DATA_KEY).toJSON());
+    const inserted = await rig.ok("insert_block", {
+      uuid: created.uuid, blocks: [{ type: "chart", text: source }],
+    });
+    const selectedCounts = mapping.type === "table" ? { rowCount: 1, invalidRecordCount: 1 }
+      : mapping.type === "line" ? {
+        plottedCount: 1, series: [{ field: "count", pointCount: 1 }], firstX: "2026-09-11", lastX: "2026-09-11",
+      } : { plottedCount: mapping.type === "scatter" ? 2 : 1 };
+    expect(inserted.blocks[0].chart).toEqual({ status: "ready", recordCount: 6, ...selectedCounts, warnings: [] });
+
+    const edited = await rig.ok("edit_block", {
+      uuid: created.uuid, block_id: inserted.blocks[0].id, rev: inserted.blocks[0].rev,
+      old_text: source, new_text: JSON.stringify({ ...filtered, filter: { reference: "PRIVATE_NO_MATCH" } }),
+    });
+    const message = "No records match the filter.";
+    const emptyCounts = mapping.type === "table" ? { rowCount: 0, invalidRecordCount: 0 }
+      : mapping.type === "line" ? { plottedCount: 0, series: [{ field: "count", pointCount: 0 }] }
+      : { plottedCount: 0 };
+    expect(edited.block.chart).toEqual({
+      status: "no-records", message, recordCount: 6, ...emptyCounts,
+      warnings: mapping.type === "scatter" || mapping.type === "table" ? [message] : [message, expect.stringContaining("count")],
+    });
+    expect(JSON.stringify(inserted)).not.toMatch(/PRIVATE_|42424242|selected-a/);
+    expect(JSON.stringify(edited)).not.toMatch(/PRIVATE_|42424242|selected-a/);
+    expect(JSON.stringify(doc.getMap(DATA_KEY).toJSON())).toBe(before);
+  });
+
   it.each([
     { type: "number", first: -2.5, last: 8, firstX: -2.5, lastX: 8 },
     { type: "date", first: "2026-09-10T10:15:00+02:00", last: "2026-09-11T09:45:00Z",

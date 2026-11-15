@@ -3,7 +3,8 @@ import { compareCodePoints } from "./data-schema.js";
 import { isExternalHref } from "./marks.js";
 import type { DataRecord, DocData } from "./data.js";
 import { chartDate } from "./chart-data.js";
-import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
+import { bindCollection, filterField, filterRecords, incompatible, keys, name, numeric, object, optionalFilter, optionalText, own, viewNotice } from "./view-data.js";
+import type { ViewFilter } from "./view-data.js";
 
 type TableFormat = "text" | "number" | "date" | "link";
 export interface TableColumnMapping {
@@ -18,6 +19,7 @@ export interface TableConfig {
   version: 1;
   type: "table";
   collection: string;
+  filter?: ViewFilter;
   columns: TableColumnMapping[];
   title?: string;
   limit?: number;
@@ -87,7 +89,7 @@ export function parseTableConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid table configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize", "limit", "shade"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "filter", "columns", "title", "sort", "pageSize", "limit", "shade"]) || !optionalFilter(value) ||
       value.version !== 1 || value.type !== "table" || !name(value.collection) ||
       !Array.isArray(value.columns) || value.columns.length < 1 || value.columns.length > 30 ||
       !value.columns.every((entry) => validColumn(entry, true)) || !optionalText(value, "title") ||
@@ -169,12 +171,13 @@ function projectTable(config: TableConfig, data: DocData | null): TableProjectio
   const binding = bindCollection(data, config.collection, "Table");
   if (binding.status !== "ready") return binding;
   const { collection, schema } = binding;
-  const badField = config.columns.find((entry) => incompatible(schema, entry.field, entry.format))?.field;
+  const badField = config.columns.find((entry) => incompatible(schema, entry.field, entry.format))?.field ?? filterField(schema, config.filter);
   if (badField !== undefined) return { status: "mapping-incompatible", message: `Table mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.` };
   const invalid = new Set(collection.invalidRecordIds);
+  const records = filterRecords(collection.records, config.filter);
   let rows: DataRecord[] = [];
   let invalidSchema = 0;
-  for (const record of collection.records) {
+  for (const record of records) {
     if (invalid.has(record.id) || !object(record.value)) { invalidSchema += 1; continue; }
     rows.push(record as DataRecord);
   }
@@ -185,14 +188,17 @@ function projectTable(config: TableConfig, data: DocData | null): TableProjectio
   else rows = sortTableRows(rows, sortColumn, sort?.direction ?? "asc");
   const eligibleCount = rows.length;
   if (config.limit !== undefined && rows.length > config.limit) rows = rows.slice(0, config.limit);
-  const common = { config, rows, barScales: tableBarScales(config.columns, rows), shadeScale: tableShadeScale(config, rows), recordCount: collection.records.length, invalidSchema };
+  const common = {
+    config, rows, barScales: tableBarScales(config.columns, rows), shadeScale: tableShadeScale(config, rows), recordCount: collection.records.length, invalidSchema,
+    ...viewNotice(records.length, collection.records.length, rows.length < eligibleCount ? `Showing ${rows.length} of ${eligibleCount} records` : undefined),
+  };
   if (rows.length === 0) return {
-    status: "no-records", message: "No records to show in this table collection.",
+    status: "no-records", message: config.filter !== undefined && records.length === 0
+      ? "No records match the filter." : "No records to show in this table collection.",
     ...common,
   };
   return {
     status: "ready", ...common,
-    ...(rows.length < eligibleCount ? { notice: `Showing ${rows.length} of ${eligibleCount} records` } : {}),
   };
 }
 

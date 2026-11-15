@@ -277,6 +277,63 @@ describe("chart height controls", () => {
   });
 });
 
+describe("filtered view composition", () => {
+  it.each(["line", "scatter", "bar", "dot", "table"])("keeps %s selection counts through no-match and live updates without writing source", async type => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ version: 1, type, collection: "trend", filter: { reference: "baseline" },
+      ...(type === "table" ? { columns: [{ field: "value", format: "number" }] }
+        : type === "scatter" ? { x: { field: "day" }, y: { field: "value" }, label: "name" }
+          : type === "line" ? { x: { field: "day", type: "number" }, y: [{ field: "value" }] }
+            : { category: { field: "name" }, y: [{ field: "value" }] }),
+    });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", replaceRecords: [
+      { id: "a", value: { day: 1, value: 3, name: "First", reference: "other" } },
+      { id: "b", value: { day: 2, value: 4, name: "Second", reference: "other" } },
+    ] }]);
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    let writes = 0;
+    doc.on("update", (_update, _origin, _doc, transaction: Y.Transaction) => { if (transaction.local) writes += 1; });
+    const before = Y.encodeStateAsUpdate(doc);
+    let mounted!: ReturnType<typeof mountEditor>;
+    await act(async () => { mounted = mountEditor(doc); flush(); });
+    const { editor } = mounted;
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    const notice = root.querySelector<HTMLElement>(".ub-chart-notice")!;
+    const prefix = type === "table" ? "Generated from document data · read-only · " : "";
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(root.querySelector(".ub-chart-message")?.textContent).toBe("No records match the filter.");
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toBe(`${prefix}0 of 2 records`);
+    expect(notice.classList.contains("ub-chart-limit-notice")).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+
+    const update = async (reference: string, secondReference: string) => {
+      applyDocData(peer, directory, [{ collection: "trend", upsert: [
+        { id: "a", value: { day: 1, value: 3, name: "First", reference } },
+        { id: "b", value: { day: 2, value: 4, name: "Second", reference: secondReference } },
+      ] }]);
+      await act(async () => { Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc))); flush(); });
+    };
+    await update("baseline", "other");
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("ready");
+    expect(notice.textContent).toBe(`${prefix}1 of 2 records`);
+    expect(root.querySelector<HTMLElement>(".ub-chart-diagnostics")?.hidden).toBe(true);
+    if (type === "table") expect(root.querySelectorAll("tbody tr")).toHaveLength(1);
+
+    await update("baseline", "baseline");
+    expect(notice.textContent).toBe(type === "table" ? "Generated from document data · read-only" : "");
+    await update("other", "other");
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(notice.textContent).toBe(`${prefix}0 of 2 records`);
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source);
+    expect(writes).toBe(0);
+    await act(async () => editor.destroy());
+    doc.destroy(); peer.destroy(); directory.destroy();
+  });
+});
+
 describe("category bar composition", () => {
   it.each(["bar", "dot"])("shows literal group text in %s selection details through data updates with several series", async type => {
     const { doc, directory, id } = fixture();

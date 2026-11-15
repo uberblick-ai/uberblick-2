@@ -733,7 +733,13 @@ Canonical UTF-8 JSON limits are ${DATA_LIMITS.area} bytes (4 MiB) for the data a
 
 ## Bind a document view to data
 
-A \`chart\` block holds editable JSON source, configured with ordinary \`create_doc\`, \`insert_block\` or \`edit_block\` calls. A line chart, bar chart, scatter plot, dot plot or data table reads a collection from its own document. Its mapping names literal top-level fields; it contains no record values:
+A \`chart\` block holds editable JSON source, configured with ordinary \`create_doc\`, \`insert_block\` or \`edit_block\` calls. A line chart, bar chart, scatter plot, dot plot or data table reads a collection from its own document. Its mapping names literal top-level fields and defines a read-only view:
+
+Line, scatter, category-bar, dot and table mappings accept optional \`filter\`, an object with at least one entry, for example \`{"reference":"baseline-a"}\`. Each literal top-level field maps to a string, finite number, boolean or null. Every entry must match the stored field's JSON type and value exactly; strings compare exactly and nothing is coerced. An absent field never matches, even null. Empty objects, non-objects, array or object values are invalid configurations. A filter field ruled out by the collection schema is incompatible.
+
+Sort, limits, the chart's 5,000-record cap, axes, groups, table bar and shade scales, and diagnostics use only selected records. Unselected records are never counted as not plotted, schema-invalid or missing a value. When a filter hides records, the chart notice or table footnote says how many it selects, such as 8 of 16 records; limit and cap notices count within that selection. A filter that selects every record adds no count. No matches show a distinct no-records message and summary warning. Write-summary \`recordCount\` remains the collection total; \`plottedCount\`, series \`pointCount\`, \`rowCount\` and \`invalidRecordCount\` count only selected records.
+
+For example:
 
 \`\`\`json
 {"version":1,"type":"line","collection":"observations","x":{"field":"day","type":"date"},"y":[{"field":"count","label":"Count"}],"missing":"gap"}
@@ -819,7 +825,7 @@ Text shows strings verbatim and other values as compact JSON. Number shows JSON 
 
 For line, category-bar, dot and table views, limit has no upper bound of its own. Records hidden by the author limit are not omissions. When it hides line-chart records, a muted note shows the latest shown and total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing notice and diagnostics when N exceeds 5,000.
 
-\`update_data\` refreshes open charts and tables and recomputes a limited window without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents; their source follows existing content locks. Search indexes titles, descriptions, block text, assigned tag names and code block languages, not record values; Markdown exports mappings while omitting datasets.
+\`update_data\` refreshes open charts and tables, re-evaluates filters and recomputes a limited window without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents; their source follows existing content locks. Search indexes titles, descriptions, block text, assigned tag names and code block languages, not record values; Markdown exports mappings while omitting datasets.
 
 ## Related
 

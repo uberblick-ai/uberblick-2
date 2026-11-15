@@ -1,7 +1,7 @@
-import { getBlockInline, INLINE_ICONS, parseTableConfig, validateCollectionSchema } from "@uberblick/schema";
+import { getBlockInline, INLINE_ICONS, parseTableConfig, prepareChartView, validateCollectionSchema } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { readBlocks, removeTempDirs, startServer, testConfig, type FailingStore } from "./core-helpers.js";
+import { readBlocks, removeTempDirs, startServer, testConfig, toolNamed, type FailingStore } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
 const rigs: Rig[] = [];
@@ -89,6 +89,28 @@ it("teaches table-only numeric bars and shades, their scales and invalid forms i
     columns: [{ field: "error_a", format: "number" }, { field: "error_b", format: "number" }],
     shade: JSON.parse(shade!),
   }))).toMatchObject({ ok: true, config: { shade: { fields: ["error_a", "error_b"], better: "lower" } } });
+});
+
+it("teaches exact primitive view filters and selected counts in data and chart-writing help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "create_doc", "insert_block", "edit_block"]) {
+    const text = topic === "data" ? (await rig.ok("get_help", { topic })).text : toolNamed(topic).details!;
+    for (const guidance of [
+      "Line, scatter, category-bar, dot and table mappings accept optional", "an object with at least one entry",
+      "string, finite number, boolean or null", "JSON type and value exactly", "strings compare exactly and nothing is coerced",
+      "An absent field never matches, even null", "Empty objects, non-objects, array or object values are invalid configurations",
+      "filter field ruled out by the collection schema is incompatible", "diagnostics use only selected records",
+      "8 of 16 records", "limit and cap notices count within that selection",
+      "No matches show a distinct no-records message and summary warning", "count only selected records",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect(text, topic).toMatch(/recordCount`? remains the collection total/);
+    const filter = text.match(/\{"reference":"baseline-a"\}/)?.[0];
+    expect(filter, topic).toBeDefined();
+    const view = prepareChartView(JSON.stringify({ version: 1, type: "table", collection: "scores",
+      filter: JSON.parse(filter!), columns: [{ field: "count", format: "number" }],
+    }), null);
+    expect(view.projection.status, topic).toBe("collection-absent");
+  }
 });
 
 it("documents inline icon names, source preservation, card labels and literal MCP emoji names", async () => {

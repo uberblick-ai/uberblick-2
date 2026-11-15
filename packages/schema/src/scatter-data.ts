@@ -6,7 +6,8 @@ import type { JSONValue } from "./data-schema.js";
 import type { DataRecord, DocData } from "./data.js";
 import { tableColumn } from "./table-data.js";
 import type { TableColumnMapping } from "./table-data.js";
-import { bindCollection, incompatible, keys, name, numeric, object, optionalText, own } from "./view-data.js";
+import { bindCollection, filterField, filterRecords, incompatible, keys, name, numeric, object, optionalFilter, optionalText, own, viewNotice } from "./view-data.js";
+import type { ViewFilter } from "./view-data.js";
 
 export interface ScatterAxisMapping {
   field: string;
@@ -21,6 +22,7 @@ export interface ScatterConfig {
   version: 1;
   type: "scatter";
   collection: string;
+  filter?: ViewFilter;
   x: ScatterAxisMapping;
   y: ScatterAxisMapping;
   label: string;
@@ -96,7 +98,7 @@ export function parseScatterConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid scatter configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "label", "group", "diagonal", "details", "title", "height"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "filter", "x", "y", "label", "group", "diagonal", "details", "title", "height"]) || !optionalFilter(value) ||
       value.version !== 1 || value.type !== "scatter" || !name(value.collection) ||
       !axis(value.x) || !axis(value.y) || !name(value.label) ||
       (Object.hasOwn(value, "group") && !name(value.group)) ||
@@ -166,7 +168,7 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
     if (mapping.lower !== undefined) mappings.push({ field: mapping.lower, format: "number" });
     if (mapping.upper !== undefined) mappings.push({ field: mapping.upper, format: "number" });
   }
-  const badField = mappings.find((mapping) => incompatible(schema, mapping.field, mapping.format))?.field;
+  const badField = mappings.find((mapping) => incompatible(schema, mapping.field, mapping.format))?.field ?? filterField(schema, config.filter);
   if (badField !== undefined) return {
     status: "mapping-incompatible",
     message: `Scatter mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.`,
@@ -176,8 +178,9 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
     invalidSchema: 0, axes: { x: axisDiagnostics(), y: axisDiagnostics() }, limited: 0, groupOverflow: false,
   };
   const invalid = new Set(collection.invalidRecordIds);
+  const records = filterRecords(collection.records, config.filter);
   const eligible: ScatterPoint[] = [];
-  for (const record of collection.records) {
+  for (const record of records) {
     if (invalid.has(record.id) || !object(record.value)) { diagnostics.invalidSchema += 1; continue; }
     const x = coordinate(own(record.value, config.x.field), diagnostics.axes.x);
     const y = coordinate(own(record.value, config.y.field), diagnostics.axes.y);
@@ -205,10 +208,12 @@ function projectScatter(config: ScatterConfig, data: DocData | null): ScatterPro
     ? [`Scatter group field “${config.group}” has more than 8 values; all points use a neutral style.`] : [];
   const common = {
     config, points, groups, recordCount: collection.records.length, eligibleCount: eligible.length,
-    plottedCount: points.length, notPlotted: collection.records.length - points.length, diagnostics, warnings,
-    ...(diagnostics.limited > 0 ? { notice: `Showing 5,000 of ${eligible.length} records` } : {}),
+    plottedCount: points.length, notPlotted: records.length - points.length, diagnostics, warnings,
+    ...viewNotice(records.length, collection.records.length,
+      diagnostics.limited > 0 ? `Showing 5,000 of ${eligible.length} records` : undefined),
   };
-  if (points.length === 0) return { status: "no-records", message: "No plottable records in this scatter collection.", ...common };
+  if (points.length === 0) return { status: "no-records", message: config.filter !== undefined && records.length === 0
+    ? "No records match the filter." : "No plottable records in this scatter collection.", ...common };
   return { status: "ready", ...common, domain: { x: domain(points, "x", config.x), y: domain(points, "y", config.y) } };
 }
 
