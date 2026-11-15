@@ -211,9 +211,19 @@ test("checklist markers keep their depth and paint in both appearances and toggl
   await expect(boxes).toHaveCount(4);
   await expect(boxes.nth(0)).not.toBeChecked();
   await expect(boxes.nth(1)).toBeChecked();
+  await placeCaretIn(items.first());
   await boxes.nth(0).tap();
   await expect(boxes.nth(0)).toBeChecked();
-  await expect(items).toHaveText(["Pack the bag", "Bring the map", "Check the route", "Save the address", "Ordinary bullet", "Ordinary number"]);
+  await expect(view).toBeFocused();
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await page.keyboard.press(`${modifier}+z`);
+  await expect(boxes.nth(0)).not.toBeChecked();
+  await expect(items.first()).toHaveText("Pack the bag");
+  await boxes.nth(0).tap();
+  await expect(boxes.nth(0)).toBeChecked();
+  await expect(view).toBeFocused();
+  await page.keyboard.type("!");
+  await expect(items).toHaveText(["Pack the bag!", "Bring the map", "Check the route", "Save the address", "Ordinary bullet", "Ordinary number"]);
   await expect.poll(() => items.evaluateAll(elements => elements.slice(0, 4).map(element => element.getAttribute("data-indent"))))
     .toEqual(["0", "1", "2", "3"]);
 
@@ -254,10 +264,9 @@ test("checklist markers keep their depth and paint in both appearances and toggl
   await expect(boxes.first()).toBeDisabled();
   await boxes.first().tap({ force: true });
   await items.first().tap();
-  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
   await page.keyboard.press(`${modifier}+Enter`);
   await expect(boxes.first()).toBeChecked();
-  await expect(items.first()).toHaveText("Pack the bag");
+  await expect(items.first()).toHaveText("Pack the bag!");
 });
 
 test("a touch caret exposes a 44px gutter without moving prose, follows edits, and inserts by tap", { tag: "@webkit-touch" }, async ({ browser }, info) => {

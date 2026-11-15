@@ -194,6 +194,28 @@ describe("checklist editing", () => {
     expect(editor.state.selection.$head.parent.attrs.id).toBe(next.id);
   });
 
+  it.each([
+    ["Task", 0, "", "Task", "unchecked", "checked"],
+    ["Task", 2, "Ta", "sk", "checked", "unchecked"],
+    ["", 0, "", "", "checked", "unchecked"],
+  ] as const)("splits checked %j at offset %i into the appropriate checklist states", (text, offset, before, after, firstList, secondList) => {
+    const ydoc = docWith([{ type: "list-item", text, list: "checked", indent: 2 }]);
+    const id = firstBlockId(ydoc);
+    const { editor } = mountEditor(ydoc);
+    caret(editor, 0, offset);
+    editor.commands.keyboardShortcut("Enter");
+    const blocks = getBlocks(ydoc);
+    expect(blocks).toMatchObject([
+      { id, type: "list-item", text: before, list: firstList, indent: 2 },
+      { type: "list-item", text: after, list: secondList, indent: 2 },
+    ]);
+    const next = blocks[1];
+    if (next === undefined) throw new Error("split checklist item is missing");
+    expect(next.id).not.toBe(id);
+    expect(next.id).not.toBe("");
+    expect(editor.state.selection.$head.parent.attrs.id).toBe(next.id);
+  });
+
   it("keeps Tab indentation and lifts the checklist to a paragraph at its start without losing its anchor", () => {
     const ydoc = docWith([{ type: "list-item", text: "Keep this", list: "checked", indent: 1 }]);
     const id = firstBlockId(ydoc);

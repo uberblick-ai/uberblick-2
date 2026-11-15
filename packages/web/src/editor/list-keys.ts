@@ -59,10 +59,18 @@ const splitListItem: Command = (state, dispatch) => {
 
   const tr = state.tr;
   if (!state.selection.empty) tr.deleteSelection();
+  // At the start, the second half still carries the completed task.
+  const keepCheckedText = item.node.attrs.list === "checked"
+    && tr.selection.$from.parentOffset === 0
+    && tr.selection.$from.parent.content.size > 0;
+  if (keepCheckedText) {
+    tr.setNodeAttribute(tr.selection.$from.before(1), "list", "unchecked");
+  }
   tr.split(tr.selection.from, 1, [
     { type: item.node.type, attrs: {
       ...item.node.attrs, id: null,
-      list: item.node.attrs.list === "checked" ? "unchecked" : item.node.attrs.list,
+      list: item.node.attrs.list === "checked" && !keepCheckedText
+        ? "unchecked" : item.node.attrs.list,
     } },
   ]);
   dispatch(tr.scrollIntoView());

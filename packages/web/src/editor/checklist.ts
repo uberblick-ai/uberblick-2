@@ -47,6 +47,8 @@ export function checklistPlugins(canEdit: () => boolean): Plugin[] {
             const label = view.dom.ownerDocument.createElement("label");
             label.className = "ub-checklist-control";
             label.contentEditable = "false";
+            // Keep the text caret and editor undo bindings through native activation.
+            label.addEventListener("mousedown", (event) => event.preventDefault());
             const input = view.dom.ownerDocument.createElement("input");
             input.type = "checkbox";
             input.tabIndex = -1;
