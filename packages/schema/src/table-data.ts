@@ -22,17 +22,23 @@ export interface TableConfig {
   title?: string;
   limit?: number;
   sort?: { field: string; direction: "asc" | "desc" };
+  shade?: { fields: string[]; better: "lower" | "higher" };
   pageSize: number;
 }
 export interface TableBarScale {
   max: number;
   signed: boolean;
 }
+export interface TableShadeScale {
+  min: number;
+  max: number;
+}
 export interface TableReady {
   status: "ready";
   config: TableConfig;
   rows: DataRecord[];
   barScales: Array<TableBarScale | null>;
+  shadeScale: TableShadeScale | null;
   recordCount: number;
   invalidSchema: number;
   notice?: string;
@@ -65,15 +71,27 @@ function validColumn(value: unknown, allowBar: boolean): boolean {
       typeof value.decimals === "number" && value.decimals >= 0 && value.decimals <= 10)));
 }
 
+function validShade(value: unknown, columns: Record<string, unknown>[]): boolean {
+  if (!object(value) || !keys(value, ["fields", "better"]) ||
+      !Array.isArray(value.fields) || value.fields.length === 0 || !value.fields.every(name) ||
+      new Set(value.fields).size !== value.fields.length ||
+      (value.better !== "lower" && value.better !== "higher")) return false;
+  return value.fields.every((field) => {
+    const shown = columns.filter((column) => column.field === field);
+    return shown.length > 0 && shown.every((column) => column.format === "number" && !Object.hasOwn(column, "bar"));
+  });
+}
+
 export function parseTableConfig(source: string):
   { ok: true; config: TableConfig } | { ok: false; message: string } {
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid table configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize", "limit"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize", "limit", "shade"]) ||
       value.version !== 1 || value.type !== "table" || !name(value.collection) ||
       !Array.isArray(value.columns) || value.columns.length < 1 || value.columns.length > 30 ||
       !value.columns.every((entry) => validColumn(entry, true)) || !optionalText(value, "title") ||
+      (Object.hasOwn(value, "shade") && !validShade(value.shade, value.columns)) ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "pageSize") && (typeof value.pageSize !== "number" ||
         !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > 100)) ||
@@ -132,6 +150,21 @@ function tableBarScales(columns: TableColumnMapping[], rows: DataRecord[]): Arra
   });
 }
 
+function tableShadeScale(config: TableConfig, rows: DataRecord[]): TableShadeScale | null {
+  if (config.shade === undefined) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const record of rows) {
+    for (const field of config.shade.fields) {
+      const value = own(record.value, field);
+      if (!numeric(value)) continue;
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+  }
+  return min === Infinity ? null : { min, max };
+}
+
 function projectTable(config: TableConfig, data: DocData | null): TableProjection {
   const binding = bindCollection(data, config.collection, "Table");
   if (binding.status !== "ready") return binding;
@@ -152,7 +185,7 @@ function projectTable(config: TableConfig, data: DocData | null): TableProjectio
   else rows = sortTableRows(rows, sortColumn, sort?.direction ?? "asc");
   const eligibleCount = rows.length;
   if (config.limit !== undefined && rows.length > config.limit) rows = rows.slice(0, config.limit);
-  const common = { config, rows, barScales: tableBarScales(config.columns, rows), recordCount: collection.records.length, invalidSchema };
+  const common = { config, rows, barScales: tableBarScales(config.columns, rows), shadeScale: tableShadeScale(config, rows), recordCount: collection.records.length, invalidSchema };
   if (rows.length === 0) return {
     status: "no-records", message: "No records to show in this table collection.",
     ...common,

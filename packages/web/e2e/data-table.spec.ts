@@ -2,9 +2,10 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
+import { converter } from "culori";
 import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { contrast } from "../test/colour.js";
+import { composite, contrast } from "../test/colour.js";
 import { activateControl, createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { renderedText } from "./contrast-helpers.js";
@@ -210,6 +211,10 @@ async function barGeometry(cell: Locator): Promise<{ width: number; left: number
     if (track === undefined || fill === undefined || track.width === 0) throw new Error("e2e: bar geometry is missing");
     return { width: fill.width / track.width, left: (fill.left - track.left) / track.width };
   });
+}
+
+function shadeFill(cell: Locator): Promise<string> {
+  return cell.evaluate(element => getComputedStyle(element).backgroundColor);
 }
 
 /**
@@ -746,6 +751,186 @@ test("in-cell bars preserve native text copying and redraw unchanged rows when l
   await expect(fixed).toHaveText("150");
   await expect(fixed.locator(".ub-data-bar")).toHaveAttribute("data-signed", "false");
   expect((await barGeometry(fixed)).width).toBeCloseTo(1, 2);
+});
+
+test("heat-map cells share one readable hue and scroll inside the table in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "System error rates",
+    columns: [
+      { field: "name", label: "Recording" },
+      { field: "value", label: "System A", format: "number", decimals: 0 },
+      { field: "rate", label: "System B", format: "number", decimals: 0 },
+      { field: "plain", label: "Unshaded number", format: "number", decimals: 0 },
+      ...Array.from({ length: 5 }, (_, index) => ({ field: "value", label: `Repeated measurement ${index + 1}`, format: "number", decimals: 0 })),
+    ],
+    shade: { fields: ["value", "rate"], better: "lower" },
+  };
+  const uuid = await tableDoc(session, "Heat-map appearance", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "First", value: 0, rate: 50, plain: 1000 } },
+    { id: "b", value: { name: "Second", value: 25, rate: 75, plain: 1000 } },
+    { id: "c", value: { name: "Third", value: 50, rate: 100, plain: 1000 } },
+    { id: "d", value: { name: "Null", value: null, rate: null, plain: 1000 } },
+    { id: "e", value: { name: "Absent", plain: 1000 } },
+    { id: "f", value: { name: "Invalid", value: "bad", rate: "bad", plain: 1000 } },
+  ] }] });
+  const touch = info.project.use.hasTouch === true;
+  const toHsl = converter("hsl");
+  for (const colorScheme of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+      colorScheme, locale: "en-US", hasTouch: touch, isMobile: info.project.use.isMobile === true,
+      viewport: { width: touch ? 810 : 1280, height: 1000 },
+      ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+      ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+    } });
+    await waitForDocumentDraw(page, session, uuid);
+    await page.evaluate(() => document.fonts.ready);
+    const table = page.getByRole("table", { name: "System error rates", exact: true });
+    const rows = table.locator("tbody tr");
+    await expect(rows.locator("td:nth-child(2)")).toHaveText(["0", "25", "50", "Null", "Absent", "Invalid: bad"]);
+    await expect(rows.locator("td:nth-child(3)")).toHaveText(["50", "75", "100", "Null", "Absent", "Invalid: bad"]);
+    await expect(table.locator("td[data-shade='true']")).toHaveCount(21);
+    await expect(rows.locator("td:nth-child(4)[data-shade]")).toHaveCount(0);
+    await expect(table.locator("th[data-shade], td[data-state='null'][data-shade], td[data-state='absent'][data-shade], td[data-state='invalid'][data-shade]")).toHaveCount(0);
+    const readings = await renderedText(page, ".ub-data-table");
+    expect(readings.length).toBeGreaterThan(0);
+    for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    const unshaded = await renderedText(page, ".ub-data-table td:first-child");
+    const grounds = new Set(unshaded.map(reading => reading.ground));
+    expect(grounds.size).toBeGreaterThan(0);
+    const paint = await table.locator("td[data-shade='true']").evaluateAll(elements => elements.map(element => {
+      const style = getComputedStyle(element);
+      return { value: Number(element.textContent), fill: style.backgroundColor, ink: style.color };
+    }));
+    const hues = paint.map(cell => toHsl(cell.fill)?.h);
+    const hue = hues[0];
+    if (hue === undefined) throw new Error("e2e: shaded cell has no hue");
+    for (const current of hues) {
+      if (current === undefined) throw new Error("e2e: shaded cell has no hue");
+      expect(Math.abs(((current - hue + 540) % 360) - 180)).toBeLessThan(2);
+    }
+    const ordered = [...paint].sort((left, right) => left.value - right.value);
+    for (const ground of grounds) {
+      for (const cell of paint) expect(contrast(cell.ink, composite(cell.fill, ground))).toBeGreaterThanOrEqual(4.5);
+      let previous = 1;
+      for (const cell of ordered) {
+        const strength = contrast(cell.fill, ground);
+        expect(strength + 0.001).toBeGreaterThanOrEqual(previous);
+        previous = strength;
+      }
+      expect(previous).toBeGreaterThanOrEqual(3);
+    }
+    expect(await shadeFill(rows.nth(0).locator("td").nth(2))).toBe(await shadeFill(rows.nth(2).locator("td").nth(1)));
+    expect(await shadeFill(rows.nth(1).locator("td").nth(1))).toBe(await shadeFill(rows.nth(1).locator("td").nth(4)));
+    const plainFill = await shadeFill(rows.nth(0).locator("td").nth(3));
+    for (const index of [3, 4, 5]) expect(await shadeFill(rows.nth(index).locator("td").nth(1))).toBe(plainFill);
+    const scroll = page.locator(".ub-table-scroll");
+    expect(await scroll.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (touch) await scroll.evaluate(element => { element.scrollLeft = 400; });
+    else {
+      await scroll.hover();
+      await page.mouse.wheel(400, 0);
+    }
+    await expect.poll(() => scroll.evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+    await scroll.evaluate(element => { element.scrollLeft = 0; });
+    const screenshot = info.outputPath(`heat-map-${colorScheme}.png`);
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await info.attach(`heat-map-${colorScheme}`, { path: screenshot, contentType: "image/png" });
+    await page.context().close();
+  }
+});
+
+test("heat maps preserve native copying and sorting while live scales refresh unchanged cells", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "Live error rates", limit: 3,
+    sort: { field: "name", direction: "asc" },
+    columns: [{ field: "name", label: "Name" }, { field: "value", label: "Value", format: "number" },
+      { field: "rate", label: "Rate", format: "number" }],
+    shade: { fields: ["value", "rate"], better: "lower" },
+  };
+  const uuid = await tableDoc(session, "Native heat maps", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "A", value: 10, rate: 0 } },
+    { id: "b", value: { name: "B", value: 20, rate: 20 } },
+    { id: "c", value: { name: "C", value: 40, rate: 40 } },
+    { id: "d", value: { name: "D", value: 160, rate: 160 } },
+  ] }] });
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+    locale: "en-US", hasTouch: touch, isMobile: info.project.use.isMobile === true,
+    viewport: { width: touch ? 810 : 1280, height: 1000 },
+    ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+    ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+    ...(info.project.name === "chromium" ? { permissions: ["clipboard-read", "clipboard-write"] } : {}),
+  } });
+  await waitForDocumentDraw(page, session, uuid);
+  await page.evaluate(() => document.fonts.ready);
+  const table = page.getByRole("table", { name: "Live error rates", exact: true });
+  const row = (name: string): Locator => table.getByRole("row").filter({ has: page.getByRole("cell", { name, exact: true }) });
+  const value = (name: string): Locator => row(name).locator("td").nth(1);
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["A", "B", "C"]);
+  await expect(value("B")).toHaveText("20");
+  expect(await value("B").ariaSnapshot()).toBe('- cell "20"');
+  const originalFill = await shadeFill(value("B"));
+  const copyPoint = await value("B").evaluate(element => {
+    const range = document.createRange(); range.selectNodeContents(element);
+    const text = range.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    return { x: text.right - box.left - 5, y: text.top - box.top + text.height / 2 };
+  });
+  await value("B").click({ clickCount: 3, position: copyPoint });
+  expect((await page.evaluate(() => document.getSelection()?.toString() ?? "")).trim()).toBe("20");
+  await page.keyboard.press("ControlOrMeta+c");
+  if (info.project.name === "chromium") {
+    await expect.poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).trim()).toBe("20");
+  } else {
+    await page.evaluate(() => {
+      const target = document.createElement("textarea"); target.dataset.shadeCopy = "true";
+      document.body.append(target); target.focus();
+    });
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect(page.locator("textarea[data-shade-copy]")).toHaveValue(/^(?:20\n?|\n?20)$/);
+    await page.locator("textarea[data-shade-copy]").evaluate(element => element.remove());
+  }
+  const sort = table.getByRole("button", { name: "Value", exact: true });
+  await activateControl(sort, { touch });
+  await activateControl(sort, { touch });
+  await expectHeaderOrder(table, "Value", "descending");
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["C", "B", "A"]);
+  expect(await shadeFill(value("B"))).toBe(originalFill);
+  const unshaded = await renderedText(page, ".ub-data-table td:first-child");
+  const ground = unshaded[0]?.ground;
+  if (ground === undefined) throw new Error("e2e: table background is missing");
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "c", value: { name: "C", value: 80, rate: 40 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(value("C")).toHaveText("80");
+  const afterUpdate = await shadeFill(value("B"));
+  expect(contrast(afterUpdate, ground)).toBeLessThan(contrast(originalFill, ground));
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "d", value: { name: "AA", value: 160, rate: 160 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["AA", "B", "A"]);
+  expect(contrast(await shadeFill(value("B")), ground)).toBeLessThan(contrast(afterUpdate, ground));
+  await editMapping(session, uuid, JSON.stringify({ ...mapping, shade: { fields: ["value", "rate"], better: "higher" } }));
+  await waitForDocumentDraw(page, session, uuid);
+  expect(contrast(await shadeFill(value("A")), ground)).toBeGreaterThan(contrast(await shadeFill(value("B")), ground));
+  expect(contrast(await shadeFill(value("B")), ground)).toBeGreaterThan(contrast(await shadeFill(value("AA")), ground));
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [
+    { id: "a", value: { name: "A", value: 20, rate: 20 } },
+    { id: "b", value: { name: "B", value: 20, rate: 20 } },
+    { id: "c", value: { name: "C", value: 20, rate: 20 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  const equal = table.locator("td[data-shade='true']");
+  await expect(equal).toHaveCount(6);
+  await expect(equal).toHaveText(["20", "20", "20", "20", "20", "20"]);
+  expect(new Set(await equal.evaluateAll(elements => elements.map(element => getComputedStyle(element).backgroundColor))).size).toBe(1);
 });
 
 test("every header sorts through native pointer and keyboard input without moving the document selection", { tag: "@webkit" }, async ({ browser }, info) => {

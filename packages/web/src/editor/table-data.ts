@@ -3,7 +3,7 @@ import { chartDate, isExternalHref } from "@uberblick/schema";
 import type { ChartProjection, DataRecord, TableColumnMapping, TableConfig, TableProjection } from "@uberblick/schema";
 import { chartDateFormatter, chartNumberFormatter } from "./chart-data.js";
 export { parseTableConfig, prepareTable, sortTableRows } from "@uberblick/schema";
-export type { TableBarScale, TableColumnMapping, TableConfig, TableProjection, TableReady } from "@uberblick/schema";
+export type { TableBarScale, TableShadeScale, TableColumnMapping, TableConfig, TableProjection, TableReady } from "@uberblick/schema";
 
 function storedText(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
 function numeric(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }

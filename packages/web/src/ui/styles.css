@@ -35,6 +35,7 @@
   --muted-foreground: light-dark(oklch(0.511 0 0), oklch(0.708 0 0));
   /* A matched small step from muted ink; headers retain AA on comment highlights. */
   --table-header-foreground: light-dark(oklch(0.521 0 0), oklch(0.698 0 0));
+  --data-shade-foreground: light-dark(#071a30, #ffffff);
   --accent: light-dark(oklch(0.97 0 0), oklch(0.22 0.01 65));
   --accent-foreground: light-dark(oklch(0.205 0 0), oklch(0.985 0 0));
   --destructive: light-dark(oklch(0.577 0.245 27.325), oklch(0.704 0.191 22.216));
@@ -1941,6 +1942,10 @@ h6.ub-heading {
   background: var(--muted-foreground);
 }
 .ub-data-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--muted-foreground); }
+.ub-data-table td[data-shade="true"] {
+  background: light-dark(hsl(215 65% calc(97% - var(--ub-data-shade-strength) * 39%)), hsl(215 65% calc(17% + var(--ub-data-shade-strength) * 30%)));
+  color: var(--data-shade-foreground);
+}
 .ub-data-table th { max-width: 32rem; }
 .ub-data-sort {
   display: flex; align-items: center; gap: 0.3rem;

@@ -1,13 +1,20 @@
 /** Native, continuous read-only table. Unchanged rows retain their DOM and cells. */
 import type { DataRecord } from "@uberblick/schema";
 import { tableCellFormatter, tableAccessibleName, sortTableRows } from "./table-data.js";
-import type { TableBarScale, TableCell, TableColumnMapping, TableProjection, TableReady } from "./table-data.js";
+import type { TableBarScale, TableShadeScale, TableCell, TableColumnMapping, TableProjection, TableReady } from "./table-data.js";
 
 type TableViewProjection = TableReady | Pick<Exclude<TableProjection, TableReady>, "status" | "message">;
 
 function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableColumnMapping["format"] | undefined,
-  scale: TableBarScale | null): void {
+  scale: TableBarScale | null, shade: number | null): void {
   if (cell.dataset.state !== value.state) cell.dataset.state = value.state;
+  if (shade === null) {
+    delete cell.dataset.shade;
+    cell.style.removeProperty("--ub-data-shade-strength");
+  } else {
+    cell.dataset.shade = "true";
+    cell.style.setProperty("--ub-data-shade-strength", String(shade));
+  }
   let content = cell.firstElementChild as HTMLElement | null;
   if (content === null) {
     content = document.createElement("div");
@@ -58,13 +65,29 @@ function renderCell(cell: HTMLTableCellElement, value: TableCell, format: TableC
   } else if (content.firstElementChild !== null || content.textContent !== value.text) content.textContent = value.text;
 }
 
+function shadeStrength(value: number, scale: TableShadeScale, better: "lower" | "higher"): number {
+  if (scale.min === scale.max) return 0.5;
+  const range = scale.max - scale.min;
+  // Halving first keeps a range spanning extreme finite numbers finite too.
+  const fraction = Number.isFinite(range) ? (value - scale.min) / range
+    : (value / 2 - scale.min / 2) / (scale.max / 2 - scale.min / 2);
+  return Math.max(0, Math.min(1, better === "lower" ? fraction : 1 - fraction));
+}
+
 function renderRow(row: HTMLTableRowElement, record: DataRecord, projection: TableReady,
-  formatters: Array<ReturnType<typeof tableCellFormatter>>, onlyBars: boolean): void {
+  formatters: Array<ReturnType<typeof tableCellFormatter>>, onlyScaled: boolean): void {
   formatters.forEach((format, index) => {
     const column = projection.config.columns[index];
-    if (onlyBars && column?.bar === undefined) return;
+    const shade = projection.config.shade;
+    const shaded = column !== undefined && shade?.fields.includes(column.field);
+    if (onlyScaled && column?.bar === undefined && !shaded) return;
     const cell = row.cells[index] ?? row.insertCell();
-    renderCell(cell, format(record), column?.format, projection.barScales[index] ?? null);
+    const value = format(record);
+    const raw = column === undefined ? undefined : record.value[column.field];
+    const strength = shaded && shade !== undefined && projection.shadeScale !== null &&
+      value.state === "valid" && typeof raw === "number" && Number.isFinite(raw)
+      ? shadeStrength(raw, projection.shadeScale, shade.better) : null;
+    renderCell(cell, value, column?.format, projection.barScales[index] ?? null, strength);
   });
 }
 
@@ -107,7 +130,7 @@ export function dataTableView(): {
     }
     projection = next;
     const { config } = next;
-    const nextScales = JSON.stringify(next.barScales);
+    const nextScales = JSON.stringify([next.barScales, next.shadeScale]);
     const scaleChanged = scales !== nextScales;
     scales = nextScales;
     const chosenColumn = readerSort === null ? undefined : config.columns[readerSort.index];
@@ -118,7 +141,7 @@ export function dataTableView(): {
     if (element.childElementCount === 0) element.append(scroll);
     const accessibleName = tableAccessibleName(config);
     if (caption.textContent !== accessibleName) caption.textContent = accessibleName;
-    const nextColumns = JSON.stringify(config.columns);
+    const nextColumns = JSON.stringify([config.columns, config.shade]);
     if (columns !== nextColumns) {
       columns = nextColumns;
       formatters = config.columns.map(column => tableCellFormatter(column));

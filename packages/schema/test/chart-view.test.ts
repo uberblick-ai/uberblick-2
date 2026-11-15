@@ -167,4 +167,32 @@ describe("shared chart-block projection", () => {
       type: "table", projection: { status: "no-records", barScales: [{ max: 0, signed: false }] },
     });
   });
+
+  it("dispatches table shading through the shared projection and omits schema-invalid rows from its scale", () => {
+    const source = JSON.stringify({
+      version: 1, type: "table", collection: "observations", columns: [{ field: "x", format: "number" }, { field: "y", format: "number" }],
+      shade: { fields: ["x", "y"], better: "higher" },
+    });
+    const data = snapshot();
+    expect(prepareChartView(source, data)).toMatchObject({
+      type: "table", projection: {
+        status: "ready", recordCount: 3, invalidSchema: 1, rows: [{ id: "a" }, { id: "b" }], shadeScale: { min: 1, max: 2 },
+      },
+    });
+    data.collections[0]!.invalidRecordIds = ["a", "b", "invalid"];
+    expect(prepareChartView(source, data)).toMatchObject({
+      type: "table", projection: { status: "no-records", shadeScale: null },
+    });
+  });
+
+  it("keeps shade invalid on charts and scatter details", () => {
+    const shade = { fields: ["x"], better: "lower" };
+    for (const mapping of [
+      { ...line, shade },
+      { version: 1, type: "scatter", collection: "observations", x: { field: "x" }, y: { field: "y" }, label: "name", shade },
+      { version: 1, type: "scatter", collection: "observations", x: { field: "x" }, y: { field: "y" }, label: "name", details: [{ field: "x", format: "number", shade }] },
+    ]) {
+      expect(prepareChartView(JSON.stringify(mapping), snapshot()).projection.status).toBe("invalid-configuration");
+    }
+  });
 });
