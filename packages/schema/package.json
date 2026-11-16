@@ -29,9 +29,9 @@
     "yjs": "^13.6.32"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.4",
+    "vitest": "^5.1.0",
     "yjs": "catalog:"
   }
 }
