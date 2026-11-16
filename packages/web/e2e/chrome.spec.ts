@@ -1419,14 +1419,14 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     await expect(overflow).toBeVisible();
     const deltaPerson = page.getByRole("button", {
       name: /^Delta · person · .*editing block 1$/,
-    });
+    }).or(overflow.locator('button[aria-description^="Delta · person ·"][aria-description$="editing block 1"]'));
     await expect(deltaPerson).toBeVisible();
     await expect(deltaPerson.locator(".ub-avatar-agent-badge")).toHaveCount(0);
     dora.provider.setAwarenessField("client", "agent");
     dora.provider.setAwarenessField("cursor", caretAt(dora.doc, 28));
     const deltaAgent = page.getByRole("button", {
       name: /^Delta · agent · .*editing block 29$/,
-    });
+    }).or(overflow.locator('button[aria-description^="Delta · agent ·"][aria-description$="editing block 29"]'));
     await expect(deltaAgent).toBeVisible();
     await expect(deltaAgent.locator(".ub-avatar-agent-badge")).toHaveText("🤖");
     expect(await visible.evaluateAll((controls) =>
@@ -1528,7 +1528,8 @@ test(`the document collaborator cluster stays compact and jumps once without mov
       element.scrollTop = 0;
     });
     await more.click();
-    const noLocation = page.getByRole("button", { name: "Eli · person" });
+    const noLocation = page.getByRole("button", { name: "Eli · person" })
+      .or(overflow.getByRole("button", { name: "Eli person", exact: true }));
     await expect(noLocation).toBeVisible();
     await noLocation.click();
     await waitForPaneScrollToSettle();

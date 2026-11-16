@@ -2588,7 +2588,7 @@ test.describe("document history through ub open", () => {
             expect(button.height).toBeGreaterThanOrEqual(scenario.touch ? 44 : 26);
             expect(Math.abs((button.left + button.right) / 2 - ((geometry.ruler?.left ?? 0) + (geometry.ruler?.right ?? 0)) / 2)).toBeLessThan(1);
           }
-          const target = scenario.docked ? history(page).getByRole("button", { name: `Copy revision ${revisionId("latest")}: rev ${revisionId("latest").slice(0, 8)}`, exact: true })
+          const target = scenario.docked ? history(page).getByRole("button", { name: `Copy revision ${revisionId("latest")}: ${scenario.named ? "Reviewed with a long revision name" : `rev ${revisionId("latest").slice(0, 8)}`}`, exact: true })
             : history(page).getByRole("button", { name: "Back to now", exact: true });
           const box = await target.boundingBox();
           if (box === null) throw new Error("The last status control is missing");
