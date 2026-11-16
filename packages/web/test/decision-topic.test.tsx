@@ -327,6 +327,7 @@ describe("decision topic navigation and history", () => {
   ])("pins the record named by a revision address instead of selecting the answer in force: $uuid", async ({ uuid, text }) => {
     story();
     const path = revisionPath(WORKSPACE, uuid, RFC, EARLIER_RFC);
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting, outside React rendering.
     function RoutedSelection() {
       const { selected, doc } = useShellRooms({
         roomReady: true, workspace: { uuid: WORKSPACE, segment: WORKSPACE },

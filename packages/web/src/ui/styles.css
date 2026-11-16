@@ -1188,9 +1188,9 @@ body {
 .ub-thread-comment:hover .ub-comment-action,
 .ub-thread-comment:focus-within .ub-comment-action { opacity: 1; pointer-events: auto; }
 .ub-thread-control { opacity: 0; pointer-events: none; }
+.ub-thread-focused .ub-thread-control,
 .ub-thread:hover .ub-thread-control,
-.ub-thread:focus-within .ub-thread-control,
-.ub-thread-focused .ub-thread-control { opacity: 1; pointer-events: auto; }
+.ub-thread:focus-within .ub-thread-control { opacity: 1; pointer-events: auto; }
 .ub-thread-resolve {
   position: absolute;
   top: 0.5rem;
@@ -1572,6 +1572,7 @@ h6.ub-heading {
   box-shadow: 0 0 0 1px var(--ring);
 }
 .ProseMirror-focused .ub-card[data-card-focused="true"] [data-empty="true"] { display: block; }
+/* biome-ignore lint/style/noDescendingSpecificity: Empty-label spacing intentionally wins through its more specific selector. */
 .ProseMirror-focused .ub-card[data-card-focused="true"] .ub-card-parts > .ub-card-title { margin-top: 6px; }
 /* Editor focus must not move a selected footer action during a native press. */
 .ProseMirror[contenteditable="true"]:not(.ProseMirror-focused) .ub-card[data-card-button][data-card-focused="true"] [data-empty="true"]:not(.ub-card-title) {
@@ -2011,6 +2012,7 @@ h6.ub-heading {
   border-radius: var(--radius-sm);
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: Table control spans and Figma shield spans belong to separate controls. */
 .ub-table-control span {
   display: flex;
   align-items: center;
@@ -2061,12 +2063,6 @@ h6.ub-heading {
   padding-left: 1px;
 }
 
-.ub-table-control.ub-table-handle:hover span,
-.ub-table-control.ub-table-handle:focus-visible span,
-.ub-table-control.ub-table-handle[data-state="open"] span {
-  border-color: var(--muted-foreground);
-}
-
 /* Menu glyphs stay muted; a destructive item's glyph takes its colour. */
 .ub-table-menu-icon { color: var(--muted-foreground); }
 [data-variant="destructive"] > .ub-table-menu-icon { color: inherit; }
@@ -2101,6 +2097,12 @@ h6.ub-heading {
 .ub-table-control[data-state="open"] span {
   background: var(--secondary);
   color: var(--foreground);
+}
+
+.ub-table-control.ub-table-handle:hover span,
+.ub-table-control.ub-table-handle:focus-visible span,
+.ub-table-control.ub-table-handle[data-state="open"] span {
+  border-color: var(--muted-foreground);
 }
 
 @media (any-pointer: coarse) {
@@ -2670,6 +2672,7 @@ h6.ub-heading {
   margin-block-start: 0.5rem;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: Decision notice spans and table control spans belong to separate controls. */
 :is(.ub-decision-notice, .ub-decision-return) > span {
   flex: 1 1 16rem;
   min-inline-size: 0;
@@ -2807,6 +2810,7 @@ h6.ub-heading {
   border: 1px dashed var(--muted-foreground);
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: Mark sizing does not overlap the in-force border and background colors. */
 .ub-decision-answer-state .ub-decisions-mark {
   flex: none;
   align-self: center;
@@ -3403,6 +3407,7 @@ h6.ub-heading {
   overflow: hidden;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: Chart footer copy buttons deliberately retain their more specific appearance. */
 .ub-copy { color: var(--muted-foreground); transition: opacity 120ms ease, color 120ms ease; }
 .ub-copy:focus-visible { opacity: 1; color: var(--foreground); }
 @media (hover: hover) {

@@ -392,7 +392,7 @@ it("keeps card links independently reachable without selecting their card", () =
   act(() => { link.click(); });
   expect(dir.opened).toEqual([TARGET]);
   expect(focus).not.toHaveBeenCalled();
-  const select = within(card).getByRole<HTMLButtonElement>("button", { name: "Comment" });
+  const select = within(card).getByRole<HTMLButtonElement>("button", { name: /Updated / });
   expect(select.tabIndex).toBe(0);
   act(() => { select.click(); });
   expect(focus).toHaveBeenCalledOnce();

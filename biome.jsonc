@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.9/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
 
   // Lint only, by decision (#54): no formatter, no whole-repo reformat diff,
   // no editor config to keep in sync. Same for the assist actions.

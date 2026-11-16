@@ -199,6 +199,7 @@ for (const { coarse, width } of [
       // The unavailable create row shares the same floor without losing its
       // native disabled state or explanation when the direct hub disconnects.
       const selector = page.locator(".ub-workspace");
+      // biome-ignore lint/performance/useDomNodeTextContent: This compares the visible workspace label before and after the hub disconnects.
       const workspaceName = (await selector.innerText()).replace(/\s+/g, " ").trim();
       await harness().stopHub();
       const unavailable = page.getByRole("button", { name: "+ New page", exact: true });

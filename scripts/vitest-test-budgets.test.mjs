@@ -112,6 +112,7 @@ withFixture("body and test fixture", ({ resource }) => { if (resource) advance(2
     assert.match(output, /maintainer approval or open decision/);
     const junit = readFileSync(join(scratch, "vitest-results/fixture.xml"), "utf8");
     assert.equal((junit.match(/<failure /g) ?? []).length, 5);
+    assert.match(junit, /budget 60000 ms including its own setup, execution and cleanup/);
   });
 });
 

@@ -190,7 +190,7 @@ function highlight(host: HTMLElement, threadId: string): HTMLElement {
 }
 
 function threadButton(item: HTMLElement): HTMLElement {
-  return item.querySelector<HTMLButtonElement>(".ub-thread-select") ?? within(item).getByRole("button", { name: "Comment" });
+  return within(item).getByRole("button", { name: /Updated / });
 }
 
 function threadCard(host: HTMLElement, excerpt = "quick brown"): HTMLElement {
@@ -421,7 +421,7 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
     // tab stop at all.
     expect(span.tabIndex).toBe(0);
     expect(span.getAttribute("role")).toBe("button");
-    expect(span.getAttribute("aria-label")).toBe("Comment");
+    expect(span.getAttribute("aria-description")).toBe("Comment");
 
     span.focus();
     expect(document.activeElement).toBe(span);
@@ -436,12 +436,12 @@ describe("a keyboard reaches a thread from its range in the prose", () => {
   it("keeps resolved anchors ordinary text after live updates and redraws", async () => {
     const { host, ydoc, threadId } = await openAnnotatedDoc();
     let span = highlight(host, threadId);
-    expect(span.getAttribute("aria-label")).toBe("Comment");
+    expect(span.getAttribute("aria-description")).toBe("Comment");
     await act(async () => setAnnotationResolved(ydoc, threadId, true));
     const ordinary = (node: HTMLElement): void => {
       expect(node.getAttribute("role")).toBeNull();
       expect(node.getAttribute("tabindex")).toBeNull();
-      expect(node.getAttribute("aria-label")).toBeNull();
+      expect(node.getAttribute("aria-description")).toBeNull();
       expect(node.getAttribute("title")).toBeNull();
       expect(node.classList.contains("ub-comment")).toBe(false);
     };

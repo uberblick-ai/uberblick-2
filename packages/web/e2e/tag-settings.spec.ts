@@ -193,7 +193,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   const documentUrl = first.url();
   const title = first.locator(".ub-title");
   const titleBefore = await title.boundingBox();
-  const picker = first.getByRole("button", { name: "Edit tags" });
+  const picker = first.getByRole("button", { name: /^Edit tags:/ });
   await picker.focus();
   await picker.press("Enter");
   // This catalog is under the panel's ten-entry search threshold, so the
@@ -214,7 +214,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first.locator(".ub-doc-meta .ub-badge")).toHaveCount(0);
 
   await second.goto(documentUrl);
-  await expect(second.getByRole("button", { name: "Edit tags" })).toContainText(
+  await expect(second.getByRole("button", { name: /^Edit tags:/ })).toContainText(
     "product",
   );
 
@@ -227,7 +227,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first.getByRole("option", { name: "product", exact: true })).toHaveCount(0);
   await picker.click();
   await second.goto(documentUrl);
-  await expect(second.getByRole("button", { name: "Edit tags" })).toContainText(
+  await expect(second.getByRole("button", { name: /^Edit tags:/ })).toContainText(
     "Add tags",
   );
 });

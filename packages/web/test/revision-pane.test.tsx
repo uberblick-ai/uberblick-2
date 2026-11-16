@@ -536,7 +536,7 @@ describe("revision comparison controls", () => {
     render(<RevisionPane history={history} docLinks={null} workspaceSettings={null} />);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Previous revision" }).disabled).toBe(true);
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Next revision" }).disabled).toBe(true);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: `Copy revision ${history.entry!.id}` }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: `Copy revision ${history.entry!.id}: ${history.entry!.name?.text ?? `rev ${history.entry!.id.slice(0, 8)}`}` }));
     const now = screen.getByRole<HTMLButtonElement>("button", { name: "Back to now" });
     expect(now.disabled).toBe(false);
     await act(async () => fireEvent.click(now));

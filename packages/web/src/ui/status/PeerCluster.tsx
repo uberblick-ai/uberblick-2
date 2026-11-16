@@ -180,7 +180,7 @@ export function PeerCluster({
                 type="button"
                 className="ub-peer-overflow-row flex w-full min-w-0 items-center gap-2 rounded-(--radius-sm) border-0 bg-transparent p-[0.35rem] text-left text-inherit [font:inherit] hover:bg-(--card-accent) focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2"
                 data-peer-id={presenceKey(session)}
-                aria-label={presenceLabel(session)}
+                aria-description={presenceLabel(session)}
                 onFocus={() => {
                   focusWasInside.current = true;
                   focusedPeer.current = presenceKey(session);

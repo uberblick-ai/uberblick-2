@@ -89,7 +89,7 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
   await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByText("Keep the approved wording.", { exact: true })).toHaveCount(0);
   await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Edit TL;DR:/ })).toHaveCount(0);
   const prose = editor(page).locator(":scope > p").first();
   const header = editor(page).locator(".ub-table th").first();
   const rail = page.getByRole("region", { name: "Comments", exact: true });
@@ -392,7 +392,7 @@ test("an open answer edits and saves before remote settlement locks the same vie
   })).toEqual(selection);
   await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue("Decided editor");
   await expect(page.getByRole("textbox", { name: "Document title" })).toBeEditable();
-  await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Edit TL;DR:/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Add TL;DR", exact: true })).toHaveCount(0);

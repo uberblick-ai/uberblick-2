@@ -101,7 +101,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.goto(tagsUrl);
       await expect(page.locator("[data-tag-list] tbody tr")).toHaveCount(EXAMPLE_TAGS.length);
       await page.goto(documentUrl);
-      await page.getByRole("button", { name: "Edit tags" }).click();
+      await page.getByRole("button", { name: /^Edit tags:/ }).click();
       await expect(page.getByRole("option")).toHaveCount(EXAMPLE_TAGS.length);
       await scan("tag picker — list");
       await page.keyboard.press("Escape");
@@ -112,7 +112,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         await expect(page.getByRole("button", { name: `Delete scan-${index}` })).toBeVisible();
       }
       await page.goto(documentUrl);
-      await page.getByRole("button", { name: "Edit tags" }).click();
+      await page.getByRole("button", { name: /^Edit tags:/ }).click();
       await expect(page.getByRole("searchbox", { name: "Search tags" })).toBeVisible();
       await scan("tag picker — search");
       await page.keyboard.press("Escape");
@@ -192,10 +192,10 @@ test("element exclusions preserve same-rule siblings and reject ambiguous select
   await page.setContent(`<!doctype html><html lang="en"><title>Exclusion probe</title><body>
     <main><h1>Scrollable lists</h1><div data-slot="caret-menu-content">
       <div id="radix:tracked" role="listbox" aria-label="Block types" style="height:50px;overflow:auto">
-        <button role="option" aria-selected="false" tabindex="-1" style="height:200px">Tracked option</button>
+        <div role="option" aria-selected="false" style="height:200px;display:flex;align-items:center">Tracked option</div>
       </div>
       <div id="radix:sibling" role="listbox" aria-label="Other list" style="height:50px;overflow:auto">
-        <button role="option" aria-selected="false" tabindex="-1" style="height:200px">Sibling option</button>
+        <div role="option" aria-selected="false" style="height:200px;display:flex;align-items:center">Sibling option</div>
       </div>
     </div></main></body></html>`);
   const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();

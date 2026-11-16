@@ -46,6 +46,7 @@ function mount(api: DocumentRevisionsClient | null, uuid: string | null = UUID, 
   visit: (nextApi: DocumentRevisionsClient | null, nextUuid: string | null, nextPath: string) => void;
 } {
   const seen: DocumentHistory[] = [];
+  // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the probe once and retains its identity across rerenders.
   function Probe({ api, uuid, path }: { api: DocumentRevisionsClient | null; uuid: string | null; path: string }): null {
     seen.push(useDocumentHistory(api, uuid, path, liveDocument));
     return null;
@@ -64,6 +65,7 @@ function mountRouted(initialApi: DocumentRevisionsClient | null, initialView: Re
   let sync!: (next: LocalSync) => void;
   const seen: DocumentHistory[] = [];
   const navigate = vi.fn((next: RevisionView | null) => change(next, api));
+  // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the probe once and retains its identity across rerenders.
   function Probe(): null {
     const [input, setInput] = useState({ api: initialApi, view: initialView, liveDocument: initialDocument, sync: initialSync });
     change = (next, nextApi) => setInput(previous => ({ ...previous, api: nextApi, view: next }));

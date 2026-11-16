@@ -844,7 +844,7 @@ for (const scheme of ["light", "dark"] as const) {
     const card = page.getByRole("region", { name: "TL;DR", exact: true });
     const title = card.getByRole("heading", { name: "TL;DR", level: 2 });
     const summary = card.locator(".ub-tldr-body > p");
-    const inlineEdit = card.getByRole("button", { name: "Edit TL;DR", exact: true });
+    const inlineEdit = card.getByRole("button", { name: /^Edit TL;DR:/ });
     await expect(card.getByRole("heading")).toHaveCount(1);
     await expect(card.getByText("Quick summary", { exact: true })).toHaveCount(0);
     await expect(card.locator("svg")).toHaveCount(0);
@@ -1181,7 +1181,7 @@ for (const scheme of ["light", "dark"] as const) {
         style.borderBottomRightRadius, style.borderBottomLeftRadius, style.borderTopWidth,
         style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth];
     });
-    await activate(page.getByRole("button", { name: "Edit tags", exact: true }));
+    await activate(page.getByRole("button", { name: /^Edit tags:/ }));
     const tags = page.locator(".ub-tag-picker-panel");
     await expect(tags).toBeVisible();
     const tagSurface = await surface(tags);
@@ -1507,7 +1507,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     // Keyboard activation in the overflow reaches the same current stable
     // block once and leaves the local range untouched.
     const jumpRow = page.locator(
-      '.ub-peer-overflow-row[aria-label*="editing block 29"]',
+      '.ub-peer-overflow-row[aria-description*="editing block 29"]',
     ).first();
     await expect(jumpRow).toBeVisible();
     await jumpRow.focus();
@@ -1745,7 +1745,7 @@ for (const scheme of ["light"] as const) {
     const sync = page.getByRole("dialog", { name: "Sync details" });
     await expect(sync).toBeVisible();
     for (const fact of await sync.locator(".ub-sync-fact").all()) {
-      const identifier = ["Hub", "Room"].includes(await fact.locator("dt").innerText());
+      const identifier = ["Hub", "Room"].includes(await fact.locator("dt").textContent() ?? "");
       await (identifier ? mono : ui)(fact.locator("dd"));
     }
     await page.keyboard.press("Escape");
@@ -1793,7 +1793,7 @@ for (const scheme of ["light"] as const) {
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Connection details", exact: true }).click();
     for (const fact of await page.locator("[data-settings-facts] > div").all()) {
-      const label = await fact.locator("dt").innerText();
+      const label = await fact.locator("dt").textContent() ?? "";
       const value = fact.locator("dd");
       if (label === "Workspace ID") {
         await mono(value.locator("span > span"));
@@ -1840,7 +1840,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   await page.keyboard.type("a line of prose\n".repeat(24));
   await page.evaluate(() => document.fonts.ready);
 
-  const editTags = page.getByRole("button", { name: "Edit tags" });
+  const editTags = page.getByRole("button", { name: /^Edit tags:/ });
   // The modal menu hides background controls from the accessibility tree;
   // their rendered boxes still anchor the open-menu geometry checks.
   const actions = page.locator('.ub-document-actions button[aria-label="Document actions"]');
@@ -2294,7 +2294,7 @@ for (const scheme of ["light", "dark"] as const) {
     await page.getByRole("button", { name: "+ New page" }).click();
     await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
-    const trigger = page.getByRole("button", { name: "Edit tags", exact: true });
+    const trigger = page.getByRole("button", { name: /^Edit tags:/ });
     const empty = trigger.locator(".ub-tag-placeholder");
     await expect(empty).toHaveText("Add tags");
     await expect(empty).toHaveCSS("border-top-style", "dotted");
@@ -2406,7 +2406,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   const documentUrl = page.url();
-  const trigger = page.getByRole("button", { name: "Edit tags" });
+  const trigger = page.getByRole("button", { name: /^Edit tags:/ });
 
   // Nothing assigned: the fallback is a dotted pill without a chevron, and
   // the control itself draws no box around it.
@@ -2890,7 +2890,7 @@ for (const scheme of ["light"] as const) {
       for (const actions of await page.getByRole("button", { name: "Copy link", exact: true }).or(page.getByRole("button", { name: "Document actions", exact: true })).all()) {
         await check(actions, actions.locator(".ub-actions-face"));
       }
-      await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
+      await check(page.getByRole("button", { name: /^Edit tags:/ }), page.locator(".ub-tag-chevron"));
       for (const peer of await page.locator(".ub-peer-control").all()) await check(peer);
       await page.locator(".ub-peer-more").tap();
       await check(page.locator(".ub-peer-overflow-row").first());

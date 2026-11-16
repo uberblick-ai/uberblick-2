@@ -406,7 +406,7 @@ function TldrCallout({
               <Button variant="plain" size="custom"
                 type="button"
                 className="block w-full border-0 p-0 bg-transparent text-left [font:inherit] [color:inherit] cursor-text"
-                aria-label="Edit TL;DR"
+                aria-label={`Edit TL;DR: ${tldr}`}
                 onClick={() => {
                   if (!canWriteContent(connection, archived)) return;
                   onEditingChange(true);
@@ -576,7 +576,7 @@ export function StatusLine({
          */}
         {reading.detail === null && peerStrip}
         {historyNav}
-        {revision !== null && <Button variant="plain" size="custom" type="button" className="ub-doc-rev shrink-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 [font:inherit] text-inherit whitespace-nowrap hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
+        {revision !== null && <Button variant="plain" size="custom" type="button" className="ub-doc-rev shrink-0 rounded-(--radius-sm) border-0 bg-transparent px-0 py-1 [font:inherit] text-inherit whitespace-nowrap hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" aria-label={`Copy revision ${revision}: rev ${revision.slice(0, 8)}`} title={`Copy revision ${revision}`}
           onClick={() => { void writeToClipboard(revision).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
           rev <span className="ub-doc-id">{revision.slice(0, 8)}</span>
         </Button>}

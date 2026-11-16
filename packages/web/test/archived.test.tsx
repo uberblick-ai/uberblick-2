@@ -856,6 +856,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     tombstoneDirectoryEntry(directory.ydoc, UUID);
 
     const seen: boolean[] = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ uuid }: { uuid: string }): null {
       seen.push(useArchived(directory, uuid));
       return null;

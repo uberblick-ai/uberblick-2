@@ -127,7 +127,7 @@ async function startMouse(page: Page, table: Locator, row = 1): Promise<void> {
   await page.mouse.move(x, y);
   await page.mouse.down();
   await expect(page.getByRole("menu")).toHaveCount(0);
-  await page.mouse.move(x - 8, y);
+  await page.mouse.move(x + 8, y);
   await expect(indicator(page)).toHaveCount(1);
   const destination = await gap(table, row + 1);
   await page.mouse.move(destination.x, destination.y);

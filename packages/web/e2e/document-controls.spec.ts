@@ -88,7 +88,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean): Promi
   await createDoc(page, `${prefix} Z`);
   await syncDetails(page, touch);
 
-  const picker = page.getByRole("button", { name: "Edit tags", exact: true });
+  const picker = page.getByRole("button", { name: /^Edit tags:/ });
   await expectFloor(picker, floor);
   await expectFloor(page.getByRole("button", { name: "Document actions", exact: true }), floor);
   const chrome = await page.evaluate(() => ({

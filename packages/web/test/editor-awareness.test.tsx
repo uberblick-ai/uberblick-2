@@ -107,6 +107,7 @@ describe("the bound editor's awareness reading", () => {
     publish(awareness, peer, { user, cursor: cursorAt(connection, 0) });
     const composerRenders = vi.spyOn(composer, "CommentComposer");
     let presence: ReturnType<typeof hooks.usePresence> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting and retains its identity across rerenders.
     function Shell() {
       presence = hooks.usePresence(connection);
       return <EditorPane connection={connection} segment={WORKSPACE} presence={presence} syncReading={{}}
@@ -138,6 +139,7 @@ describe("the bound editor's awareness reading", () => {
     const second = awarenessFor();
     publish(awareness, peer, { user: { name: "Peer", color: "#345678" } });
     act(() => { appendBlock(connection.ydoc, { type: "paragraph", text: "Ask @alice and @Peer" }); });
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting and retains its identity across rerenders.
     function Page({ members }: { members: readonly string[] }) {
       return <WorkspaceMembersContext value={members}>
         <EditorPane connection={connection} segment={WORKSPACE} presence={[]}

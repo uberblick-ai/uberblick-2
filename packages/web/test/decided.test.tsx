@@ -133,7 +133,8 @@ function editorElement(host: HTMLElement): HTMLElement {
 
 function button(host: ParentNode, label: string): HTMLButtonElement {
   const found = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => candidate.textContent?.trim() === label || candidate.getAttribute("aria-label") === label,
+    (candidate) => candidate.textContent?.trim() === label || candidate.getAttribute("aria-label") === label
+      || candidate.getAttribute("aria-description") === label,
   );
   if (found === undefined) throw new Error(`no ${label} button`);
   return found;
@@ -318,10 +319,10 @@ describe("decision record content permissions", () => {
     act(() => typeInto(title, "A wording fix"));
     expect(getMeta(ydoc).title).toBe("A wording fix");
     expect(host.querySelector(".ub-tldr")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
     expect(host.querySelector(".ub-tldr-form")).toBeNull();
 
-    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Edit tags"]')?.click());
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label^="Edit tags:"]')?.click());
     const tag = document.querySelector<HTMLButtonElement>('[role="option"]');
     expect(tag?.textContent).toContain("sync");
     act(() => tag?.click());
@@ -344,7 +345,7 @@ describe("decision record content permissions", () => {
     const prose = editorElement(host);
     const pane = host.querySelector<HTMLElement>(".ub-document-pane")!;
     pane.scrollTop = 173;
-    expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
     expect(host.querySelector(".ub-tldr-form")).toBeNull();
     const editor = binding.mock.results[0]?.value.editor;
     if (editor == null) throw new Error("fixture editor did not bind");
@@ -389,7 +390,7 @@ describe("decision record content permissions", () => {
       expect(pane.scrollTop).toBe(173);
       expect(prose.getAttribute("contenteditable")).toBe(String(status === "open"));
       expect(host.querySelector(".ub-tldr-form")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
       if (status !== "open") expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
     }
     peer.destroy();
@@ -696,7 +697,7 @@ describe("decision record content permissions", () => {
     const editor = binding.mock.results[0]?.value.editor;
     act(() => editor.commands.setTextSelection({ from: 17, to: 20 }));
     expect(document.querySelector('[data-slot="selection-composer"]')).toBeNull();
-    expect(host.querySelector('[aria-label="Edit tags"]')).toBeNull();
+    expect(host.querySelector('[aria-label^="Edit tags:"]')).toBeNull();
 
     act(() => button(host, "Restore").click());
     expect(binding).toHaveBeenCalledOnce();
@@ -705,7 +706,7 @@ describe("decision record content permissions", () => {
     const title = host.querySelector<HTMLTextAreaElement>(".ub-title");
     expect(title?.readOnly).toBe(false);
     expect(button(item, "Reply")).toBeDefined();
-    expect(host.querySelector('[aria-label="Edit tags"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label^="Edit tags:"]')).not.toBeNull();
     expect(getMeta(ydoc).status).toBe("decided");
   });
 });

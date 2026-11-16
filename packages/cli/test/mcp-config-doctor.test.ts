@@ -94,8 +94,8 @@ describe("doctor's MCP config reads", () => {
     for (const held of fields) {
       writeFileSync(file.path, format === "json"
         ? JSON.stringify({ mcpServers: { uberblick: held } })
-        : '[mcp_servers.uberblick]\n' + Object.entries(held).map(([key, value]) =>
-          `${key} = ${typeof value === "object" ? "{}" : JSON.stringify(value)}\n`).join(""));
+        : `[mcp_servers.uberblick]\n${Object.entries(held).map(([key, value]) =>
+          `${key} = ${typeof value === "object" ? "{}" : JSON.stringify(value)}\n`).join("")}`);
       expect(presence(file, entry)).toBe("foreign");
     }
   });

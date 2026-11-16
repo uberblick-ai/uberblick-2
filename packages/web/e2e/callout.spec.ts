@@ -65,6 +65,7 @@ async function selectAll(page: Page, body: Locator, touch: boolean): Promise<str
     await page.keyboard.press(`${modifier}+a`);
   }
   await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? ""))
+    // biome-ignore lint/performance/useDomNodeTextContent: Native selection must match rendered text, including browser line breaks.
     .toContain(await body.innerText());
   return page.evaluate(() => document.getSelection()?.toString() ?? "");
 }

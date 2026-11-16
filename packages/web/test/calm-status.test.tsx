@@ -53,6 +53,7 @@ function probe(initial: RoomStatus): {
   wait: (ms: number) => void;
 } {
   let shown: SyncState = "synced";
+  // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the probe once and retains its identity across rerenders.
   function Probe({ status }: { status: RoomStatus }): null {
     shown = useCalmSyncState(rawSyncState(status));
     return null;
@@ -76,6 +77,7 @@ function scopedProbe(initial: RoomStatus): {
 } {
   const source = {};
   let shown: SyncState | null = null;
+  // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the probe once and retains its identity across rerenders.
   function Probe({ status }: { status: RoomStatus }): null {
     shown = useCalmSyncState(rawSyncState(status), source);
     return null;

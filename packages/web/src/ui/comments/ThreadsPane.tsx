@@ -155,7 +155,7 @@ function ThreadCard({
         const edit = edits.find((item) => item.commentId === comment.key);
         return <div key={comment.key} className="ub-thread-comment" data-comment-id={comment.key}>
         {index === 0 ? <Button variant="plain" size="custom" type="button" className="ub-thread-select text-left"
-          aria-label="Comment" aria-expanded={focused} onClick={onSelect}>
+          aria-description="Comment" aria-expanded={focused} onClick={onSelect}>
           <CommentByline comment={comment} now={now} updatedAt={newest} />
         </Button> : <CommentByline comment={comment} now={now} />}
         {edit !== undefined && canEdit(comment)

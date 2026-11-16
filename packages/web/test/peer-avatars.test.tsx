@@ -169,7 +169,7 @@ describe("the compact collaborator cluster", () => {
     act(() => more?.click());
 
     const overflow = screen.getByRole("dialog", { name: "More collaborators" });
-    const rows = within(overflow).getAllByRole<HTMLButtonElement>("button", { name: /^Peer \d+ ·/ });
+    const rows = within(overflow).getAllByRole<HTMLButtonElement>("button", { name: /^Peer \d+\s*(agent|person)/ });
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("Peer 4");
     expect(rows[0]?.textContent).toContain("agent");
@@ -192,18 +192,20 @@ describe("the compact collaborator cluster", () => {
     const more = within(view.container).getByRole<HTMLButtonElement>("button", { name: "2 more collaborators" });
     act(() => more.click());
     const label = `Peer 4 · agent · ${SESSION} · editing block 4`;
-    const row = screen.getByRole<HTMLButtonElement>("button", { name: label });
-    expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
+    const row = screen.getByRole<HTMLButtonElement>("button", { name: /^Peer 4\s*agent$/ });
+    expect(row.getAttribute("aria-description")).toBe(label);
+    expect(screen.getAllByRole("button", { name: /^Peer 4\s*agent$/ })).toHaveLength(1);
     act(() => row.focus());
     view.rerender(<PeerCluster presence={draw([
       ...roster.slice(0, 3), { ...agent, clientId: 6 }, roster[4]!,
     ])} />);
-    expect(screen.getByRole("button", { name: label })).toBe(row);
+    expect(screen.getByRole("button", { name: /^Peer 4\s*agent$/ })).toBe(row);
     expect(document.activeElement).toBe(row);
     view.rerender(<PeerCluster presence={draw([
       ...roster.slice(0, 3), { ...agent, clientId: 6, departed: true }, roster[4]!,
     ])} />);
-    expect(screen.getByRole("button", { name: `Peer 4 · agent · ${SESSION} · left` })).toBe(row);
+    expect(screen.getByRole("button", { name: /^Peer 4\s*agent · left$/ })).toBe(row);
+    expect(row.getAttribute("aria-description")).toBe(`Peer 4 · agent · ${SESSION} · left`);
     expect(document.activeElement).toBe(row);
     expect(within(view.container).getByRole("button", { name: "2 more collaborators" }).textContent).toBe("+2");
   });
@@ -238,7 +240,7 @@ describe("the compact collaborator cluster", () => {
     }).click());
     const row = within(screen.getByRole("dialog", { name: "More collaborators" }))
       .getByRole<HTMLButtonElement>("button", {
-        name: "Overflow Agent · agent · overflow-session · left",
+        name: /^Overflow Agent\s*agent · left$/,
       });
     expect(row.textContent).toContain("agent · left");
     expect(row.querySelector(".ub-avatar-departed")).not.toBeNull();
@@ -289,7 +291,7 @@ describe("the compact collaborator cluster", () => {
     draw(peers(4));
     const restoredMore = within(host).getByRole<HTMLButtonElement>("button", { name: "1 more collaborator" });
     act(() => restoredMore?.click());
-    const nextRow = within(screen.getByRole("dialog", { name: "More collaborators" })).getByRole<HTMLButtonElement>("button", { name: `Peer 4 · agent · ${SESSION} · editing block 4` });
+    const nextRow = within(screen.getByRole("dialog", { name: "More collaborators" })).getByRole<HTMLButtonElement>("button", { name: /^Peer 4\s*agent$/ });
     act(() => nextRow?.focus());
     draw([peers(4)[0]!, peers(4)[2]!, peers(4)[3]!]);
     expect(document.activeElement).toBe(

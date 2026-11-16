@@ -268,7 +268,7 @@ test("resized boundaries keep pills, column moves and row dragging aligned", { t
     const source = await geometry(handle);
     await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
     await page.mouse.down();
-    await page.mouse.move(source.x + source.width / 2 - 8, source.y + source.height / 2);
+    await page.mouse.move(source.x + source.width / 2 + 8, source.y + source.height / 2);
     await expect(page.locator(".ub-table-row-drop")).toHaveCount(1);
     const last = await geometry(table.locator("tr").last());
     await page.mouse.move(last.x + last.width / 2, last.y + last.height - 1, { steps: 8 });

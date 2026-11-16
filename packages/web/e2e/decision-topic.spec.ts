@@ -169,7 +169,7 @@ async function selected(page: Page, uuid: string, text: string, editable = false
   await expect(page.locator(".ub-decision-timeline")).not.toContainText("viewing");
   await expect(editor(page)).toHaveAttribute("contenteditable", String(editable));
   await expect(editor(page)).toHaveText(text);
-  await expect(entry(page, uuid).locator(".ub-decision-record-state")).toHaveText(await page.locator(".ub-decision-answer-header .ub-decision-answer-state").innerText());
+  await expect(entry(page, uuid).locator(".ub-decision-record-state")).toHaveText(await page.locator(".ub-decision-answer-header .ub-decision-answer-state").textContent() ?? "");
   await expect(page.locator(".ub-decision-related")).toHaveCount(0);
   await expect(page.getByText(/^Related page:/)).toHaveCount(0);
 }
