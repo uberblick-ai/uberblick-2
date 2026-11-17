@@ -4,7 +4,7 @@
  */
 import { Extension } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
-import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView } from "@tiptap/extension-table";
+import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView, updateColumns } from "@tiptap/extension-table";
 import type { TableOptions } from "@tiptap/extension-table";
 import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
@@ -28,15 +28,17 @@ const cellAttributes = () => ({
   colspan: { default: 1 }, rowspan: { default: 1 }, colwidth: { default: null },
 });
 
-// ProseMirror can reuse a table view for a different stable block. TableKit
-// refreshes its columns on update; mirror our identity too, as other blocks do.
+// ProseMirror can reuse a table view for a different stable block. Refresh its
+// columns and block identity without replacing the table DOM for an id change.
 class IdentifiedTableView extends TableView {
   constructor(node: ProseMirrorNode, cellMinWidth: number, view: EditorView) {
     super(node, cellMinWidth, view, { class: "ub-table", "data-block-type": "table", id: node.attrs.id });
   }
 
   override update(node: ProseMirrorNode): boolean {
-    if (!super.update(node)) return false;
+    if (!node.hasMarkup(this.node.type, { ...this.node.attrs, id: node.attrs.id }, this.node.marks)) return false;
+    this.node = node;
+    updateColumns(node, this.colgroup, this.table, this.cellMinWidth);
     // TipTap leaves an old inline width when a column becomes unsized.
     updateColumnsOnResize(node, this.colgroup, this.table, this.cellMinWidth);
     if (typeof node.attrs.id === "string") this.table.id = node.attrs.id;

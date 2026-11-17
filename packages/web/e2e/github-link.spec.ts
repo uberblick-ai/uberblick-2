@@ -127,7 +127,7 @@ test("one local reading repaints every GitHub state in prose and comments with o
     await expect(prose).toHaveCount(cases.length);
     await expect.poll(() => requests.length).toBe(1);
     expect(requests[0]?.items).toHaveLength(cases.length);
-    const revision = await page.locator(".ub-doc-rev").innerText();
+    const revision = await page.locator(".ub-doc-rev").textContent() ?? "";
     const unknownPaths = await prose.locator("path").evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
     const baselines = new Map<string, Array<Record<string, string>>>();
     for (const appearance of ["light", "dark"] as const) {
@@ -316,7 +316,7 @@ test("only link text naming its GitHub issue or pull request becomes a pill", as
     await expect(link.locator(".ub-github-pill")).toHaveCount(0);
   }
   await page.locator(".ub-title").click();
-  const rev = await page.locator(".ub-doc-rev").innerText();
+  const rev = await page.locator(".ub-doc-rev").textContent() ?? "";
   await page.reload();
   await expect(page.locator(".ub-github-pill")).toHaveCount(accepted.length);
   await expect(page.locator(".ub-doc-rev")).toHaveText(rev);

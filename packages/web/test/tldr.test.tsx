@@ -129,7 +129,7 @@ function field(host: HTMLElement): HTMLTextAreaElement | null {
 }
 
 async function openInline(host: HTMLElement): Promise<void> {
-  act(() => within(host).getByRole("button", { name: "Edit TL;DR" }).click());
+  act(() => within(host).getByRole("button", { name: /^Edit TL;DR:/ }).click());
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -150,7 +150,7 @@ describe("the document TL;DR", () => {
     expect(within(host).queryByText("The legacy summary.")).toBeNull();
     expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
     expect(ydoc.getMap("meta").get("tldr")).toBe("The legacy summary.");
-    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
     act(() => openActions(host));
     expect(menuItem("Edit TL;DR")).toBeUndefined();
     expect(menuItem("Add TL;DR")).toBeUndefined();
@@ -281,7 +281,7 @@ describe("the document TL;DR", () => {
     expect(getMeta(ydoc).tldr).toBeNull();
     expect(ydoc.getMap("meta").get("tldr")).toBe("The legacy summary.");
     expect(field(host)).toBeNull();
-    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
     expect(within(host).queryByText("The legacy summary.")).toBeNull();
   });
 
@@ -349,7 +349,7 @@ describe("the document TL;DR", () => {
     expect(getMeta(ydoc).tldr).toBe("Changed in place.");
     expect(getMeta(peer).tldr).toBe("Changed in place.");
     expect(field(host)).toBeNull();
-    expect(within(host).getByRole("button", { name: "Edit TL;DR" }).textContent).toBe("Changed in place.");
+    expect(within(host).getByRole("button", { name: /^Edit TL;DR:/ }).textContent).toBe("Changed in place.");
     peer.destroy();
   });
 
@@ -432,7 +432,7 @@ describe("the document TL;DR", () => {
     ydoc.on("update", updates);
     const text = within(host).getByText("The first summary.");
     act(() => text.click());
-    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
     expect(field(host)).toBeNull();
     expect(updates).not.toHaveBeenCalled();
   });
@@ -459,11 +459,11 @@ describe("the document TL;DR", () => {
     expect(within(host).getByRole<HTMLButtonElement>("button", { name: "Save" }).disabled).toBe(true);
     expect(within(host).getByRole<HTMLButtonElement>("button", { name: "Clear" }).disabled).toBe(true);
     act(() => within(host).getByRole("button", { name: "Cancel" }).click());
-    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Edit TL;DR:/ })).toBeNull();
 
     act(() => connection.setWritable(true));
     connection.status = { ...connection.status, writable: false };
-    act(() => within(host).getByRole("button", { name: "Edit TL;DR" }).click());
+    act(() => within(host).getByRole("button", { name: /^Edit TL;DR:/ }).click());
     expect(field(host)).toBeNull();
     expect(updates).not.toHaveBeenCalled();
   });

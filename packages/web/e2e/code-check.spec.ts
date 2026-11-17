@@ -73,6 +73,7 @@ async function expectPathsContained(group: Locator, expected: readonly string[])
     const row = rows.nth(index);
     const text = row.locator(".ub-code-check-path-text");
     await expect(row.locator(".sr-only")).toHaveText(fullPath);
+    // biome-ignore lint/performance/useDomNodeTextContent: This assertion checks the rendered path abbreviation rather than hidden source text.
     const shown = await text.innerText();
     if (shown !== fullPath) {
       expect(shown).toMatch(/^…\//);
@@ -130,7 +131,7 @@ for (const scheme of ["light", "dark"] as const) {
       readySelector: ".ub-editor",
     });
     const revision = page.locator(".ub-doc-rev");
-    await expect(revision).toHaveAttribute("aria-label", `Copy revision ${original.rev}`);
+    await expect(revision).toHaveAttribute("aria-label", `Copy revision ${original.rev}: rev ${original.rev.slice(0, 8)}`);
     let panel = await openDetails(page, hasTouch);
     await expect(panel.getByRole("heading", { name: "Code", exact: true })).toBeVisible();
     const groups = panel.locator(".ub-code-check");
@@ -189,12 +190,12 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(fact(product, "Page edited since")).toHaveText("No");
     await expect(fact(worker, "Page edited since")).toHaveText("No");
     await expect(note).toHaveCount(0);
-    await expect(revision).toHaveAttribute("aria-label", `Copy revision ${currentRev}`);
+    await expect(revision).toHaveAttribute("aria-label", `Copy revision ${currentRev}: rev ${currentRev.slice(0, 8)}`);
     await page.keyboard.press("Escape");
 
     await writer.call("set_metadata", { uuid: created.uuid, code_check: { ...primary, rev: currentRev, result: "drift" } });
     await expect(note).toHaveText("Differs from code");
-    await expect(revision).toHaveAttribute("aria-label", `Copy revision ${currentRev}`);
+    await expect(revision).toHaveAttribute("aria-label", `Copy revision ${currentRev}: rev ${currentRev.slice(0, 8)}`);
     for (const width of [1280, 744]) {
       await page.setViewportSize({ width, height: 1080 });
       await expectNoteContained(page);

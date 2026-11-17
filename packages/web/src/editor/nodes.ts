@@ -350,7 +350,7 @@ export const CommentMark = Mark.create({
                 // live views; these attributes cover static HTML/clipboard.
                 tabindex: "0",
                 role: "button",
-                "aria-label": "Comment",
+                "aria-description": "Comment",
               }
             : {},
       },

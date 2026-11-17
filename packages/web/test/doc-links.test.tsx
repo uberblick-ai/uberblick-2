@@ -493,7 +493,7 @@ describe("an unwritable document room", () => {
     );
     const title = within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled");
     expect(title?.readOnly).toBe(true);
-    expect(within(host).queryByRole("button", { name: "Edit tags" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: /^Edit tags:/ })).toBeNull();
     const content = within(host).getByRole("textbox", { name: "Document content" });
     // contenteditable is the browser editing contract. The parent is the
     // editor-owned host; the writable case below witnesses this same query.

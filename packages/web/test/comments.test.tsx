@@ -1346,6 +1346,7 @@ describe("the comments column writes back", () => {
     type: (text: string) => Promise<void>;
     unmount: () => void;
   } {
+    // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the component once and retains its identity across rerenders.
     function LiveComments(): ReactElement {
       const [focused, setFocused] = useState<ThreadFocus | null>(null);
       return <LiveThreadsPane

@@ -9,6 +9,7 @@ import type { RevisionRow } from "./revision-rows.js";
 export function revisionKeyboardShortcuts(editor: Editor, docLinks: DocLinkContext | null) {
   return {
     "Mod-a": () => editor.commands.selectAll(),
+    // biome-ignore lint/correctness/noComponentHookFactories: Enter is a keyboard command returning a boolean, not a React component.
     Enter: () => {
       const { selection } = editor.state;
       if (!selection.empty) return false;

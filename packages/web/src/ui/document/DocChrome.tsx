@@ -223,7 +223,7 @@ function TagStrip({
           ref={trigger}
           type="button"
           className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-initial flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-          aria-label="Edit tags"
+          aria-label={`Edit tags: ${shown.length > 0 ? shown.map((entry) => entry.name).join(" ") : "Add tags"}`}
           aria-expanded={open}
           aria-haspopup="listbox"
           aria-controls={open ? listId : undefined}

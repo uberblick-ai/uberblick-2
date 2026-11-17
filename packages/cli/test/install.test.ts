@@ -592,7 +592,7 @@ describe("ub mcp install, and what is registered already", () => {
     },
     {
       what: "an empty env subtable separated by another table",
-      before: entrySnippet("codex") + '[other]\nenabled = true\n[mcp_servers.uberblick.env]\n',
+      before: `${entrySnippet("codex")}[other]\nenabled = true\n[mcp_servers.uberblick.env]\n`,
     },
   ])("recognises the plain Codex entry from $what and runs nothing", async ({ before }) => {
     const box = sandbox();
@@ -662,10 +662,10 @@ describe("ub mcp install, and what is registered already", () => {
   it.each([
     { what: "another command", text: entrySnippet("codex").replace('command = "ub"', `command = "${SECRET}"`) },
     { what: "other arguments", text: entrySnippet("codex").replace('["mcp", "serve"]', `["${SECRET}"]`) },
-    { what: "a binding env override", text: entrySnippet("codex") + `env = { UB_WORKSPACE_ID = "${WORKSPACE}" }\n` },
-    { what: "an unknown key", text: entrySnippet("codex") + `cwd = "${SECRET}"\n` },
-    { what: "a non-table env", text: entrySnippet("codex") + "env = 1979-05-27\n" },
-    { what: "a JSON-only type key", text: entrySnippet("codex") + 'type = "stdio"\n' },
+    { what: "a binding env override", text: `${entrySnippet("codex")}env = { UB_WORKSPACE_ID = "${WORKSPACE}" }\n` },
+    { what: "an unknown key", text: `${entrySnippet("codex")}cwd = "${SECRET}"\n` },
+    { what: "a non-table env", text: `${entrySnippet("codex")}env = 1979-05-27\n` },
+    { what: "a JSON-only type key", text: `${entrySnippet("codex")}type = "stdio"\n` },
     { what: "a non-table server", text: "[mcp_servers]\nuberblick = 1979-05-27\n" },
   ])("protects Codex config with $what", async ({ text }) => {
     const box = sandbox();
@@ -686,7 +686,7 @@ describe("ub mcp install, and what is registered already", () => {
 
   it.each([
     { what: "malformed config with no entry", text: `token = "unterminated ${SECRET}\n` },
-    { what: "a plain entry followed by malformed settings", text: entrySnippet("codex") + `[other]\nunparseable ${SECRET}\n` },
+    { what: "a plain entry followed by malformed settings", text: `${entrySnippet("codex")}[other]\nunparseable ${SECRET}\n` },
     { what: "non-table mcp_servers", text: `mcp_servers = "${SECRET}"\n` },
   ])("refuses unusable Codex config with $what without quoting it", async ({ text }) => {
     const box = sandbox();

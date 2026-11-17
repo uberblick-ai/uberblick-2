@@ -111,6 +111,7 @@ describe("editor lifetime in the document pane", () => {
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const original = getBlocks(connection.ydoc);
 
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting and retains its identity across rerenders.
     function Arrival({ arrive }: { arrive: boolean }): ReactElement {
       useLayoutEffect(() => {
         // BoundEditor's changed author schedules control effects while the
@@ -154,6 +155,7 @@ describe("editor lifetime in the document pane", () => {
     onTestCleanup(() => connection.ydoc.destroy());
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const stray = new Y.XmlText("Unrepresentable top-level text");
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting and retains its identity across rerenders.
     function Arrival({ arrive }: { arrive: boolean }): ReactElement {
       useLayoutEffect(() => {
         if (arrive) getBlocksFragment(connection.ydoc).insert(1, [stray]);

@@ -40,12 +40,12 @@ function commentMarkViews(ydoc: Y.Doc): Plugin {
             if (!live) {
               dom.removeAttribute("tabindex");
               dom.removeAttribute("role");
-              dom.removeAttribute("aria-label");
+              dom.removeAttribute("aria-description");
               dom.classList.remove("ub-comment-flash");
             } else {
               dom.tabIndex = 0;
               dom.setAttribute("role", "button");
-              dom.setAttribute("aria-label", "Comment");
+              dom.setAttribute("aria-description", "Comment");
             }
           };
           paint();

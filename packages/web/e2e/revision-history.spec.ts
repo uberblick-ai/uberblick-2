@@ -1707,7 +1707,7 @@ test.describe("document history through ub open", () => {
     await expect(restore).toBeDisabled();
     await expect(restore).toHaveAccessibleDescription("This is the current version.");
     const drawer = await showHistoryList(page);
-    const revisionCaption = await historyList(page).getByText(/ · \d+ revisions?$/).innerText();
+    const revisionCaption = await historyList(page).getByText(/ · \d+ revisions?$/).textContent() ?? "";
     await activateControl(historyList(page).getByRole("button", { name: /Baseline to restore/ }));
     await closeHistoryList(page, drawer);
     await expect(restore).toBeEnabled();
@@ -2405,7 +2405,7 @@ test.describe("document history through ub open", () => {
     const kickoff = list.getByRole("button", { name: /Kickoff.*kickoff-person/ });
     const back = history(page).getByRole("button", { name: "Previous revision", exact: true });
     const forward = history(page).getByRole("button", { name: "Next revision", exact: true });
-    const copyRevision = history(page).getByRole("button", { name: `Copy revision ${revisionId("reviewed")}`, exact: true });
+    const copyRevision = history(page).getByRole("button", { name: `Copy revision ${revisionId("reviewed")}: Reviewed with the entire release team before the final launch review`, exact: true });
     const tab = process.platform === "darwin" && browser.browserType().name() === "webkit" ? "Alt+Tab" : "Tab";
     const assertView = async (address: string, after: string, before: string): Promise<void> => {
       await expect(page).toHaveURL(new URL(address, harness().appUrl).href);
@@ -2588,7 +2588,7 @@ test.describe("document history through ub open", () => {
             expect(button.height).toBeGreaterThanOrEqual(scenario.touch ? 44 : 26);
             expect(Math.abs((button.left + button.right) / 2 - ((geometry.ruler?.left ?? 0) + (geometry.ruler?.right ?? 0)) / 2)).toBeLessThan(1);
           }
-          const target = scenario.docked ? history(page).getByRole("button", { name: `Copy revision ${revisionId("latest")}`, exact: true })
+          const target = scenario.docked ? history(page).getByRole("button", { name: `Copy revision ${revisionId("latest")}: ${scenario.named ? "Reviewed with a long revision name" : `rev ${revisionId("latest").slice(0, 8)}`}`, exact: true })
             : history(page).getByRole("button", { name: "Back to now", exact: true });
           const box = await target.boundingBox();
           if (box === null) throw new Error("The last status control is missing");

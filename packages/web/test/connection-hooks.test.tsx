@@ -182,6 +182,7 @@ describe("connection-scoped readings", () => {
     // A new provider can keep the room key while replacing the whole replica.
     const replacement = fixture(`${WORKSPACE}/beta`, "Replacement");
     const seen: Array<ReturnType<typeof useReading>> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ current }: { current: RoomConnection | null }): null {
       seen.push(useReading(current));
       return null;
@@ -215,6 +216,7 @@ describe("connection-scoped readings", () => {
   it("distinguishes metadata that has not been read from a genuinely empty room", () => {
     const fix = fixture(`${WORKSPACE}/empty`);
     const seen: Array<ReturnType<typeof useDocMeta>> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ current }: { current: RoomConnection | null }): null {
       seen.push(useDocMeta(current));
       return null;
@@ -234,6 +236,7 @@ describe("connection-scoped readings", () => {
     upsertDirectoryEntry(fix.ydoc, { uuid: OTHER_UUID, title: "Archived", tags: [] });
     tombstoneDirectoryEntry(fix.ydoc, OTHER_UUID);
     let entries: ReturnType<typeof useDirectory> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ includeDeleted }: { includeDeleted: boolean }): null {
       entries = useDirectory(fix.connection, includeDeleted);
       return null;
@@ -261,6 +264,7 @@ describe("connection-scoped readings", () => {
       uuid: proposal, title: "Proposal", kind: "decision", status: "open", topic: UUID, supersedes: OTHER_UUID,
     });
     let entries: ReturnType<typeof useDirectory> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function Probe(): null {
       entries = useDirectory(fix.connection, true);
       return null;
@@ -289,6 +293,7 @@ describe("connection-scoped readings", () => {
   it("refreshes link conflicts before the transaction has notified observers", () => {
     const fix = fixture(`${WORKSPACE}/links`, "Links");
     let links: ReturnType<typeof useLinkConflicts> | undefined;
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function Probe(): null {
       links = useLinkConflicts(fix.connection);
       return null;
@@ -316,11 +321,13 @@ describe("connection-scoped readings", () => {
     publish(fix, { ...state, cursor: { anchor: anchorAt(0) } });
     let renders = 0;
     let presence: ReturnType<typeof usePresence> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting, outside React rendering.
     function DrawPresence({ current }: { current: ReturnType<typeof usePresence> }): null {
       renders += 1;
       presence = current;
       return null;
     }
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function Probe() {
       return <DrawPresence current={usePresence(fix.connection)} />;
     }
@@ -366,6 +373,7 @@ describe("connection-scoped readings", () => {
     join(fix, {});
     let agents = 0;
     let titlePresence: ReturnType<typeof useTitlePresence> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function Probe(): null {
       agents = useAgentSessions(fix.connection);
       titlePresence = useTitlePresence(fix.connection);
@@ -420,6 +428,7 @@ describe("connection-scoped readings", () => {
     };
     publish(fix, state);
     let reading: Pick<ReturnType<typeof useReading>, "titlePresence" | "presence" | "agentSessions">;
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function Probe(): null {
       reading = {
         titlePresence: useTitlePresence(fix.connection),
@@ -477,6 +486,7 @@ describe("connection-scoped readings", () => {
     join(fix, { ...state, client: "web", session: "run-a" }, 80);
     join(fix, { ...state, client: "web", session: "run-a" }, 90);
     let reading: Pick<ReturnType<typeof useReading>, "titlePresence" | "presence" | "agentSessions">;
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function Probe(): null {
       reading = {
         titlePresence: useTitlePresence(fix.connection),
@@ -529,6 +539,7 @@ describe("connection-scoped readings", () => {
       cursor: { anchor: 3, head: 3 },
     });
     const seen: Array<ReturnType<typeof useTitlePresence>> = [];
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ current }: { current: RoomConnection | null }): null {
       seen.push(useTitlePresence(current));
       return null;

@@ -290,7 +290,7 @@ describe("ub auth logout retires devices", () => {
 
   it("all-devices quotes an invalid stored username and escapes DEL and every C1 control", async () => {
     const remote = await rig();
-    const username = 'synthetic"\\user\n\u001b\u007f' + String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80));
+    const username = `synthetic"\\user\n\u001b\u007f${String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80))}`;
     const escaped = '"synthetic\\"\\\\user\\n\\u001b\\u007f' +
       '\\u0080\\u0081\\u0082\\u0083\\u0084\\u0085\\u0086\\u0087' +
       '\\u0088\\u0089\\u008a\\u008b\\u008c\\u008d\\u008e\\u008f' +

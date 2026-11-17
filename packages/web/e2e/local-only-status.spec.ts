@@ -65,7 +65,7 @@ test("local-only Code disclosure takes native input and keeps its quiet paint in
   await expect(page.locator(".ub-editor")).toContainText("This page stays on this computer.");
   await expectLocalHeader(page);
   await expect(page.locator(".ub-status-code-check")).toHaveCount(0);
-  await expect(page.locator(".ub-doc-rev")).toHaveAttribute("aria-label", `Copy revision ${original.rev}`);
+  await expect(page.locator(".ub-doc-rev")).toHaveAttribute("aria-label", `Copy revision ${original.rev}: rev ${original.rev.slice(0, 8)}`);
 
   await writer.call("set_metadata", {
     uuid: created.uuid,

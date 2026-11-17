@@ -236,6 +236,7 @@ test("a stored multiline caption renders its line break below the preview", { ta
   const page = await open(browser, created.uuid, []);
   const caption = page.locator(".ub-figma-caption p");
   await expect(caption).toBeVisible();
+  // biome-ignore lint/performance/useDomNodeTextContent: This test verifies the rendered line break, which DOM text alone cannot establish.
   expect(await caption.innerText()).toBe("Line one\nLine two");
   const lines = await caption.evaluate((element) => {
     const range = document.createRange();

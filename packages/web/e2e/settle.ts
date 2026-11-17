@@ -10,7 +10,7 @@ export type SyncPath = "relay" | "upstream";
 
 // Keep control queries out of the generated tables' hundreds of thousands of cells.
 function tagPicker(page: Page): Locator {
-  return page.locator(".ub-doc-meta").getByRole("button", { name: "Edit tags", exact: true });
+  return page.locator(".ub-doc-meta").getByRole("button", { name: /^Edit tags:/ });
 }
 
 function tagOptions(page: Page, selected?: boolean): Locator {

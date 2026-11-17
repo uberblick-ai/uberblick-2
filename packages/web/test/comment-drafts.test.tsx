@@ -27,6 +27,7 @@ function mountComments(count: number) {
   const connection = {
     room: "workspace/draft-document", ydoc, status: { writable: true },
   } as unknown as RoomConnection;
+  // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the component once and retains its identity across rerenders.
   function LiveComments({ pane = {} }: { pane?: Partial<ComponentProps<typeof ThreadsPane>> }): ReactElement {
     const threads = useThreads(connection);
     const [focused, setFocused] = useState<ThreadFocus | null>(null);
@@ -52,7 +53,7 @@ function mountComments(count: number) {
 }
 
 function select(card: HTMLElement): void {
-  act(() => within(card).getByRole<HTMLButtonElement>("button", { name: "Comment" }).click());
+  act(() => within(card).getByRole<HTMLButtonElement>("button", { name: /Updated / }).click());
 }
 
 function field(card: HTMLElement): HTMLTextAreaElement {
@@ -69,15 +70,15 @@ describe("reply draft ownership", () => {
       fireEvent.input(field(first), { target: { value: "Unsent first reply" } });
       select(second);
       fireEvent.input(field(second), { target: { value: "Unsent second reply" } });
-      expect(within(first).getByRole("button", { name: "Comment" }).getAttribute("aria-expanded")).toBe("false");
-      expect(within(second).getByRole("button", { name: "Comment" }).getAttribute("aria-expanded")).toBe("true");
+      expect(within(first).getByRole("button", { name: /Updated / }).getAttribute("aria-expanded")).toBe("false");
+      expect(within(second).getByRole("button", { name: /Updated / }).getAttribute("aria-expanded")).toBe("true");
       select(first);
       expect(field(first).value).toBe("Unsent first reply");
       expect(field(second).value).toBe("Unsent second reply");
       fireEvent.keyDown(field(first), { key: "Escape" });
       expect(view.container.querySelector("[aria-current=true]")).toBeNull();
       select(second);
-      fireEvent.keyDown(within(second).getByRole("button", { name: "Comment" }), { key: "Escape" });
+      fireEvent.keyDown(within(second).getByRole("button", { name: /Updated / }), { key: "Escape" });
       expect(view.container.querySelector("[aria-current=true]")).toBeNull();
       expect(field(first).value).toBe("Unsent first reply");
       expect(field(second).value).toBe("Unsent second reply");

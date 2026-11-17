@@ -133,7 +133,7 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   const summaryB = b.getByLabel(
     "Write one or two plain-English sentences that help a reader understand this document.",
   );
-  const inlineB = calloutB.getByRole("button", { name: "Edit TL;DR", exact: true });
+  const inlineB = calloutB.getByRole("button", { name: /^Edit TL;DR:/ });
   await inlineB.click();
   await expect(summaryB).toBeFocused();
   const caret = await summaryB.evaluate((element: HTMLTextAreaElement) => ({
@@ -177,7 +177,7 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   // The native inline button keeps keyboard activation and the form's focus.
   // Safari's Option-Tab includes buttons under its default Tab preference.
   const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
-  const inlineA = calloutA.getByRole("button", { name: "Edit TL;DR", exact: true });
+  const inlineA = calloutA.getByRole("button", { name: /^Edit TL;DR:/ });
   await a.locator(".ub-title").focus();
   for (let count = 0; count < 20; count += 1) {
     if (await inlineA.evaluate((element) => document.activeElement === element)) break;
@@ -221,7 +221,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   const remote = b.locator(".ub-tldr-body > p");
   await expect(remote).toHaveText("A summary shared with readers.");
 
-  await a.getByRole("button", { name: "Edit TL;DR", exact: true }).tap();
+  await a.getByRole("button", { name: /^Edit TL;DR:/ }).tap();
   await expect(summary).toBeFocused();
   await summary.fill("A draft cancelled with Escape.");
   await summary.press("Escape");
@@ -230,7 +230,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
-  await a.getByRole("button", { name: "Edit TL;DR", exact: true }).tap();
+  await a.getByRole("button", { name: /^Edit TL;DR:/ }).tap();
   await expect(summary).toBeFocused();
   await summary.fill("A draft cancelled by tapping Cancel.");
   await a.getByRole("button", { name: "Cancel", exact: true }).tap();
@@ -241,7 +241,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
 
   // WebKit can leave pointer-clicked buttons unfocused. Clear still has to
   // receive a tap before an unchanged field's blur dismisses the form.
-  await a.getByRole("button", { name: "Edit TL;DR", exact: true }).tap();
+  await a.getByRole("button", { name: /^Edit TL;DR:/ }).tap();
   await a.getByRole("button", { name: "Clear", exact: true }).tap();
   await expect(a.locator(".ub-tldr")).toHaveCount(0);
   await expect(b.locator(".ub-tldr")).toHaveCount(0);

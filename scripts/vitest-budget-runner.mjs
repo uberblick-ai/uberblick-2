@@ -2,10 +2,19 @@ import { performance } from "node:perf_hooks";
 import { budgetFailure, testBudget } from "./test-duration-budget.mjs";
 
 function fail(test, error) {
+  const detail = { name: error.name, message: error.message, stack: error.stack };
   test.result ??= {};
   test.result.state = "fail";
   test.result.errors ??= [];
-  test.result.errors.push({ name: error.name, message: error.message, stack: error.stack });
+  test.result.errors.push(detail);
+  // Vitest records attempts before the complete-lifecycle check and reports
+  // their errors when present, so retain the failure on the finished attempt.
+  const attempt = test.result.attempts?.at(-1);
+  if (attempt) {
+    attempt.state = "fail";
+    attempt.errors ??= [];
+    attempt.errors.push(detail);
+  }
 }
 
 function testName(test) {

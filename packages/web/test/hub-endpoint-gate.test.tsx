@@ -73,6 +73,7 @@ it("waits for the served name before acquiring a room and keeps that default acr
     connection: { room: ROOM } as ReturnType<typeof acquireRoom>["connection"], release,
   });
   const factory = vi.fn(() => IDENTITY);
+  // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
   function NamedProbe({ room = ROOM }: { room?: string }) {
     const ready = useHubEndpoint();
     const identity = useIdentity(factory, ready ? defaultPresenceName() : null);

@@ -57,6 +57,7 @@ function room(patch: Partial<RoomStatus> = {}) {
 }
 
 function mount(connection: RoomConnection, hubAcked?: boolean | null, sampledAt: number | null = null) {
+  // biome-ignore lint/correctness/noComponentHookFactories: This harness creates the probe once and retains its identity across rerenders.
   function Reading({ connection, acked, sampledAt }: {
     connection: RoomConnection;
     acked: boolean | null | undefined;

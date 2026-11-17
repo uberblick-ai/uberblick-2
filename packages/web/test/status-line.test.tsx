@@ -133,6 +133,7 @@ describe("the edited row", () => {
     initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Checked page" });
     appendBlock(current.connection.ydoc, { type: "paragraph", text: "Compared text" });
     const input = { repository: "owner/project", commit: "a".repeat(40), result: "matches" as const };
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting, outside React rendering.
     function Header() {
       const meta = useDocMeta(current.connection);
       const revision = useDocRev(current.connection);
@@ -185,7 +186,7 @@ describe("the edited row", () => {
 
   it("copies the full revision and shows only its prefix in mono", async () => {
     const view = render(<StatusLine connection={fixture().connection} presence={[]} revision="e9faf4df1234abcd" />);
-    const revision = within(view.container).getByRole("button", { name: "Copy revision e9faf4df1234abcd" });
+    const revision = within(view.container).getByRole("button", { name: "Copy revision e9faf4df1234abcd: rev e9faf4df" });
     expect(revision.textContent).toBe("rev e9faf4df");
     expect(revision.querySelector(".ub-doc-id")?.textContent).toBe("e9faf4df");
     await act(async () => revision.click());
@@ -316,7 +317,7 @@ describe("local-only status", () => {
     const button = within(view.container).getByRole("button", { name: "Code check" });
     expect(button.getAttribute("title")).toBe("Code check");
     expect(view.container.querySelector(".ub-sync-dot")).toBeNull();
-    expect(within(view.container).getByRole("button", { name: "Copy revision abc12345" })).toBeTruthy();
+    expect(within(view.container).getByRole("button", { name: "Copy revision abc12345: rev abc12345" })).toBeTruthy();
     initDoc(current.connection.ydoc, { uuid: "9f3c1a2b-0000-4000-8000-0123456789ab", title: "Decision" });
     act(() => { setKind(current.connection.ydoc, "decision"); });
     view.rerender(tree([check(2)], Date.now()));

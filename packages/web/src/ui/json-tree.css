@@ -34,6 +34,7 @@
 .ub-json-row[data-wrapped="true"] { height: auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ub-json-row:not([data-wrapped="true"]) > .ub-json-string { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; }
 .ub-json-row:hover > .ub-json-toggle { color: var(--foreground); }
+/* biome-ignore lint/style/noDescendingSpecificity: Preview opacity does not overlap the row string's sizing and overflow. */
 .ub-json-preview > .ub-json-key, .ub-json-preview > .ub-json-string, .ub-json-preview > .ub-json-number, .ub-json-preview > .ub-json-literal { opacity: 0.8; }
 .ub-json-count {
   margin-left: 0.6rem;
@@ -137,6 +138,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: Compare button resets do not overlap the row hover's text color. */
 .ub-json-compare-cell > .ub-json-toggle { padding: 0; border: 0; background: transparent; font: inherit; }
 .ub-json-compare-cell > .ub-json-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ub-json-compare-cell:not([data-mark=""])::before {

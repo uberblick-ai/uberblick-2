@@ -176,7 +176,7 @@ function press(
 }
 
 function picker(host: HTMLElement): HTMLButtonElement | null {
-  return within(host).queryByRole<HTMLButtonElement>("button", { name: "Edit tags" });
+  return within(host).queryByRole<HTMLButtonElement>("button", { name: /^Edit tags:/ });
 }
 
 function search(): HTMLInputElement | null {

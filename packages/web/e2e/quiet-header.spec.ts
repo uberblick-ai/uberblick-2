@@ -204,7 +204,7 @@ for (const scheme of ["light", "dark"] as const) {
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     const revision = page.locator(".ub-doc-rev");
-    const short = await revision.locator(".ub-doc-id").innerText();
+    const short = await revision.locator(".ub-doc-id").textContent() ?? "";
     await revision.focus();
     await revision.press("Enter");
     const copied = await page.evaluate(() => (window as unknown as { revisionCopies: string[] }).revisionCopies.at(-1));

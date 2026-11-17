@@ -73,6 +73,7 @@ describe("a room connection is paired with the room it was asked for", () => {
     /** Every (asked for, handed back) pair, one per render. */
     const seen: Array<[string | null, string | null]> = [];
 
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ room }: { room: string | null }): ReactElement | null {
       const connection = useRoom(room, IDENTITY);
       seen.push([room, connection?.room ?? null]);
@@ -127,6 +128,7 @@ describe("a room connection is paired with the room it was asked for", () => {
     const replacement = connection(`${WORKSPACE}/beta`, OFFLINE);
     const seen: Array<{ room: string; raw: string; shown: string | null }> = [];
 
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting and retains its identity across rerenders.
     function Probe({ current }: { current: RoomConnection }): null {
       const status = useRoomStatus(current);
       const raw = rawSyncState(status);

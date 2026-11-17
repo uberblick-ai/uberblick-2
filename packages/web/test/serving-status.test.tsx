@@ -195,6 +195,7 @@ describe("the locally served room's upstream reading", () => {
     vi.setSystemTime(10_000);
     const pending = deferred<DocumentSearchStatus>();
     const api = client(async () => await pending.promise);
+    // biome-ignore lint/correctness/noComponentHookFactories: This test probe is created once before mounting, outside React rendering.
     function RawReading() {
       return <output>{JSON.stringify(useServingRoomStatus(api, ROOM_A))}</output>;
     }

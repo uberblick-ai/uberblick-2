@@ -280,6 +280,7 @@ describe("the Preferences page stores this client's choices", () => {
   });
 
   it("saves a name only on submission, keeps it after reload, and clears back to the default", () => {
+    // biome-ignore lint/correctness/noComponentHookFactories: This test component is created once before mounting and retains its identity across rerenders.
     function Preferences(): ReactElement {
       const chosenName = useSetting("presenceName");
       return <PreferencesSettings identity={{ ...IDENTITY, name: chosenName ?? IDENTITY.name }} />;
@@ -332,6 +333,7 @@ describe("an agent session is one that says it is an agent", () => {
     };
   }
 
+  // biome-ignore lint/correctness/noComponentHookFactories: This suite creates the component once, outside React rendering.
   function Count({ connection }: { connection: RoomConnection }): ReactElement {
     return <span className="ub-count">{useAgentSessions(connection)}</span>;
   }
