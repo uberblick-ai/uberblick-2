@@ -239,6 +239,29 @@ test("an open answer checklist ticks until remote settlement disables the same c
   });
 });
 
+test("open decision answers keep typed and pasted footnote references as ordinary text", { tag: "@webkit" }, async ({ browser }) => {
+  const writer = session();
+  const uuid = await record(writer, "open", [{ type: "paragraph", text: "Answer " }]);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
+  const body = editor(page).locator(":scope > p").first();
+  await placeCaretIn(body);
+  await page.keyboard.type("[^");
+  await expect(page.getByRole("option", { name: "Add footnote", exact: true })).toHaveCount(0);
+  await page.keyboard.type("typed] ");
+  await editor(page).evaluate(element => {
+    const transfer = new DataTransfer();
+    transfer.setData("text/plain", "[^pasted]");
+    transfer.setData("text/html", '<span data-footnote-ref="true">[^pasted]</span>');
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }));
+  });
+  await expect(body).toHaveText("Answer [^typed] [^pasted]");
+  await expect(editor(page).locator(".ub-footnote-reference")).toHaveCount(0);
+  await expectMcp(() => writer.call<{ blocks: Array<{ text: string; inline?: Array<{ marks: Record<string, unknown> }> }> }>("get_doc", { uuid }), saved => {
+    expect(saved.blocks[0]?.text).toBe("Answer [^typed] [^pasted]");
+    expect(saved.blocks[0]?.inline?.some(span => span.marks.footnoteRef !== undefined) ?? false).toBe(false);
+  });
+});
+
 test("an open answer edits and saves before remote settlement locks the same view and its native input", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const touch = info.project.use.hasTouch === true;
   const writer = session();

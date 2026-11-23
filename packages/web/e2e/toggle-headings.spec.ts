@@ -194,6 +194,42 @@ test("nested toggles fold their sections, stay local and restart collapsed", asy
   await expect(block(page, created, 1)).toBeHidden();
 });
 
+test("footnote navigation reveals folded notes and references and takes precedence over checklist toggling", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const reference = { text: "[^source]", marks: { footnoteRef: true } } as const;
+  const created = await create(writer(), [
+    { type: "paragraph", inline: [{ text: "Opening ", marks: {} }, reference] },
+    { type: "heading", level: 2, text: "> References" },
+    { type: "list-item", list: "unchecked", inline: [{ text: "Hidden ", marks: {} }, reference] },
+    { type: "heading", level: 2, text: "Boundary" },
+    { type: "heading", level: 2, text: "> Notes" },
+    { type: "footnote", label: "source", text: "Stored inside the folded section" },
+  ]);
+  const touch = info.project.use.hasTouch === true;
+  const page = await open(browser, created.uuid, touch);
+  const note = block(page, created, 5);
+  const item = block(page, created, 2);
+  await expect(note).toBeHidden();
+  await expect(item).toBeHidden();
+  await activateControl(block(page, created, 0).locator(".ub-footnote-reference"), { touch });
+  await expect(control(page, "Notes", true)).toHaveAttribute("aria-expanded", "true");
+  await expect(note).toBeVisible();
+  await expect(note).toBeInViewport();
+  await expect.poll(async () => (await caret(page)).id).toBe(created.blocks[5]?.id);
+  await activateControl(note.locator(".ub-footnote-backlink").nth(1), { touch });
+  await expect(control(page, "References", true)).toHaveAttribute("aria-expanded", "true");
+  await expect(item).toBeInViewport();
+  await expect.poll(async () => (await caret(page)).id).toBe(created.blocks[2]?.id);
+  const checkbox = item.getByRole("checkbox");
+  await expect(checkbox).not.toBeChecked();
+  await placeCaretIn(item, { touch });
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect.poll(async () => (await caret(page)).id).toBe(created.blocks[5]?.id);
+  await expect(checkbox).not.toBeChecked();
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect.poll(async () => (await caret(page)).id).toBe(created.blocks[2]?.id);
+});
+
 test("expanded sections and their caret survive remote edits and actual undo and redo", async ({ browser }) => {
   const session = writer();
   const created = await create(session, [

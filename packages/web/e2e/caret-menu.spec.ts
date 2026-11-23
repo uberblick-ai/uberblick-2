@@ -1,6 +1,7 @@
 /** Browser-only menu wiring: pane collisions, moving anchors and touch input. */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { createDoc as createAppDoc } from "./app-helpers.js";
 import { authorizeBrowser, placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
@@ -26,6 +27,70 @@ function menu(page: Page, name = "Block types"): Locator {
 function card(page: Page, name = "Block types"): Locator {
   return page.locator('[data-slot="caret-menu-content"]').filter({ has: menu(page, name) });
 }
+
+test("typing a footnote trigger offers a caret action, pasted lines stay inside its note and Enter picks inline menus", { tag: "@webkit-touch" }, async ({ page, browserName }, info) => {
+  await openDoc(page, browserName);
+  await page.keyboard.type("A literal [^");
+  await staysInsidePane(page, "Footnotes");
+  await page.keyboard.press("Escape");
+  await expect(menu(page, "Footnotes")).toHaveCount(0);
+  await page.keyboard.type("label]");
+  await expect(prose(page).locator(":scope > p")).toHaveText("A literal [^label]");
+  await expect(prose(page).locator(".ub-footnote-reference")).toHaveCount(0);
+
+  await createDoc(page, "Add footnote at the caret");
+  await page.keyboard.type("Before [^");
+  await staysInsidePane(page, "Footnotes");
+  const add = page.getByRole("option", { name: "Add footnote", exact: true });
+  if (info.project.use.hasTouch === true) await add.tap();
+  else await page.keyboard.press("Enter");
+  await expect(menu(page, "Footnotes")).toHaveCount(0);
+  const note = prose(page).locator('[data-block-type="footnote"]');
+  await expect(note).toHaveCount(1);
+  await expect(note).toHaveAttribute("data-footnote-label", "1");
+  await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parent.type.name)).toBe("footnote");
+  await page.keyboard.type("Before after");
+  await expect.poll(() => prose(page).evaluate(element => { const selection = (element as HTMLElement & { editor: Editor }).editor.state.selection; return [selection.$head.parent.type.name, selection.$head.parentOffset]; })).toEqual(["footnote", 12]);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => prose(page).evaluate(element => { const selection = (element as HTMLElement & { editor: Editor }).editor.state.selection; return [selection.$head.parent.type.name, selection.$head.parentOffset]; })).toEqual(["footnote", 12]);
+  await page.keyboard.press("Home");
+  await expect.poll(() => prose(page).evaluate(element => { const selection = (element as HTMLElement & { editor: Editor }).editor.state.selection; return [selection.$head.parent.type.name, selection.$head.parentOffset]; })).toEqual(["footnote", 0]);
+  for (let count = 0; count < 7; count += 1) await page.keyboard.press("ArrowRight");
+  await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parentOffset)).toBe(7);
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await page.evaluate(() => {
+    const source = document.createElement("textarea");
+    source.dataset.footnoteClipboard = "true";
+    source.value = "first\nsecond ";
+    document.body.append(source);
+    source.focus();
+    source.select();
+  });
+  await page.keyboard.press(`${modifier}+c`);
+  await page.locator("textarea[data-footnote-clipboard]").evaluate(element => element.remove());
+  await prose(page).focus();
+  await page.keyboard.press(`${modifier}+v`);
+  await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Before first second after");
+  await expect(prose(page).locator(":scope > *")).toHaveCount(2);
+  await expect(note).toHaveAttribute("data-footnote-label", "1");
+  await page.keyboard.press("Enter");
+  await expect(prose(page).locator(":scope > *")).toHaveCount(2);
+  await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Before first second after");
+
+  await page.keyboard.press("End");
+  await page.keyboard.type(" :smi");
+  await expect(menu(page, "Emoji and icons").getByRole("option").first()).toHaveAccessibleName("smiley");
+  await page.keyboard.press("Enter");
+  await expect(menu(page, "Emoji and icons")).toHaveCount(0);
+  await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Before first second after 😃");
+  await page.keyboard.type(" @menu");
+  await expect(menu(page, "People and documents").getByRole("option").first()).toHaveAccessibleName("menu layout");
+  await page.keyboard.press("Enter");
+  await expect(menu(page, "People and documents")).toHaveCount(0);
+  await expect(note.getByRole("link", { name: "menu layout", exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(prose(page).locator(":scope > *")).toHaveCount(2);
+});
 
 async function createDoc(page: Page, title: string): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) < 1280 &&

@@ -4,7 +4,7 @@ import { appendBlock, getBlock, getBlockInline, getBlocksFragment } from "@uberb
 import { findForeignBlocks } from "../src/editor/palette.js";
 import { mountEditor } from "./helpers.js";
 
-describe("plain editable footnotes", () => {
+describe("editable footnotes", () => {
   it.each([false, true])("keeps labels and reference marks through edits and moves, arriving while bound: %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     appendBlock(ydoc, { type: "paragraph", text: "Opening context" });
@@ -22,7 +22,7 @@ describe("plain editable footnotes", () => {
       expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
       expect(element.querySelector(".ub-unsupported-block")).toBeNull();
       expect(element.querySelector("[data-footnote-ref]")?.textContent).toBe("[^Source]");
-      expect(element.querySelector("[data-block-type=footnote]")?.textContent).toBe("Kept note");
+      expect(element.querySelector("[data-block-type=footnote]")?.textContent).toBe("1 Kept note↩");
 
       const referenceIndex = 1;
       const referencePos = editor.state.doc.child(0).nodeSize;

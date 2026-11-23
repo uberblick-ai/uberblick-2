@@ -23,6 +23,9 @@ import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
 import { PersonMentions } from "./person-mentions.js";
 import { EmojiTyping } from "./emoji-menu.js";
+import { FootnoteTyping } from "./footnote-menu.js";
+import { Footnotes } from "./footnotes.js";
+import { FootnoteEditing } from "./footnote-editing.js";
 import { ToggleHeadings } from "./toggle-headings.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
@@ -111,6 +114,9 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // Installed once: reconfiguring plugins on menu mount destroys collaboration
     // views (including its UndoManager). The UI only registers live handlers.
     CaretMenuKeys,
+    Footnotes,
+    FootnoteEditing.configure({ decisionAnswer: options.decisionAnswer ?? (() => false) }),
+    FootnoteTyping.configure({ allowed: () => options.decisionAnswer?.() !== true }),
     // Syntax colors are derived decorations, never stored marks.
     CodeHighlighting,
     // List keys fall through outside items; numbering remains a decoration.

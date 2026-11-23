@@ -53,6 +53,7 @@ import { useWorkspaceMembers } from "../workspace-members.js";
 import { useGitHubItemStates } from "../github-item-states.js";
 import { setEditorMembers } from "../../editor/person-mentions.js";
 import { EmojiMenu } from "../editor-controls/EmojiMenu.js";
+import { FootnoteMenu } from "../editor-controls/FootnoteMenu.js";
 import {
   readRoomMeta,
   useDocMeta,
@@ -697,6 +698,40 @@ function ForeignFallback({
   );
 }
 
+function activateThreadKey(
+  event: KeyboardEvent,
+  docLinks: DocLinkContext | null,
+  selectThread: (threadId: string, viaKeyboard?: boolean) => void,
+): void {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.target instanceof Element && event.target.closest(".ub-footnote-reference, .ub-footnote-backlink")) return;
+  const docId = docLinkFromTarget(event.target);
+  if (docId !== null) {
+    if (docLinks?.lookup(docId).state === "deleted") {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+    if (event.key !== "Enter" || docLinks === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    docLinks.open(docId);
+    return;
+  }
+  const anchor = linkAnchorFromTarget(event.target);
+  if (anchor !== null) {
+    if (event.key === "Enter" && !isExternalHref(anchor.getAttribute("href"))) event.preventDefault();
+    return;
+  }
+  const threadId = threadIdFromActivation(event);
+  if (threadId === null) return;
+  event.preventDefault();
+  event.stopPropagation();
+  selectThread(threadId, true);
+}
+
 // The shell's presence reading also changes when a caret crosses blocks. Keep
 // that parent update outside the editor; its own peer-name/status readers stay
 // live, and actual binding inputs still pass through React's props comparison.
@@ -795,6 +830,7 @@ const BoundEditor = memo(function BoundEditor({
       onSelectThread(threadId, { viaKeyboard });
     };
     const activate = (event: MouseEvent): void => {
+      if (event.target instanceof Element && event.target.closest(".ub-footnote-reference, .ub-footnote-backlink")) return;
       const threadId = threadIdFromTarget(event.target);
       if (handleDocLinkClick(event, docLinks)) return;
       const anchor = linkAnchorFromTarget(event.target);
@@ -819,44 +855,7 @@ const BoundEditor = memo(function BoundEditor({
     // Enter/Space activates only a focused button-role highlight. Capture and
     // stop activation before ProseMirror can split a block; caret typing
     // targets the contenteditable and must remain untouched.
-    const activateThread = (event: KeyboardEvent): void => {
-      if (event.isComposing || event.keyCode === 229) return;
-      // Enter on a focused read-only reference navigates in-app, preserving
-      // Back and avoiding surrounding thread selection. Caret typing targets
-      // contenteditable, outside the anchor.
-      const docId = docLinkFromTarget(event.target);
-      if (docId !== null) {
-        if (docLinks?.lookup(docId).state === "deleted") {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            event.stopPropagation();
-          }
-          return;
-        }
-        if (event.key !== "Enter" || docLinks === null) return;
-        event.preventDefault();
-        event.stopPropagation();
-        docLinks.open(docId);
-        return;
-      }
-      const anchor = linkAnchorFromTarget(event.target);
-      if (anchor !== null) {
-        // Enter on a focused read-only anchor belongs to the browser; neither
-        // Enter nor Space on it activates the surrounding comment highlight.
-        if (
-          event.key === "Enter" &&
-          !isExternalHref(anchor.getAttribute("href"))
-        ) {
-          event.preventDefault();
-        }
-        return;
-      }
-      const threadId = threadIdFromActivation(event);
-      if (threadId === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-      selectThread(threadId, true);
-    };
+    const activateThread = (event: KeyboardEvent): void => activateThreadKey(event, docLinks, selectThread);
     element.addEventListener("click", activate);
     element.addEventListener("keydown", activateThread, true);
     setEditor(binding.editor);
@@ -921,6 +920,9 @@ const BoundEditor = memo(function BoundEditor({
         )}
         {editor !== null && !contentReadOnly && writable && (
           <EmojiMenu editor={editor} host={frame} />
+        )}
+        {editor !== null && !contentReadOnly && writable && !isDecision(connection) && !decisionView && (
+          <FootnoteMenu editor={editor} host={frame} />
         )}
         {editor !== null && !contentReadOnly && writable && (
           <MentionMenu

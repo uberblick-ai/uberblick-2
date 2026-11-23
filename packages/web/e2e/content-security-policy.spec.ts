@@ -133,7 +133,7 @@ test("workspace and every block render, load Figma and sync edits without CSP vi
   for (const selector of [
     ".ub-code > code", ".ub-wireframe-drawing .wf-root",
     ".ProseMirror h2", ".ProseMirror hr", ".ProseMirror li", ".ProseMirror blockquote",
-    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card", ".ub-callout", "[data-footnote-ref]", "[data-block-type=footnote]",
+    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card", ".ub-callout", ".ub-footnote-reference", "[data-block-type=footnote]",
   ]) await expect(page.locator(selector).first()).toBeVisible();
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
   await page.getByRole("button", { name: "Document actions", exact: true }).click();

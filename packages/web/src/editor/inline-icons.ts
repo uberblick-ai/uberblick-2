@@ -25,7 +25,7 @@ function ranges(node: ProseMirrorNode): { text: string; icons: IconRange[] } {
   const icons = inlineIconTokens(text).flatMap((token): IconRange[] => {
     const touched = runs.filter((run) => run.from < token.to && token.from < run.to);
     const first = touched[0];
-    if (first === undefined || touched.some((run) => run.marks.some((mark) => mark.type.spec.code))) return [];
+    if (first === undefined || touched.some((run) => run.marks.some((mark) => mark.type.spec.code || mark.type.name === "footnoteRef"))) return [];
     const linkedRun = touched.find((run) => linkMark(run.marks) !== undefined);
     const link = linkMark(linkedRun?.marks ?? []);
     let scopeFrom = 0;

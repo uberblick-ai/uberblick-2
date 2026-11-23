@@ -6,7 +6,7 @@ import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { normalizeFigmaLink } from "@uberblick/schema";
 import { slashTriggerAt } from "./block-menu.js";
-import { endUndoCapture, findBlockById } from "./blocks.js";
+import { bodyInsertionAllowed, endUndoCapture, findBlockById } from "./blocks.js";
 import type { SlashTrigger } from "./block-menu.js";
 
 export interface FigmaDraft {
@@ -26,6 +26,7 @@ export function startFigmaDraft(editor: Editor, blockId: string, trigger?: Slash
   if (!editor.isEditable) return false;
   const found = findBlockById(editor.state.doc, blockId);
   if (found === null) return false;
+  if (trigger === undefined && !bodyInsertionAllowed(editor.state.doc, found.pos + found.node.nodeSize)) return false;
   const live = trigger === undefined ? null : slashTriggerAt(editor);
   if (trigger !== undefined && (live?.blockId !== blockId || live.query !== trigger.query)) return false;
   const existing = currentFigmaDraft(editor);
@@ -70,6 +71,7 @@ export function commitFigmaDraft(editor: Editor, draft: FigmaDraft, values: Figm
   if (!editor.isEditable || currentFigmaDraft(editor) !== draft) return false;
   const found = findBlockById(editor.state.doc, draft.blockId);
   if (found === null) return false;
+  if (draft.mode === "below" && !bodyInsertionAllowed(editor.state.doc, found.pos + found.node.nodeSize)) return false;
   const url = normalizeFigmaLink(values.url).url;
   const fresh = figmaNode(editor.schema, { ...values, url }, draft.mode === "replace" ? draft.blockId : null);
   if (fresh === null) return false;

@@ -17,7 +17,7 @@ import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Transaction } from "@tiptap/pm/state";
 import type { BlockType } from "@uberblick/schema";
-import { endUndoCapture, findBlockById, isTypedHere } from "./blocks.js";
+import { bodyInsertionAllowed, endUndoCapture, findBlockById, isTypedHere } from "./blocks.js";
 import { retypeBlockInTransaction } from "./retype.js";
 import type { RetypeAttrs } from "./retype.js";
 
@@ -339,7 +339,7 @@ export function replaceParagraphWithDivider(tr: Transaction, pos: number): boole
   const previous = tr.doc.nodeAt(pos);
   const { divider, paragraph } = tr.doc.type.schema.nodes;
   if (previous?.type.name !== "paragraph" || previous.content.size !== 0 ||
-    divider === undefined || paragraph === undefined) return false;
+    divider === undefined || paragraph === undefined || !bodyInsertionAllowed(tr.doc, pos)) return false;
   const line = divider.create({ id: previous.attrs.id });
   tr.replaceWith(pos, pos + previous.nodeSize, [line, paragraph.create({ id: null })]);
   tr.setSelection(TextSelection.near(tr.doc.resolve(pos + line.nodeSize + 1)));
@@ -408,6 +408,7 @@ export function insertBlockBelow(
   const found = findBlockById(state.doc, blockId);
   if (found === null) return false;
   const { pos: blockPos, node: block } = found;
+  if (!bodyInsertionAllowed(state.doc, blockPos + block.nodeSize)) return false;
 
   const nodeType = state.schema.nodes[entry.type];
   if (nodeType === undefined) return false;

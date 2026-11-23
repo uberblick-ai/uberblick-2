@@ -16,6 +16,7 @@ import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 import { expect, test } from "@playwright/test";
 import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helpers.js";
 import type { Browser, Page } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { placeCaret, placeCaretIn } from "./harness.js";
 import { fastForwardPageTimers, installPageTimers, setPageTime, withPageTimers } from "./page-timers.js";
 
@@ -96,6 +97,37 @@ test("a checklist toggle reaches a second client and its caret shortcut reaches 
   await expect(boxA).not.toBeChecked();
   await expect(itemA).toContainText("A shared task");
   await expect(itemB).toContainText("A shared task");
+});
+
+test("adding a footnote syncs its reference and note and one undo removes both", async ({ browser }) => {
+  const a = await openApp(browser);
+  await createDoc(a, docTitle("Footnote collaboration"));
+  const b = await openApp(browser, new URL(a.url()).pathname);
+  await placeCaret(a);
+  await a.keyboard.type("Shared [^");
+  await expect.poll(() => blockText(b)).toBe("Shared [^");
+  await a.getByRole("option", { name: "Add footnote", exact: true }).click();
+  const noteA = editor(a).locator('[data-block-type="footnote"]');
+  const noteB = editor(b).locator('[data-block-type="footnote"]');
+  await expect(noteB).toHaveAttribute("data-footnote-label", "1");
+  await expect(editor(b).locator(".ub-footnote-reference")).toHaveText("1");
+  await expect.poll(() => editor(a).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parent.type.name)).toBe("footnote");
+  await a.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => blockText(b)).toBe("Shared [^");
+  await expect(noteA).toHaveCount(0);
+  await expect(noteB).toHaveCount(0);
+  await expect(editor(b).locator(".ub-footnote-reference")).toHaveCount(0);
+  await a.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(noteB).toHaveAttribute("data-footnote-label", "1");
+  await editor(b).locator(".ub-footnote-reference").click();
+  await expect.poll(() => editor(b).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parent.type.name)).toBe("footnote");
+  await b.keyboard.type("Written by the other reader");
+  await expect.poll(() => editor(a).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Written by the other reader");
+  await expect(editor(a).locator(".ub-footnote-reference")).toHaveText("1");
+  await waitForAcknowledged(a, { path: "relay" });
+  await b.reload();
+  await expect.poll(() => editor(b).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Written by the other reader");
+  await expect(noteB).toHaveAttribute("data-footnote-label", "1");
 });
 
 test("a TL;DR added from the menu and edited inline follows in the other client", { tag: "@webkit" }, async ({

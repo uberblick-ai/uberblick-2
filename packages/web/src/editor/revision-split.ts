@@ -23,6 +23,7 @@ import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
+import { Footnotes } from "./footnotes.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
 import { unchangedRuns } from "./revision-rows.js";
@@ -115,7 +116,8 @@ function foldNode(run: number, count: number, headings: string, nodes: readonly 
   const type = revisionSchema.nodes.revisionFold;
   if (type === undefined) throw new Error("Revision fold is missing");
   const levels = nodes.filter((node) => node.type.name === "heading").map((node) => Number(node.attrs.level));
-  return type.create({ run, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) });
+  return type.create({ run, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels),
+    footnoteBlocks: nodes.map((node, index) => identified(node, run + index).toJSON()) });
 }
 
 function sourceText(node: PMNode): string {
@@ -340,6 +342,7 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks,
       DocLinks.configure({ context: docLinks }), ExternalLinks,
       GitHubLinks.configure({ settings: workspaceSettings, states: githubStates }), InlineIcons, PersonMentions, ToggleHeadings,
+      Footnotes.configure({ history: true }),
     ],
     content,
     editable: false,
@@ -462,7 +465,8 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
     const button = event.target instanceof Element ? event.target.closest<HTMLElement>(".ub-revision-fold-button") : null;
     if (button === null) return;
     event.preventDefault();
-    options.onExpand?.(Number(button.dataset.fold));
+    if (options.onExpand !== undefined) options.onExpand(Number(button.dataset.fold));
+    else expandRun(Number(button.dataset.fold));
   };
   for (const view of [before.view, after.view]) view.dom.addEventListener("click", expand);
   alignRevisionSides(before.view, after.view);
@@ -475,16 +479,17 @@ export function createRevisionSplit(options: CreateRevisionSplitOptions): Revisi
     observeRows();
     alignRevisionSides(before.view, after.view);
   };
+  const expandRun = (run: number): void => {
+    const index = model.rows.findIndex((row) => row.fold?.run === run);
+    const fold = model.rows[index]?.fold;
+    if (fold === undefined) return;
+    expanded.add(run);
+    apply(revisionSplitModel(options.before, options.after, { collapse: true, expanded }));
+  };
   return {
     get model() { return model; },
     before, after, align,
-    expand: (run) => {
-      const index = model.rows.findIndex((row) => row.fold?.run === run);
-      const fold = model.rows[index]?.fold;
-      if (fold === undefined) return;
-      expanded.add(run);
-      apply(revisionSplitModel(options.before, options.after, { collapse: true, expanded }));
-    },
+    expand: expandRun,
     setCollapse: (collapse) => {
       expanded.clear();
       apply(revisionSplitModel(options.before, options.after, { collapse, expanded }));

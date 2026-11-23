@@ -20,6 +20,17 @@ export function findBlockById(
   return null;
 }
 
+/** New body blocks stay before trailing notes; stored misplaced notes stay in place. */
+export function bodyInsertionAllowed(doc: ProseMirrorNode, at: number): boolean {
+  let trailing = doc.content.size;
+  for (let index = doc.childCount - 1; index >= 0; index -= 1) {
+    const node = doc.child(index);
+    if (node.type.name !== "footnote") break;
+    trailing -= node.nodeSize;
+  }
+  return at <= trailing;
+}
+
 /**
  * Close Yjs's capture interval so the next change is its own undo step. A
  * conversion otherwise coalesces with the typing that triggered it, and undo

@@ -20,6 +20,7 @@ import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
+import { Footnotes } from "./footnotes.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
 import { FOOTNOTE_MARKS, PROSE_MARKS } from "./marks.js";
@@ -63,7 +64,8 @@ const Fold = TiptapNode.create({
   group: "block",
   atom: true,
   selectable: false,
-  addAttributes: () => ({ run: { default: 0 }, count: { default: 0 }, headings: { default: "" }, headingLevel: { default: null } }),
+  addAttributes: () => ({ run: { default: 0 }, count: { default: 0 }, headings: { default: "" }, headingLevel: { default: null },
+    footnoteBlocks: { default: [], rendered: false } }),
   parseHTML: () => [],
   renderHTML: ({ node }) => ["div", { class: "ub-revision-fold" }, ["button", {
     type: "button", class: "ub-revision-fold-button", "data-fold": String(node.attrs.run),
@@ -314,7 +316,8 @@ function foldInlineRows(rows: RevisionRow[], nodes: PMNode[], blocks: RevisionBl
       const levels = hidden.filter((entry) => entry.type.name === "heading").map((entry) => Number(entry.attrs.level));
       const fold = revisionSchema.nodes.revisionFold;
       if (fold === undefined) throw new Error("Revision fold is missing");
-      shown.nodes.push(fold.create({ run: run.start, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels) }));
+      shown.nodes.push(fold.create({ run: run.start, count, headings, headingLevel: levels.length === 0 ? null : Math.min(...levels),
+        footnoteBlocks: hidden.map((node) => node.toJSON()) }));
       shown.rows.push({ kind: "folded", at: run.start, changed: false, fold: { run: run.start, count },
         before: { labels: [], filler: false }, after: { labels: [], filler: false } });
       shown.blocks.push({ kind: "folded", at: run.start, fields: [], widthsOnly: false, dataCollections: [], showSource: false });
@@ -508,6 +511,8 @@ export function createRevisionInline(options: CreateRevisionEditorOptions): Revi
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
       GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
+      // known limit: Inline footnote numbers include removed references; revisit when comparison sides have separate reference projections.
+      Footnotes.configure({ history: true }),
     ],
     content: model.content,
     editable: false,
