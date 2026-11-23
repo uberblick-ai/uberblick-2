@@ -22,7 +22,7 @@ function addresses(doc: PMNode, range: Range): Address[] {
     if (node.type.spec.code || !node.type.allowsMarkType(link)) return false;
     const protectedRanges: Range[] = [];
     node.forEach((child, offset) => {
-      const blocked = child.marks.some((mark) => mark.type.spec.code || mark.type.name === "link" || mark.type.name === "docLink");
+      const blocked = child.marks.some((mark) => mark.type.spec.code || mark.type.name === "link" || mark.type.name === "docLink" || mark.type.name === "footnoteRef");
       if (!child.isText || blocked) protectedRanges.push({ from: offset, to: offset + child.nodeSize });
     });
     const source = node.textBetween(0, node.content.size, "", "\n");

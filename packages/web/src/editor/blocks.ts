@@ -20,6 +20,13 @@ export function findBlockById(
   return null;
 }
 
+/** New body blocks stay before the first note; stored misplaced notes stay in place. */
+export function bodyInsertionAllowed(doc: ProseMirrorNode, at: number): boolean {
+  let allowed = true;
+  doc.forEach((node, pos) => { if (pos < at && node.type.name === "footnote") allowed = false; });
+  return allowed;
+}
+
 /**
  * Close Yjs's capture interval so the next change is its own undo step. A
  * conversion otherwise coalesces with the typing that triggered it, and undo

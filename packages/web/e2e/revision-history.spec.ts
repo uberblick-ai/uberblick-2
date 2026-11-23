@@ -1034,6 +1034,74 @@ test.describe("document history through ub open", () => {
     await expect(historicalEditor(page).locator(".ub-revision-fields")).toHaveCount(0);
   });
 
+  test("footnotes number each history column and reveal collapsed notes by pointer, touch and Enter", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const uuid = randomUUID();
+    const title = docTitle("Footnote history");
+    const source = new Y.Doc();
+    const states: Record<string, string> = {};
+    try {
+      initDoc(source, { uuid, title });
+      const gone = appendBlock(source, { type: "paragraph", inline: [
+        { text: "Removed ", marks: {} }, { text: "[^gone]", marks: { footnoteRef: true } },
+      ] });
+      const kept = appendBlock(source, { type: "paragraph", inline: [
+        { text: "Earlier ", marks: {} }, { text: "[^kept]", marks: { footnoteRef: true } },
+      ] });
+      for (let index = 0; index < 8; index += 1) appendBlock(source, { type: "paragraph", text: `Unchanged context ${index}` });
+      appendBlock(source, { type: "footnote", label: "gone", text: "Removed reference note" });
+      appendBlock(source, { type: "footnote", label: "kept", text: "Retained reference note" });
+      states.earlier = Buffer.from(snapshotRevision(source).state).toString("base64");
+      deleteBlock(source, gone);
+      editBlock(source, kept, "Earlier [^kept]", "Latest [^kept]");
+      states.latest = Buffer.from(snapshotRevision(source).state).toString("base64");
+      await harness().seedDocument(source);
+    } finally { source.destroy(); }
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce" },
+      beforeNavigate: async target => { await serveHistory(target, [
+        { id: "latest", author: null, startedAt: 2_000, endedAt: null },
+        { id: "earlier", author: null, startedAt: 1_000, endedAt: 2_000 },
+      ], states); },
+    });
+    await expect(history(page).getByRole("button", { name: "Previous revision", exact: true })).toBeEnabled();
+    await previous(page);
+    await comparisonView(page, "Split");
+    await expect(page.locator(".ub-revision-split")).toBeVisible();
+    for (const side of [earlierSide(page), historicalEditor(page)]) {
+      await expect(side.locator(".ub-revision-fold-button").first()).toBeVisible();
+      await expect(side.locator('[data-block-type="footnote"][data-footnote-label="kept"]')).toHaveCount(0);
+    }
+    for (const [side, number] of [[earlierSide(page), "2"], [historicalEditor(page), "1"]] as const) {
+      const reference = side.locator('.ub-footnote-reference[data-footnote-label="kept"]');
+      const note = side.locator('[data-block-type="footnote"][data-footnote-label="kept"]');
+      await expect(reference).toHaveText(number);
+      await activateControl(reference, { touch });
+      await expect(note).toBeVisible();
+      await expect(note).toBeInViewport();
+      await expect(note.locator(".ub-footnote-backlink")).toBeFocused();
+      await activateControl(note.locator(".ub-footnote-backlink"), { touch });
+      await expect(reference).toBeInViewport();
+      const position = await side.evaluate(element => {
+        let found = -1;
+        (element as HTMLElement & { editor: Editor }).editor.state.doc.descendants((node, pos) => {
+          if (node.isText && node.text?.includes("[^kept]")) found = pos + node.text.indexOf("[^kept]") + 2;
+        });
+        return found;
+      });
+      expect(position).toBeGreaterThan(0);
+      await selectPositions(side, position);
+      await page.keyboard.press("Enter");
+      await expect(note.locator(".ub-footnote-backlink")).toBeFocused();
+      const original = await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON());
+      await page.keyboard.type("mutation [^");
+      await expect(page.getByRole("option", { name: "Add footnote", exact: true })).toHaveCount(0);
+      expect(await side.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.getJSON())).toEqual(original);
+    }
+    await comparisonView(page, "Inline");
+    await expect(historicalEditor(page).locator('.ub-footnote-reference[data-footnote-label="kept"]')).toHaveText("2");
+  });
+
   test("the earliest revision keeps the live document's block spacing", { tag: "@webkit" }, async ({ browser }) => {
     const uuid = randomUUID();
     const title = docTitle("Earliest revision spacing");

@@ -24,7 +24,7 @@ function linkRanges(doc: ProseMirrorNode): LinkRange[] {
     if (!node.isTextblock) return true;
     let current: LinkRange | undefined;
     node.forEach((child, offset) => {
-      const link = child.isText
+      const link = child.isText && !child.marks.some((mark) => mark.type.name === "footnoteRef")
         ? child.marks.find((mark) => mark.type.name === "link")
         : undefined;
       if (link === undefined) {

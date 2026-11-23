@@ -7,8 +7,10 @@ import { devices, expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
+import type { Editor } from "@tiptap/core";
 import { activateControl } from "./input-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
+import { placeCaretIn } from "./harness.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let scratch: string | null = null;
@@ -93,36 +95,96 @@ async function openCalloutFixture(browser: Browser, options: BrowserContextOptio
   return page;
 }
 
-test("footnotes stay plain editable text and retain their labels and references @webkit-touch", async ({ page }, info) => {
+test("footnote numbers, unused cues and back links work by pointer, touch and read-only keyboard @webkit-touch", async ({ page }, info) => {
   const url = new URL(calloutFixtureUrl);
   url.searchParams.set("footnotes", "");
   await page.goto(url.href);
   await expect(page.locator("[data-callout-controls-ready=true]")).toBeVisible();
-  const paragraph = page.locator(".tiptap > p").first();
-  const note = page.locator("[data-block-type=footnote]");
+  await page.evaluate(() => document.fonts.ready);
+  const prose = page.locator(".tiptap");
+  const paragraph = prose.locator(":scope > p").first();
+  const references = prose.locator(".ub-footnote-reference");
+  const note = prose.locator('[data-block-type="footnote"][data-footnote-label="Source"]');
+  const other = prose.locator('[data-block-type="footnote"][data-footnote-label="Other"]');
+  const links = note.locator(".ub-footnote-backlink");
+  const touch = info.project.use.hasTouch === true;
+  const caretId = () => prose.evaluate(element => String((element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parent.attrs.id));
+  const noteId = await note.getAttribute("id");
+  const bodyId = await paragraph.getAttribute("id");
+  const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  const before = await page.getByLabel("Stored editor blocks").textContent();
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
-    await expect(paragraph).toHaveText("Read [^Source]");
-    await expect(note).toHaveText("Kept note");
-    await expect(note).toBeVisible();
+    await expect(references).toHaveText(["1", "1", "2?", "3"]);
+    await expect(references.nth(2)).not.toHaveAttribute("href");
+    await expect(note.locator(".ub-footnote-number")).toHaveText("1");
+    await expect(other.locator(".ub-footnote-number")).toHaveText("3");
+    await expect(links).toHaveCount(2);
+    await expect(prose.locator(".ub-footnote-unused")).toHaveText(["source · unused", "unused · unused"]);
+    await expect(note).toHaveClass(/ub-footnotes-start/);
+    expect(await note.evaluate(element => getComputedStyle(element).borderTopStyle)).not.toBe("none");
     await expect(page.getByText("This block needs a newer version.", { exact: true })).toHaveCount(0);
+    const geometry = await references.first().evaluate(element => {
+      const style = getComputedStyle(element);
+      const target = getComputedStyle(element, "::after");
+      const bounds = element.getBoundingClientRect();
+      const width = Number.parseFloat(target.minWidth);
+      const height = Number.parseFloat(target.minHeight);
+      const x = bounds.left + bounds.width / 2;
+      const y = bounds.top + bounds.height / 2;
+      const reaches = [[x - width / 2 + 2, y], [x + width / 2 - 2, y], [x, y - height / 2 + 2], [x, y + height / 2 - 2]]
+        .every(([left, top]) => left !== undefined && top !== undefined && element.contains(document.elementFromPoint(left, top)));
+      return { width, height, reaches, cursor: style.cursor, decoration: style.textDecorationLine };
+    });
+    expect(geometry.width).toBeGreaterThanOrEqual(touch ? 44 : 24);
+    expect(geometry.height).toBeGreaterThanOrEqual(touch ? 44 : 24);
+    expect(geometry.reaches).toBe(true);
+    expect(geometry.cursor).toBe("pointer");
+    expect(geometry.decoration).toContain("underline");
+    const readings = await renderedText(page, ".ub-footnote-reference, .ub-footnote-backlink, .ub-footnote-unused");
+    expect(readings.length).toBeGreaterThan(0);
+    for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
   }
-  if (info.project.use.hasTouch === true) await paragraph.tap();
-  else await paragraph.click();
-  await page.keyboard.press("End");
-  await page.keyboard.type(" afterward");
-  if (info.project.use.hasTouch === true) await note.tap();
-  else await note.click();
-  await page.keyboard.press("End");
-  await page.keyboard.type(" amended");
-  await expect(paragraph).toHaveText("Read [^Source] afterward");
-  await expect(note).toHaveText("Kept note amended");
-  await expect.poll(async () => JSON.parse(await page.getByLabel("Stored editor blocks").textContent() ?? "[]")).toMatchObject([
-    { type: "paragraph", text: "Read [^Source] afterward", inline: [
-      { text: "Read ", marks: {} }, { text: "[^Source]", marks: { footnoteRef: true } }, { text: " afterward", marks: {} },
-    ] },
-    { type: "footnote", label: "Source", text: "Kept note amended" },
-  ]);
+  await placeCaretIn(paragraph, { edge: "start", touch });
+  for (let count = 0; count < 5; count += 1) await page.keyboard.press("ArrowRight");
+  const caretOffset = () => prose.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parentOffset);
+  await expect.poll(caretOffset).toBe(5);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(caretOffset).toBe(14);
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(caretOffset).toBe(5);
+  await page.keyboard.press("Delete");
+  await expect(references).toHaveCount(3);
+  await expect.poll(() => prose.evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.firstChild?.textContent)).toBe("Read  and [^source]. Missing [^absent]. Other [^Other]");
+  await page.keyboard.press(`${modifier}+z`);
+  await expect(references).toHaveCount(4);
+  await activateControl(references.nth(1), { touch });
+  await expect.poll(caretId).toBe(noteId);
+  await expect(note).toBeInViewport();
+  await activateControl(links.nth(1), { touch });
+  await expect.poll(caretId).toBe(bodyId);
+  await expect(references.nth(1)).toBeInViewport();
+  await placeCaretIn(paragraph);
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect.poll(caretId).toBe(await other.getAttribute("id"));
+  await page.keyboard.press(`${modifier}+Enter`);
+  await expect.poll(caretId).toBe(bodyId);
+
+  await page.getByRole("button", { name: "Make editor read only", exact: true }).click();
+  await expect(prose).toHaveAttribute("contenteditable", "false");
+  for (let count = 0; count < 30 && !await references.first().evaluate(element => element === document.activeElement); count += 1) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(references.first()).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(links.first()).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(references.first()).toBeFocused();
+  await expect(page.getByRole("option", { name: "Add footnote", exact: true })).toHaveCount(0);
+  expect(await page.getByLabel("Stored editor blocks").textContent()).toBe(before);
+  await page.getByRole("button", { name: "Make editor writable", exact: true }).click();
+  await expect(prose).toHaveAttribute("contenteditable", "true");
+  await expect(references.first()).toHaveAttribute("tabindex", "-1");
 });
 
 function documentListUrl(scenario = "controls", state = "all"): string {

@@ -70,6 +70,7 @@ function blockAt(
     const $inside = view.state.doc.resolve(view.posAtDOM(element, 0));
     if ($inside.depth < 1) return null;
     const node = $inside.node(1);
+    if (node.type.name === "footnote") return null;
     return typeof node.attrs.id === "string" && node.attrs.id !== ""
       ? { blockId: node.attrs.id, pos: $inside.before(1) }
       : null;

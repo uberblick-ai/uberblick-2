@@ -2339,15 +2339,45 @@ h6.ub-heading {
   text-decoration: underline;
 }
 
-/* Zero-sized text retains native character-wise caret movement. */
+/* Hidden source stays available to selections and the clipboard beneath its widget. */
 .ub-github-link-text,
 .ub-person-mention-text,
 .ub-toggle-heading-marker,
-.ub-inline-icon-text {
+.ub-inline-icon-text,
+.ub-footnote-source {
   font-size: 0;
   line-height: 0;
   letter-spacing: 0;
   word-spacing: 0;
+}
+.ub-footnote-reference,
+.ub-footnote-number,
+.ub-footnote-unused,
+.ub-footnote-backlink {
+  font: var(--type-small-size)/var(--type-small-leading) var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.ub-footnote-reference { position: relative; vertical-align: super; }
+a.ub-footnote-reference,
+.ub-footnote-backlink { color: var(--foreground); text-decoration: underline; cursor: pointer; }
+a.ub-footnote-reference::after,
+.ub-footnote-backlink::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  transform: translate(-50%, -50%);
+}
+.ub-footnote-backlink { position: relative; display: inline-block; margin-inline-start: 0.75rem; }
+.ub-footnote-number,
+.ub-footnote-unused { margin-inline-end: 0.5rem; }
+.ub-footnote-unused,
+.ub-footnote-unmatched { color: var(--muted-foreground); }
+.ub-editor .ProseMirror > .ub-footnotes-start { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+@media (pointer: coarse) {
+  a.ub-footnote-reference::after,
+  .ub-footnote-backlink::after { min-width: 2.75rem; min-height: 2.75rem; }
 }
 .ub-editor .ProseMirror > .ub-toggle-folded { display: none; }
 /* The disclosure takes a fixed slot before the heading text, centred on the

@@ -97,12 +97,13 @@ export const Paragraph = Node.create({
   },
 });
 
-// known limit: splitting a note can repeat its label and trailing blocks can follow notes; revisit when the web has footnote controls.
 export const Footnote = Node.create({
   name: "footnote",
   group: "block",
   content: "inline*",
   marks: FOOTNOTE_MARKS,
+  isolating: true,
+  defining: true,
   addAttributes() {
     return {
       id: idAttribute,
