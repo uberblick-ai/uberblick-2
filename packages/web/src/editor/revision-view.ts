@@ -511,6 +511,7 @@ export function createRevisionInline(options: CreateRevisionEditorOptions): Revi
       CodeHighlighting, ListBlocks, CardBlocks, TerminalBlocks, ChartBlocks, WireframeBlocks, AblaufBlocks, JsonTreeBlocks,
       DocLinks.configure({ context: options.docLinks ?? null }), ExternalLinks,
       GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
+      // known limit: Inline footnote numbers include removed references; revisit when comparison sides have separate reference projections.
       Footnotes.configure({ history: true }),
     ],
     content: model.content,

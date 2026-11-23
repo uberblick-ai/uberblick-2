@@ -69,6 +69,7 @@ export function footnoteIndex(doc: PMNode): { references: FootnoteReference[]; n
         key: `${blockKey}:${range.from}`, marks, ...(fold === undefined ? {} : { fold }) });
     }
   };
+  // known limit: moving references leaves notes in stored order; revisit when automatic note ordering is required.
   doc.forEach((node, pos, index) => {
     if (node.type.name === "revisionFold") {
       const hidden = node.attrs.footnoteBlocks as readonly Record<string, unknown>[];
@@ -104,6 +105,13 @@ export function footnoteRanges(doc: PMNode): FootnoteReference[] {
 }
 
 let nextView = 0;
+
+function footnoteGlyph(owner: Document, text: string): HTMLSpanElement {
+  const glyph = owner.createElement("span");
+  glyph.className = "ub-footnote-glyph";
+  glyph.textContent = text;
+  return glyph;
+}
 
 export const Footnotes = Extension.create<{ history: boolean }>({
   name: "uberblickFootnotes",
@@ -209,7 +217,7 @@ export const Footnotes = Extension.create<{ history: boolean }>({
               element.dataset.footnoteNumber = String(reference.number);
               element.dataset.footnoteLabel = reference.label;
               element.contentEditable = "false";
-              element.textContent = `${reference.number}${note === undefined ? "?" : ""}`;
+              element.append(footnoteGlyph(view.dom.ownerDocument, `${reference.number}${note === undefined ? "?" : ""}`));
               element.setAttribute("aria-label", `Footnote ${reference.number}${note === undefined ? ": note missing" : ""}`);
               if (element instanceof HTMLAnchorElement && note !== undefined) {
                 element.href = `#${noteId(note.key)}`;
@@ -249,7 +257,7 @@ export const Footnotes = Extension.create<{ history: boolean }>({
                 element.contentEditable = "false";
                 element.href = `#${referenceId(reference.key)}`;
                 element.tabIndex = canEdit() ? -1 : 0;
-                element.textContent = note.references.length === 1 ? "↩" : `↩ ${index < 26 ? String.fromCharCode(97 + index) : index + 1}`;
+                element.append(footnoteGlyph(view.dom.ownerDocument, note.references.length === 1 ? "↩" : `↩ ${index < 26 ? String.fromCharCode(97 + index) : index + 1}`));
                 element.setAttribute("aria-label", `Back to footnote ${reference.number} reference ${index + 1}`);
                 element.addEventListener("mousedown", (event) => { if (canEdit()) event.preventDefault(); });
                 element.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); follow(view, reference.key, "reference"); });

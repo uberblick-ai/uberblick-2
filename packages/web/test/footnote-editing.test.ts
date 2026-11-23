@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import type { Editor } from "@tiptap/core";
+import { GapCursor } from "@tiptap/pm/gapcursor";
 import { AllSelection, NodeSelection } from "@tiptap/pm/state";
 import { appendBlock, createAnnotation, getBlockInline, getBlocks } from "@uberblick/schema";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
@@ -34,6 +35,24 @@ function fixture(noteText = "Before after") {
 }
 
 describe("footnote editing boundaries", () => {
+  it.each(["before", "after"] as const)("returns a native gap %s a note to its inline text", (edge) => {
+    const ydoc = new Y.Doc();
+    appendBlock(ydoc, { type: "footnote", label: "source", text: "Written" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      const boundary = editor.state.doc.resolve(edge === "before" ? 0 : editor.state.doc.content.size);
+      editor.view.dispatch(editor.state.tr.setSelection(new GapCursor(boundary)));
+      expect(editor.state.selection.$head.parent.type.name).toBe("footnote");
+      expect(editor.state.selection.$head.parentOffset).toBe(edge === "before" ? 0 : 7);
+      expect(key(editor, "Enter")).toBe(true);
+      paste(editor, "<p>first</p><p>second</p>");
+      expect(getBlocks(ydoc)).toMatchObject([{
+        type: "footnote", label: "source", text: edge === "before" ? "first secondWritten" : "Writtenfirst second",
+      }]);
+      expect(getBlocks(ydoc)).toHaveLength(1);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
   it("crosses a formatted reference as one caret unit and deletes it as one unit from either side", () => {
     const { editor, ydoc, body } = fixture();
     try {

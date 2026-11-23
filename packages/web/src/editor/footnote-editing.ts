@@ -1,4 +1,5 @@
 import { Extension } from "@tiptap/core";
+import { GapCursor } from "@tiptap/pm/gapcursor";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode, ResolvedPos } from "@tiptap/pm/model";
 import { Plugin, Selection, TextSelection } from "@tiptap/pm/state";
@@ -78,6 +79,12 @@ function notePaste(slice: Slice, state: EditorState): Slice {
 
 function atomicSelection(state: EditorState, previous: EditorState): TextSelection | null {
   const selection = state.selection;
+  // Isolating notes admit native gap cursors, which could create ordinary blocks beside the notes.
+  if (selection instanceof GapCursor) {
+    const { $head } = selection;
+    if ($head.nodeBefore?.type.name === "footnote") return TextSelection.create(state.doc, $head.pos - 1);
+    if ($head.nodeAfter?.type.name === "footnote") return TextSelection.create(state.doc, $head.pos + 1);
+  }
   if (!(selection instanceof TextSelection)) return null;
   let { anchor, head } = selection;
   const forward = anchor <= head;

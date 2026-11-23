@@ -50,7 +50,11 @@ test("typing a footnote trigger offers a caret action and pasted lines stay insi
   await expect(note).toHaveAttribute("data-footnote-label", "1");
   await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parent.type.name)).toBe("footnote");
   await page.keyboard.type("Before after");
+  await expect.poll(() => prose(page).evaluate(element => { const selection = (element as HTMLElement & { editor: Editor }).editor.state.selection; return [selection.$head.parent.type.name, selection.$head.parentOffset]; })).toEqual(["footnote", 12]);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => prose(page).evaluate(element => { const selection = (element as HTMLElement & { editor: Editor }).editor.state.selection; return [selection.$head.parent.type.name, selection.$head.parentOffset]; })).toEqual(["footnote", 12]);
   await page.keyboard.press("Home");
+  await expect.poll(() => prose(page).evaluate(element => { const selection = (element as HTMLElement & { editor: Editor }).editor.state.selection; return [selection.$head.parent.type.name, selection.$head.parentOffset]; })).toEqual(["footnote", 0]);
   for (let count = 0; count < 7; count += 1) await page.keyboard.press("ArrowRight");
   await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.selection.$head.parentOffset)).toBe(7);
   const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");

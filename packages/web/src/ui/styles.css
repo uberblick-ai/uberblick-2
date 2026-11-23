@@ -2358,12 +2358,14 @@ h6.ub-heading {
   font-variant-numeric: tabular-nums;
 }
 .ub-footnote-reference { position: relative; vertical-align: super; }
+.ub-footnote-glyph { position: relative; z-index: 1; }
 a.ub-footnote-reference,
 .ub-footnote-backlink { color: var(--foreground); text-decoration: underline; cursor: pointer; }
 a.ub-footnote-reference::after,
 .ub-footnote-backlink::after {
   content: "";
   position: absolute;
+  z-index: 0;
   inset: 50% auto auto 50%;
   min-width: 1.75rem;
   min-height: 1.75rem;

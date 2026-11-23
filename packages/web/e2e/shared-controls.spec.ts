@@ -103,7 +103,8 @@ test("footnote numbers, unused cues and back links work by pointer, touch and re
   await page.evaluate(() => document.fonts.ready);
   const prose = page.locator(".tiptap");
   const paragraph = prose.locator(":scope > p").first();
-  const references = prose.locator(".ub-footnote-reference");
+  const references = paragraph.locator(".ub-footnote-reference");
+  const adjacent = prose.locator(":scope > p").nth(1).locator(".ub-footnote-reference");
   const note = prose.locator('[data-block-type="footnote"][data-footnote-label="Source"]');
   const other = prose.locator('[data-block-type="footnote"][data-footnote-label="Other"]');
   const links = note.locator(".ub-footnote-backlink");
@@ -119,7 +120,7 @@ test("footnote numbers, unused cues and back links work by pointer, touch and re
     await expect(references.nth(2)).not.toHaveAttribute("href");
     await expect(note.locator(".ub-footnote-number")).toHaveText("1");
     await expect(other.locator(".ub-footnote-number")).toHaveText("3");
-    await expect(links).toHaveCount(2);
+    await expect(links).toHaveCount(3);
     await expect(prose.locator(".ub-footnote-unused")).toHaveText(["source · unused", "unused · unused"]);
     await expect(note).toHaveClass(/ub-footnotes-start/);
     expect(await note.evaluate(element => getComputedStyle(element).borderTopStyle)).not.toBe("none");
@@ -144,6 +145,15 @@ test("footnote numbers, unused cues and back links work by pointer, touch and re
     const readings = await renderedText(page, ".ub-footnote-reference, .ub-footnote-backlink, .ub-footnote-unused");
     expect(readings.length).toBeGreaterThan(0);
     for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    for (const [reference, target] of [[adjacent.nth(0), note], [adjacent.nth(1), other]] as const) {
+      const bounds = await reference.boundingBox();
+      if (bounds === null) throw new Error("e2e: adjacent footnote has no glyph box");
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+      if (touch) await page.touchscreen.tap(x, y);
+      else await page.mouse.click(x, y);
+      await expect.poll(caretId, { message: "a footnote glyph follows its own note beside another reference" }).toBe(await target.getAttribute("id"));
+    }
   }
   await placeCaretIn(paragraph, { edge: "start", touch });
   for (let count = 0; count < 5; count += 1) await page.keyboard.press("ArrowRight");

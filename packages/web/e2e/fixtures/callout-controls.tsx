@@ -40,6 +40,10 @@ function CalloutControlsFixture() {
         { text: ". Missing ", marks: {} }, { text: "[^absent]", marks: { footnoteRef: true } },
         { text: ". Other ", marks: {} }, { text: "[^Other]", marks: { footnoteRef: true } },
       ] });
+      appendBlock(ydoc, { type: "paragraph", inline: [
+        { text: "Adjacent ", marks: {} }, { text: "[^Source]", marks: { footnoteRef: true } },
+        { text: "[^Other]", marks: { footnoteRef: true } },
+      ] });
       appendBlock(ydoc, { type: "footnote", label: "Source", text: "Kept note" });
       appendBlock(ydoc, { type: "footnote", label: "Other", text: "Another note" });
       appendBlock(ydoc, { type: "footnote", label: "source", text: "Duplicate note" });
