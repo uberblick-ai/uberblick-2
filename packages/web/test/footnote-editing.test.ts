@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import type { Editor } from "@tiptap/core";
 import { GapCursor } from "@tiptap/pm/gapcursor";
+import { Fragment, Slice } from "@tiptap/pm/model";
 import { AllSelection, NodeSelection } from "@tiptap/pm/state";
 import { appendBlock, createAnnotation, getBlockInline, getBlocks } from "@uberblick/schema";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
@@ -35,6 +36,53 @@ function fixture(noteText = "Before after") {
 }
 
 describe("footnote editing boundaries", () => {
+  it("leaves an ordinary native replacement range to ProseMirror when it differs from the current selection", () => {
+    const ydoc = new Y.Doc();
+    appendBlock(ydoc, { type: "paragraph", text: "A retained sentence" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      editor.commands.setTextSelection(8);
+      const before = editor.state.doc;
+      const handled = editor.view.someProp("handleTextInput", (handler) => handler(
+        editor.view, 1, 2, "X", () => editor.state.tr.insertText("X", 1, 2),
+      ));
+      expect(handled).not.toBe(true);
+      expect(editor.state.doc).toBe(before);
+      expect(getBlocks(ydoc)[0]?.text).toBe("A retained sentence");
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
+  it("leaves ordinary selected text to the native clipboard and input handlers", () => {
+    const ydoc = new Y.Doc();
+    appendBlock(ydoc, { type: "paragraph", text: "An ordinary sentence" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      editor.commands.setTextSelection({ from: 2, to: 5 });
+      const plugin = editor.state.plugins.find((candidate) => candidate.props.handlePaste !== undefined && candidate.props.handleTextInput !== undefined);
+      if (plugin === undefined) throw new Error("The production footnote editing plugin must be installed");
+      const before = editor.state.doc;
+      const slice = new Slice(Fragment.from(editor.schema.node("paragraph", null, editor.schema.text("Pasted"))), 1, 1);
+      expect(plugin.props.handlePaste?.call(plugin, editor.view, new Event("paste") as ClipboardEvent, slice)).toBe(false);
+      const setData = vi.fn();
+      const cut = new Event("cut", { cancelable: true });
+      Object.defineProperty(cut, "clipboardData", { value: { setData } });
+      expect(plugin.props.handleDOMEvents?.cut?.call(plugin, editor.view, cut as ClipboardEvent)).toBe(false);
+      expect(setData).not.toHaveBeenCalled();
+      for (const inputType of ["insertParagraph", "insertLineBreak", "deleteContentBackward", "deleteContentForward", "deleteByCut"]) {
+        const event = new InputEvent("beforeinput", { inputType, cancelable: true });
+        expect(plugin.props.handleDOMEvents?.beforeinput?.call(plugin, editor.view, event)).toBe(false);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      const coordinates = vi.spyOn(editor.view, "posAtCoords").mockReturnValue({ pos: 6, inside: 0 });
+      try {
+        expect(plugin.props.handleDrop?.call(plugin, editor.view, new Event("drop") as DragEvent, slice, true)).toBe(false);
+      } finally { coordinates.mockRestore(); }
+      expect(editor.state.doc).toBe(before);
+      expect(editor.state.selection.from).toBe(2);
+      expect(editor.state.selection.to).toBe(5);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
   it.each(["before", "after"] as const)("returns a native gap %s a note to its inline text", (edge) => {
     const ydoc = new Y.Doc();
     appendBlock(ydoc, { type: "footnote", label: "source", text: "Written" });

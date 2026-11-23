@@ -221,9 +221,9 @@ export const FootnoteEditing = Extension.create<{ decisionAnswer: () => boolean 
           if (event.key === "Backspace" || event.key === "Delete") return deleteKey(view, event.key === "Backspace");
           return false;
         },
-        handleTextInput(view, from, to, text) {
+        handleTextInput(view, _from, _to, text) {
           const range = deletionRange(view.state);
-          if (range.from === from && range.to === to) return false;
+          if (range.from === view.state.selection.from && range.to === view.state.selection.to) return false;
           view.dispatch(view.state.tr.insertText(text, range.from, range.to).scrollIntoView());
           return true;
         },
