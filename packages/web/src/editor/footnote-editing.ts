@@ -127,6 +127,11 @@ function deleteSelection(view: EditorView): boolean {
   return true;
 }
 
+/** Whole-note replacements have no inline destination and could add body blocks beside notes. */
+function replacesNoteBlock(state: EditorState, range: { from: number; to: number }): boolean {
+  return !state.selection.empty && state.doc.nodeAt(range.from)?.type.name === "footnote";
+}
+
 function deleteKey(view: EditorView, backward: boolean): boolean {
   const { state } = view;
   if (!state.selection.empty) return deleteSelection(view);
@@ -169,7 +174,8 @@ function arrowKey(view: EditorView, event: KeyboardEvent): boolean {
 
 export const FootnoteEditing = Extension.create<{ decisionAnswer: () => boolean }>({
   name: "footnoteEditing",
-  priority: 1200,
+  // Caret menus take Enter before note limits; structural handlers run after them.
+  priority: 1150,
   addOptions: () => ({ decisionAnswer: () => false }),
   addProseMirrorPlugins() {
     const { decisionAnswer } = this.options;
@@ -194,6 +200,7 @@ export const FootnoteEditing = Extension.create<{ decisionAnswer: () => boolean 
             return true;
           }
           const range = deletionRange(view.state);
+          if (replacesNoteBlock(view.state, range)) return true;
           if (range.from === view.state.selection.from && range.to === view.state.selection.to) return false;
           view.dispatch(view.state.tr.delete(range.from, range.to).replaceSelection(slice)
             .setMeta("paste", true).setMeta("uiEvent", "paste").scrollIntoView());
@@ -223,6 +230,7 @@ export const FootnoteEditing = Extension.create<{ decisionAnswer: () => boolean 
         },
         handleTextInput(view, _from, _to, text) {
           const range = deletionRange(view.state);
+          if (replacesNoteBlock(view.state, range)) return true;
           if (range.from === view.state.selection.from && range.to === view.state.selection.to) return false;
           view.dispatch(view.state.tr.insertText(text, range.from, range.to).scrollIntoView());
           return true;

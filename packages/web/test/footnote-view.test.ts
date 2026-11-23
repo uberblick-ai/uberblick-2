@@ -67,6 +67,8 @@ it("follows both references and returns to the reference followed, with permissi
   const { editor, element } = mountEditor(ydoc);
   try {
     const reference = element.querySelectorAll<HTMLAnchorElement>("a.ub-footnote-reference")[1]!;
+    expect(reference.title).toBe("Footnote 1 · Ctrl+Enter beside the reference");
+    expect(reference.getAttribute("aria-keyshortcuts")).toBe("Control+Enter");
     reference.click();
     expect(editor.state.selection.$head.parent.attrs.id).toBe(note);
     editor.commands.insertContentAt(1, "Inserted ");
@@ -78,12 +80,15 @@ it("follows both references and returns to the reference followed, with permissi
     editor.setEditable(false);
     const readonlyReference = element.querySelectorAll<HTMLAnchorElement>("a.ub-footnote-reference")[1]!;
     expect(readonlyReference.tabIndex).toBe(0);
+    expect(readonlyReference.title).toBe("Footnote 1");
+    expect(readonlyReference.hasAttribute("aria-keyshortcuts")).toBe(false);
     readonlyReference.click();
-    expect(document.activeElement?.classList.contains("ub-footnote-backlink")).toBe(true);
+    expect(document.activeElement).toBe(element.querySelectorAll(".ub-footnote-backlink")[1]);
     (document.activeElement as HTMLAnchorElement).click();
-    expect(document.activeElement?.classList.contains("ub-footnote-reference")).toBe(true);
+    expect(document.activeElement).toBe(readonlyReference);
     editor.setEditable(true);
     expect(element.querySelector<HTMLAnchorElement>(".ub-footnote-backlink")?.tabIndex).toBe(-1);
+    expect(element.querySelector(".ub-footnote-reference")?.getAttribute("aria-keyshortcuts")).toBe("Control+Enter");
   } finally { editor.destroy(); ydoc.destroy(); }
 });
 
@@ -139,7 +144,7 @@ it.each(["inline", "split"] as const)("follows a reference into an unchanged fol
   const text = first.firstChild as Y.XmlText;
   text.delete(0, text.length);
   text.insert(0, "Read ");
-  text.insert(5, "[^source]", { footnoteRef: true });
+  text.insert(5, "[^source] twice [^source]", { footnoteRef: true });
   const left = document.body.appendChild(document.createElement("div"));
   const right = document.body.appendChild(document.createElement("div"));
   const history = mode === "inline"
@@ -148,8 +153,13 @@ it.each(["inline", "split"] as const)("follows a reference into an unchanged fol
   try {
     const host = mode === "inline" ? left : right;
     expect(host.querySelector("[data-block-type=footnote]")).toBeNull();
-    host.querySelector<HTMLAnchorElement>(".ub-footnote-reference")?.click();
+    const reference = host.querySelectorAll<HTMLAnchorElement>(".ub-footnote-reference")[1]!;
+    expect(reference.title).toBe("Footnote 1");
+    expect(reference.hasAttribute("aria-keyshortcuts")).toBe(false);
+    reference.click();
     expect(host.querySelector("[data-block-type=footnote]")).not.toBeNull();
-    expect(document.activeElement?.classList.contains("ub-footnote-backlink")).toBe(true);
+    expect(document.activeElement).toBe(host.querySelectorAll(".ub-footnote-backlink")[1]);
+    (document.activeElement as HTMLAnchorElement).click();
+    expect(document.activeElement).toBe(host.querySelectorAll(".ub-footnote-reference")[1]);
   } finally { history.destroy(); left.remove(); right.remove(); before.destroy(); after.destroy(); }
 });

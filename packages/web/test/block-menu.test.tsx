@@ -264,6 +264,51 @@ describe("the registry", () => {
   });
 });
 
+describe("body insertion around notes", () => {
+  it.each([false, true])("allows blocks below a misplaced note while keeping trailing notes last (%s)", (hasTrailingNotes) => {
+    const ydoc = new Y.Doc();
+    const early = appendBlock(ydoc, { type: "footnote", label: "early", text: "Early note" });
+    const body = appendBlock(ydoc, { type: "paragraph", text: "Later body" });
+    const trailing = hasTrailingNotes ? [
+      appendBlock(ydoc, { type: "footnote", label: "last", text: "Last note" }),
+      appendBlock(ydoc, { type: "footnote", label: "unused", text: "Unused note" }),
+    ] : [];
+    const { editor } = mountEditor(ydoc);
+    const paragraph = BLOCK_MENU_ENTRIES.find((entry) => entry.type === "paragraph")!;
+    try {
+      expect(insertBlockBelow(editor, body, paragraph)).toBe(true);
+      expect(getBlocks(ydoc).map(({ type, text }) => [type, text])).toEqual([
+        ["footnote", "Early note"], ["paragraph", "Later body"], ["paragraph", ""],
+        ...(hasTrailingNotes ? [["footnote", "Last note"], ["footnote", "Unused note"]] : []),
+      ]);
+      expect(insertBlockBelow(editor, early, paragraph)).toBe(true);
+      const before = getBlocks(ydoc);
+      for (const note of trailing) expect(insertBlockBelow(editor, note, paragraph)).toBe(false);
+      expect(getBlocks(ydoc)).toEqual(before);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
+  it("converts a divider below a misplaced note without moving stored notes", () => {
+    const ydoc = new Y.Doc();
+    const early = appendBlock(ydoc, { type: "footnote", label: "early", text: "Early note" });
+    const body = appendBlock(ydoc, { type: "paragraph", text: "/divider" });
+    const last = appendBlock(ydoc, { type: "footnote", label: "last", text: "Last note" });
+    const { editor } = mountEditor(ydoc);
+    try {
+      editor.commands.setTextSelection(editor.state.doc.child(0).nodeSize + 9);
+      const trigger = slashTriggerAt(editor)!;
+      const divider = BLOCK_MENU_ENTRIES.find((entry) => entry.type === "divider")!;
+      expect(convertBlockAtTrigger(editor, trigger, divider)).toBe(true);
+      expect(getBlocks(ydoc)).toMatchObject([
+        { id: early, type: "footnote", text: "Early note" },
+        { id: body, type: "divider", text: "" },
+        { type: "paragraph", text: "" },
+        { id: last, type: "footnote", text: "Last note" },
+      ]);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+});
+
 describe("the slash trigger", () => {
   it("opens on an empty paragraph and stays shut mid-text", () => {
     const { ydoc } = docWith([

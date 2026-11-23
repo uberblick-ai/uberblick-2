@@ -164,6 +164,39 @@ describe("footnote editing boundaries", () => {
     } finally { editor.destroy(); ydoc.destroy(); }
   });
 
+  it.each(["paste", "typing"])("refuses %s across notes without changing unselected notes or adding body blocks", (input) => {
+    const { editor, ydoc, notePos } = fixture("First note");
+    try {
+      appendBlock(ydoc, { type: "footnote", label: "second", text: "Second note" });
+      appendBlock(ydoc, { type: "footnote", label: "third", text: "Third note" });
+      const second = notePos() + (editor.state.doc.child(1).nodeSize);
+      const third = second + editor.state.doc.child(2).nodeSize;
+      editor.commands.setTextSelection({ from: second + 3, to: third + 4 });
+      const before = getBlocks(ydoc);
+      if (input === "paste") paste(editor, "<p>one</p><p>two</p>");
+      else expect(editor.view.someProp("handleTextInput", (handler) => handler(
+        editor.view, editor.state.selection.from, editor.state.selection.to, "typed",
+        () => editor.state.tr.insertText("typed"),
+      ))).toBe(true);
+      expect(getBlocks(ydoc)).toEqual(before);
+
+      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, second)));
+      if (input === "paste") paste(editor, "<p>one</p><p>two</p>");
+      else expect(editor.view.someProp("handleTextInput", (handler) => handler(
+        editor.view, editor.state.selection.from, editor.state.selection.to, "typed",
+        () => editor.state.tr.insertText("typed"),
+      ))).toBe(true);
+      expect(getBlocks(ydoc)).toEqual(before);
+      editor.commands.setTextSelection({ from: second + 3, to: third + 4 });
+      expect(key(editor, "Backspace")).toBe(true);
+      expect(getBlocks(ydoc)).toMatchObject([
+        { type: "paragraph", text: "Read [^source] next" },
+        { type: "footnote", label: "source", text: "First note" },
+      ]);
+      expect(getBlocks(ydoc)).toHaveLength(2);
+    } finally { editor.destroy(); ydoc.destroy(); }
+  });
+
   it.each([
     ["two paragraphs", "<p>first</p><p>second</p>", "first second", false],
     ["two formatted paragraphs", "<p><strong>first</strong></p><p><em>second</em></p>", "first second", false],

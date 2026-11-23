@@ -106,6 +106,14 @@ export function footnoteRanges(doc: PMNode): FootnoteReference[] {
 
 let nextView = 0;
 
+function referenceHint(element: HTMLAnchorElement, number: number, editable: boolean): void {
+  element.title = `Footnote ${number}`;
+  if (!editable) return;
+  const apple = /Mac|iPad|iPhone/.test(element.ownerDocument.defaultView?.navigator.platform ?? "");
+  element.title += ` · ${apple ? "Cmd" : "Ctrl"}+Enter beside the reference`;
+  element.setAttribute("aria-keyshortcuts", apple ? "Meta+Enter" : "Control+Enter");
+}
+
 function footnoteGlyph(owner: Document, text: string): HTMLSpanElement {
   const glyph = owner.createElement("span");
   glyph.className = "ub-footnote-glyph";
@@ -152,7 +160,8 @@ export const Footnotes = Extension.create<{ history: boolean }>({
         view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, position)).scrollIntoView());
         view.focus();
       } else {
-        const link = kind === "note" ? element.parentElement?.querySelector<HTMLElement>(".ub-footnote-backlink") : element;
+        const backlink = origin === undefined ? ".ub-footnote-backlink" : `.ub-footnote-backlink[href="#${referenceId(origin)}"]`;
+        const link = kind === "note" ? element.parentElement?.querySelector<HTMLElement>(backlink) : element;
         link?.focus({ preventScroll: true });
       }
       return true;
@@ -222,9 +231,7 @@ export const Footnotes = Extension.create<{ history: boolean }>({
               if (element instanceof HTMLAnchorElement && note !== undefined) {
                 element.href = `#${noteId(note.key)}`;
                 element.tabIndex = canEdit() ? -1 : 0;
-                const apple = /Mac|iPad|iPhone/.test(view.dom.ownerDocument.defaultView?.navigator.platform ?? "");
-                element.title = `Footnote ${reference.number} · ${apple ? "Cmd" : "Ctrl"}+Enter beside the reference`;
-                element.setAttribute("aria-keyshortcuts", apple ? "Meta+Enter" : "Control+Enter");
+                referenceHint(element, reference.number, canEdit());
                 element.addEventListener("mousedown", (event) => { if (canEdit()) event.preventDefault(); });
                 element.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); follow(view, note.key, "note", reference.key); });
               }

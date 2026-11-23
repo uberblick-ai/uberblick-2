@@ -113,6 +113,7 @@ test("footnote numbers, unused cues and back links work by pointer, touch and re
   const noteId = await note.getAttribute("id");
   const bodyId = await paragraph.getAttribute("id");
   const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "Meta" : "Control");
+  await expect(references.first()).toHaveAttribute("aria-keyshortcuts", `${modifier}+Enter`);
   const before = await page.getByLabel("Stored editor blocks").textContent();
   for (const colorScheme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme });
@@ -182,6 +183,8 @@ test("footnote numbers, unused cues and back links work by pointer, touch and re
 
   await page.getByRole("button", { name: "Make editor read only", exact: true }).click();
   await expect(prose).toHaveAttribute("contenteditable", "false");
+  await expect(references.first()).toHaveAttribute("title", "Footnote 1");
+  await expect(references.first()).not.toHaveAttribute("aria-keyshortcuts");
   for (let count = 0; count < 30 && !await references.first().evaluate(element => element === document.activeElement); count += 1) {
     await page.keyboard.press("Tab");
   }
@@ -190,6 +193,12 @@ test("footnote numbers, unused cues and back links work by pointer, touch and re
   await expect(links.first()).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(references.first()).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(references.nth(1)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(links.nth(1)).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(references.nth(1)).toBeFocused();
   await expect(page.getByRole("option", { name: "Add footnote", exact: true })).toHaveCount(0);
   expect(await page.getByLabel("Stored editor blocks").textContent()).toBe(before);
   await page.getByRole("button", { name: "Make editor writable", exact: true }).click();

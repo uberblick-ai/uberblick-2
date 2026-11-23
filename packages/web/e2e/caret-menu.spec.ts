@@ -28,7 +28,7 @@ function card(page: Page, name = "Block types"): Locator {
   return page.locator('[data-slot="caret-menu-content"]').filter({ has: menu(page, name) });
 }
 
-test("typing a footnote trigger offers a caret action and pasted lines stay inside its note", { tag: "@webkit-touch" }, async ({ page, browserName }, info) => {
+test("typing a footnote trigger offers a caret action, pasted lines stay inside its note and Enter picks inline menus", { tag: "@webkit-touch" }, async ({ page, browserName }, info) => {
   await openDoc(page, browserName);
   await page.keyboard.type("A literal [^");
   await staysInsidePane(page, "Footnotes");
@@ -76,6 +76,20 @@ test("typing a footnote trigger offers a caret action and pasted lines stay insi
   await page.keyboard.press("Enter");
   await expect(prose(page).locator(":scope > *")).toHaveCount(2);
   await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Before first second after");
+
+  await page.keyboard.press("End");
+  await page.keyboard.type(" :smi");
+  await expect(menu(page, "Emoji and icons").getByRole("option").first()).toHaveAccessibleName("smiley");
+  await page.keyboard.press("Enter");
+  await expect(menu(page, "Emoji and icons")).toHaveCount(0);
+  await expect.poll(() => prose(page).evaluate(element => (element as HTMLElement & { editor: Editor }).editor.state.doc.lastChild?.textContent)).toBe("Before first second after 😃");
+  await page.keyboard.type(" @menu");
+  await expect(menu(page, "People and documents").getByRole("option").first()).toHaveAccessibleName("menu layout");
+  await page.keyboard.press("Enter");
+  await expect(menu(page, "People and documents")).toHaveCount(0);
+  await expect(note.getByRole("link", { name: "menu layout", exact: true })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(prose(page).locator(":scope > *")).toHaveCount(2);
 });
 
 async function createDoc(page: Page, title: string): Promise<void> {
