@@ -5,11 +5,12 @@ import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { documentOperation } from "./operation.js";
 import { uuidArg } from "./schemas.js";
+import { footnotePositionError, footnotePositionFailure } from "./footnote-position.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
   block_ids: z.array(z.string().min(1)).min(1).describe("Distinct block ids, in their destination order."),
-  after_block_id: z.string().min(1).nullish().describe("Move after this block. Omit or null to move first."),
+  after_block_id: z.string().min(1).nullish().describe("Move after this block. Omit or null to move first. Body blocks go before the trailing footnotes; footnotes go among those trailing notes."),
 });
 
 export const moveBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, block_ids, after_block_id }, _request, replica) => {
@@ -18,6 +19,15 @@ export const moveBlockOperation = documentOperation({ content: true, contentDura
     Y.applyUpdate(draft, Y.encodeStateAsUpdate(replica.doc));
     const before = Y.encodeStateVector(draft);
     const changed = moveBlocks(draft, block_ids, after_block_id ?? null);
+    const existing = getBlocks(replica.doc);
+    const selected = new Set(block_ids);
+    const placed = block_ids.map(id => {
+      const block = getBlock(draft, id);
+      if (block === null) throw new Error(`Moved block ${id} is missing`);
+      return block;
+    });
+    const positionFailure = footnotePositionFailure(existing.filter(block => !selected.has(block.id)), placed, after_block_id ?? null);
+    if (positionFailure !== null) throw footnotePositionError(positionFailure.afterBlockId);
     if (getMeta(draft, replica.id).kind === "decision") {
       const failure = decisionAnswerShapeFailure(getBlocks(draft));
       if (failure !== null) {

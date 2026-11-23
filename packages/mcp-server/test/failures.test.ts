@@ -132,6 +132,9 @@ const EXPECTED: Record<
   invalid_card: { recoveryClass: "manual", detail: [] },
   invalid_callout: { recoveryClass: "manual", detail: [] },
   invalid_divider: { recoveryClass: "manual", detail: [] },
+  invalid_footnote_label: { recoveryClass: "manual", detail: [] },
+  invalid_footnote_reference: { recoveryClass: "manual", detail: [] },
+  footnote_position: { recoveryClass: "manual", detail: ["after_block_id", "entry_index"] },
   divider_not_editable: { recoveryClass: "manual", detail: [] },
   divider_annotation: { recoveryClass: "manual", detail: [] },
   annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
@@ -342,6 +345,15 @@ describe("the failure contract", () => {
     })).payload);
     record((await rig.call("insert_block", {
       uuid: doc.uuid, blocks: [{ type: "divider", text: "Invalid text" }],
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, after_block_id: doc.blockId, blocks: [{ type: "footnote", text: "Missing label" }],
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, blocks: [{ type: "paragraph", inline: [{ text: "[^one][^two]", marks: { footnoteRef: true } }] }],
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, blocks: [{ type: "footnote", label: "one", text: "Before the body" }],
     })).payload);
     const divider = await rig.ok("insert_block", { uuid: doc.uuid, after_block_id: doc.blockId, blocks: [{ type: "divider" }] });
     record((await rig.call("edit_block", {

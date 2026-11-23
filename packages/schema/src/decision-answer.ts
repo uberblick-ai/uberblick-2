@@ -1,5 +1,5 @@
 import type * as Y from "yjs";
-import { getBlocks } from "./blocks.js";
+import { getBlocks, getBlocksWithInline } from "./blocks.js";
 import { hasDocData } from "./data.js";
 import { getMeta } from "./doc.js";
 import type { BlockInput } from "./types.js";
@@ -14,11 +14,12 @@ export type DecisionAnswerFailure = DecisionAnswerShapeFailure
 
 /** Adjacent list items form one answer block, regardless of style or indent. */
 export function decisionAnswerShapeFailure(
-  blocks: readonly Pick<BlockInput, "type">[],
+  blocks: readonly { type: BlockInput["type"]; inline?: readonly { marks: { footnoteRef?: boolean | undefined } }[] | undefined }[],
 ): DecisionAnswerShapeFailure | null {
   if (blocks.some((block) => !["paragraph", "code", "table", "list-item"].includes(block.type))) {
     return "decision_block_unsupported";
   }
+  if (blocks.some((block) => block.inline?.some((run) => run.marks.footnoteRef))) return "decision_block_unsupported";
   let count = 0;
   for (let index = 0; index < blocks.length; index++) {
     if (blocks[index]?.type !== "list-item" || blocks[index - 1]?.type !== "list-item") count++;
@@ -44,7 +45,7 @@ export function decisionAnswerFailure(
 }
 
 export function decisionDocAnswerFailure(doc: Y.Doc): DecisionAnswerFailure | null {
-  return decisionAnswerFailure(getBlocks(doc), {
+  return decisionAnswerFailure(getBlocksWithInline(doc).map(({ block, inline }) => ({ ...block, inline })), {
     tldr: getMeta(doc).tldr,
     hasData: hasDocData(doc),
   });

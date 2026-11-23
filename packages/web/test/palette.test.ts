@@ -38,7 +38,7 @@ import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
 describe("the editor palette and stored block types", () => {
-  it("declares the schema's block nodes, seven marks, and nothing else", () => {
+  it("declares the schema's block nodes and marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "callout",
       "card",
@@ -52,6 +52,7 @@ describe("the editor palette and stored block types", () => {
       "doc",
       "figma",
       "figmaCaption",
+      "footnote",
       "heading",
       "list-item",
       "paragraph",
@@ -64,8 +65,7 @@ describe("the editor palette and stored block types", () => {
       "text",
       "unsupportedBlock",
     ]);
-    // The closed mark set: the schema package's six inline marks, plus the
-    // annotation anchor.
+    // The closed mark set: the schema package's inline marks and annotation anchor.
     expect(Object.keys(uberblickSchema.marks).sort()).toEqual(
       [...INLINE_MARKS, COMMENT_MARK].sort(),
     );
@@ -107,7 +107,7 @@ describe("the editor palette and stored block types", () => {
     for (const mark of INLINE_MARKS) {
       const type = uberblickSchema.marks[mark]!;
       for (const prose of PROSE_BLOCK_TYPES) {
-        expect(uberblickSchema.nodes[prose]?.allowsMarkType(type), mark).toBe(true);
+        expect(uberblickSchema.nodes[prose]?.allowsMarkType(type), `${prose}: ${mark}`).toBe(prose !== "footnote" || mark !== "footnoteRef");
       }
       expect(uberblickSchema.nodes.code?.allowsMarkType(type), mark).toBe(false);
     }

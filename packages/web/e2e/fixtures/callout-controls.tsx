@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Editor } from "@tiptap/core";
-import { appendBlock, getBlocksFragment } from "@uberblick/schema";
+import { appendBlock, getBlockInline, getBlocks, getBlocksFragment } from "@uberblick/schema";
 import * as Y from "yjs";
 import { createUberblickEditor } from "../../src/editor/create-editor.js";
 import { CommentComposer } from "../../src/ui/comments/CommentComposer.js";
@@ -26,14 +26,22 @@ function CalloutControlsFixture() {
   const frame = useRef<HTMLDivElement | null>(null);
   const [bound, setBound] = useState<{ editor: Editor; ydoc: Y.Doc } | null>(null);
   const [ready, setReady] = useState(false);
+  const [snapshot, setSnapshot] = useState("");
+  const footnotes = new URLSearchParams(location.search).has("footnotes");
 
   useEffect(() => {
     const ydoc = new Y.Doc();
-    appendBlock(ydoc, { type: "callout", variant: "tip", icon: "🚀", text: "Keep this text." });
+    if (footnotes) {
+      appendBlock(ydoc, { type: "paragraph", inline: [{ text: "Read ", marks: {} }, { text: "[^Source]", marks: { footnoteRef: true } }] });
+      appendBlock(ydoc, { type: "footnote", label: "Source", text: "Kept note" });
+    } else appendBlock(ydoc, { type: "callout", variant: "tip", icon: "🚀", text: "Keep this text." });
     const editor = createUberblickEditor({ element: host.current, fragment: getBlocksFragment(ydoc), awareness: null });
+    const update = () => setSnapshot(JSON.stringify(getBlocks(ydoc).map((block) => ({ ...block, inline: getBlockInline(ydoc, block.id) }))));
+    ydoc.on("update", update);
+    update();
     setBound({ editor, ydoc });
     return () => { editor.destroy(); ydoc.destroy(); };
-  }, []);
+  }, [footnotes]);
 
   useEffect(() => { if (bound !== null) setReady(true); }, [bound]);
 
@@ -54,6 +62,7 @@ function CalloutControlsFixture() {
           </>}
         </div>
       </div>
+      <output hidden aria-label="Stored editor blocks">{snapshot}</output>
     </main>
   </WorkspaceMembersContext>;
 }

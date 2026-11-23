@@ -63,7 +63,7 @@ async function expectWorkspaceSynced(page: Page): Promise<void> {
 }
 
 const blocks: BlockInput[] = [
-  { type: "paragraph", text: "Ordinary **marked** prose and a [link](https://example.com)." },
+  { type: "paragraph", text: "Ordinary **marked** prose and a [link](https://example.com). Reference [^csp]." },
   { type: "heading", level: 2, text: "Every block" },
   { type: "divider" },
   { type: "code", language: "typescript", text: "const value = 1;" },
@@ -87,9 +87,10 @@ const figma: BlockInput = {
 test("workspace and every block render, load Figma and sync edits without CSP violations", { tag: "@webkit" }, async ({ browser }, info) => {
   if (agent === null) throw new Error("e2e: the CSP MCP agent is not configured");
   const writer = agent.open({ name: "csp-e2e" });
-  expect([...new Set([...blocks, figma].map((block) => block.type))].sort()).toEqual([...BLOCK_TYPES].sort());
+  const everyBlock: BlockInput[] = [...blocks, figma, { type: "footnote", label: "csp", text: "A note rendered as plain prose." }];
+  expect([...new Set(everyBlock.map((block) => block.type))].sort()).toEqual([...BLOCK_TYPES].sort());
   const allTypes = await writer.call<{ uuid: string }>("create_doc", {
-    title: "CSP every block type", description: "Includes the live Figma view.", blocks: [...blocks, figma],
+    title: "CSP every block type", description: "Includes the live Figma view.", blocks: everyBlock,
   });
   await writer.call("update_data", {
     uuid: allTypes.uuid,
@@ -132,7 +133,7 @@ test("workspace and every block render, load Figma and sync edits without CSP vi
   for (const selector of [
     ".ub-code > code", ".ub-wireframe-drawing .wf-root",
     ".ProseMirror h2", ".ProseMirror hr", ".ProseMirror li", ".ProseMirror blockquote",
-    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card", ".ub-callout",
+    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card", ".ub-callout", "[data-footnote-ref]", "[data-block-type=footnote]",
   ]) await expect(page.locator(selector).first()).toBeVisible();
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
   await page.getByRole("button", { name: "Document actions", exact: true }).click();

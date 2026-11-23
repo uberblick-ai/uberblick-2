@@ -35,6 +35,7 @@ import {
  * `COMMENT_MARK` alone.
  */
 export const PROSE_MARKS: string = [...INLINE_MARKS, COMMENT_MARK].join(" ");
+export const FOOTNOTE_MARKS: string = [...INLINE_MARKS.filter((mark) => mark !== "footnoteRef"), COMMENT_MARK].join(" ");
 
 const BOLD_INPUT = /(?<=^|[\s([{"'])(\*\*(?!\s+\*\*)([^*]+)\*\*)$/;
 const BOLD_UNDERSCORE_INPUT = /(?<=^|[\s([{"'])(__(?!\s+__)([^_]+)__)$/;
@@ -317,6 +318,18 @@ const DocLink = Mark.create({
   },
 });
 
+/** Retain the reference's stored characters while the editor shows plain text. */
+const FootnoteRef = Mark.create({
+  name: "footnoteRef",
+  inclusive: false,
+  parseHTML() {
+    return [{ tag: "span[data-footnote-ref]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["span", mergeAttributes({ "data-footnote-ref": "" }, HTMLAttributes), 0];
+  },
+});
+
 /** The inline marks, in the order the ProseMirror schema should see them. */
 export const inlineMarkExtensions = [
   Bold,
@@ -325,4 +338,5 @@ export const inlineMarkExtensions = [
   InlineCode,
   Link,
   DocLink,
+  FootnoteRef,
 ];

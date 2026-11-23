@@ -190,7 +190,7 @@
           "format": "uuid"
         },
         "blocks": {
-          "description": "Initial blocks, in order.",
+          "description": "Initial blocks, in order, with all footnotes after the other blocks.",
           "type": "array",
           "items": {
             "type": "object",
@@ -209,11 +209,12 @@
                   "chart",
                   "card",
                   "figma",
-                  "divider"
+                  "divider",
+                  "footnote"
                 ]
               },
               "text": {
-                "description": "Prose with automatic links for bare web addresses (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
+                "description": "Prose with automatic links for bare web addresses and footnote references written as [^label] (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -250,8 +251,12 @@
                 "description": "Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types.",
                 "type": "string"
               },
+              "label": {
+                "description": "Footnotes only: required nonempty label without whitespace, [, ] or backslash. Labels match ignoring case; duplicates and unused labels are kept. On edit_block, omission keeps the label.",
+                "type": "string"
+              },
               "inline": {
-                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
+                "description": "Prose (paragraph, heading, list-item, quote, callout, footnote) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL), docLink (document UUID) or footnoteRef (true on exactly one [^label]). Replaces `text` with joined run texts. Unescaped [^label] becomes a reference in regular-document prose, outside links and inline code; not inside footnotes or decision answers. Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -272,6 +277,9 @@
                           "type": "boolean"
                         },
                         "inlineCode": {
+                          "type": "boolean"
+                        },
+                        "footnoteRef": {
                           "type": "boolean"
                         },
                         "link": {
@@ -875,7 +883,7 @@
         },
         "new_text": {
           "type": "string",
-          "description": "Replacement text. Newly written bare web addresses in prose become external links. Repeat old_text to change only list style, depth, callout variant, icon or table column widths."
+          "description": "Replacement text. Newly written bare web addresses become links and [^label] becomes a footnote reference in eligible regular-document prose. Repeat old_text to change only list style, depth, callout variant, icon, footnote label or table column widths."
         },
         "column_widths": {
           "description": "Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.",
@@ -914,6 +922,10 @@
         },
         "icon": {
           "description": "New callout icon: one emoji character or a curated :name: icon; an empty value restores the default. Omitted keeps it. Refused on other block types.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Footnotes only: required nonempty label without whitespace, [, ] or backslash. Labels match ignoring case; duplicates and unused labels are kept. On edit_block, omission keeps the label.",
           "type": "string"
         },
         "rev": {
@@ -994,7 +1006,7 @@
           "format": "uuid"
         },
         "after_block_id": {
-          "description": "Insert after this block. Omit or null to insert first.",
+          "description": "Insert after this block. Omit or null to insert first. Body blocks go before the trailing footnotes; footnotes go among those trailing notes.",
           "anyOf": [
             {
               "type": "string",
@@ -1025,11 +1037,12 @@
                   "chart",
                   "card",
                   "figma",
-                  "divider"
+                  "divider",
+                  "footnote"
                 ]
               },
               "text": {
-                "description": "Prose with automatic links for bare web addresses (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
+                "description": "Prose with automatic links for bare web addresses and footnote references written as [^label] (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
                 "type": "string"
               },
               "level": {
@@ -1066,8 +1079,12 @@
                 "description": "Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types.",
                 "type": "string"
               },
+              "label": {
+                "description": "Footnotes only: required nonempty label without whitespace, [, ] or backslash. Labels match ignoring case; duplicates and unused labels are kept. On edit_block, omission keeps the label.",
+                "type": "string"
+              },
               "inline": {
-                "description": "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
+                "description": "Prose (paragraph, heading, list-item, quote, callout, footnote) runs `[{text, marks}]`: marks are bold, italic, strike, inlineCode, link (external http(s) URL), docLink (document UUID) or footnoteRef (true on exactly one [^label]). Replaces `text` with joined run texts. Unescaped [^label] becomes a reference in regular-document prose, outside links and inline code; not inside footnotes or decision answers. Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's current title. A target unknown to this replica's directory refuses with doclink_target_not_known_locally before writing; archived targets are accepted.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -1088,6 +1105,9 @@
                           "type": "boolean"
                         },
                         "inlineCode": {
+                          "type": "boolean"
+                        },
+                        "footnoteRef": {
                           "type": "boolean"
                         },
                         "link": {
@@ -1130,7 +1150,7 @@
             ],
             "additionalProperties": false
           },
-          "description": "Blocks to insert consecutively, in order. A single block is a one-entry array."
+          "description": "Blocks to insert consecutively, in order, with footnotes after other blocks. A single block is a one-entry array."
         }
       },
       "required": [
@@ -1169,7 +1189,7 @@
           "description": "Distinct block ids, in their destination order."
         },
         "after_block_id": {
-          "description": "Move after this block. Omit or null to move first.",
+          "description": "Move after this block. Omit or null to move first. Body blocks go before the trailing footnotes; footnotes go among those trailing notes.",
           "anyOf": [
             {
               "type": "string",

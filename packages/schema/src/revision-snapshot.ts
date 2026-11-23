@@ -34,6 +34,7 @@ function copyChildren(source: Y.XmlFragment, target: Y.XmlFragment): void {
 }
 
 /** A fresh document contains no live-room history, annotations or excluded metadata. */
+// known limit: footnote history needs an updated client and hub; revisit when mixed-version history supports footnotes.
 export function snapshotRevision(document: Y.Doc): RevisionSnapshot {
   const title = getMeta(document).title;
   const blocks = snapshotBlocks(document);

@@ -16,6 +16,7 @@ export interface RevInput {
   indent?: ListIndent | undefined;
   variant?: string | undefined;
   icon?: string | undefined;
+  label?: string | undefined;
 }
 
 function fnv1a32(input: string): number {
@@ -53,6 +54,7 @@ export function blockRev(input: RevInput): string {
     input.text,
   ];
   if (input.type === "callout") fields.push(input.variant ?? null, input.icon ?? null);
+  if (input.type === "footnote") fields.push(input.label ?? null);
   const canonical = JSON.stringify(fields);
   return `${hex8(fnv1a32(canonical))}${hex8(djb2(canonical))}`;
 }

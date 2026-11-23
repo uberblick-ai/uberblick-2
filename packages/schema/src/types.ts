@@ -14,6 +14,7 @@ export const BLOCK_TYPES = [
   "card",
   "figma",
   "divider",
+  "footnote",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -35,6 +36,7 @@ export const PROSE_BLOCK_TYPES = [
   "list-item",
   "quote",
   "callout",
+  "footnote",
 ] as const;
 
 export type ProseBlockType = (typeof PROSE_BLOCK_TYPES)[number];
@@ -75,6 +77,7 @@ export const INLINE_MARKS = [
   "inlineCode",
   "link",
   "docLink",
+  "footnoteRef",
 ] as const;
 
 /**
@@ -86,6 +89,7 @@ export interface InlineMarkSet {
   italic?: boolean;
   strike?: boolean;
   inlineCode?: boolean;
+  footnoteRef?: boolean;
   /** External http(s) URL. */
   link?: string;
   /** A document uuid, lowercase — never a path, a title or a URL. */
@@ -125,6 +129,8 @@ export interface Block {
   variant?: CalloutVariant;
   /** Callouts only: a valid stored override of the variant's default icon. */
   icon?: string;
+  /** Footnotes only: the preserved, case-insensitively matched reference label. */
+  label?: string;
   /** Tables only: whole CSS pixels from the header row, or null when unsized. */
   columnWidths?: Array<number | null>;
   /** Figma blocks only: read-only view identity derived from the stored link. */
@@ -148,6 +154,8 @@ export interface BlockInput {
   variant?: CalloutVariant;
   /** Callouts only: one emoji or a curated :name: icon. Ignored for other types. */
   icon?: string;
+  /** Required for footnotes; excludes whitespace, brackets and backslashes. */
+  label?: string;
   /** Tables only: one positive whole CSS-pixel width or null per column. */
   columnWidths?: Array<number | null>;
   /**

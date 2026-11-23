@@ -7,8 +7,9 @@ import {
 import { canonicalDocumentUuid } from "./rooms.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type { InlineMarkSet, InlineRun } from "./types.js";
+import { splitFootnoteRuns } from "./footnotes.js";
 
-const FLAGS = ["bold", "italic", "strike", "inlineCode"] as const;
+const FLAGS = ["bold", "italic", "strike", "inlineCode", "footnoteRef"] as const;
 
 /**
  * Link targets are external http(s) URLs; UUIDs belong to docLink. Writers,
@@ -91,6 +92,7 @@ export function sameInlineMarks(a: InlineMarkSet, b: InlineMarkSet): boolean {
     a.italic === b.italic &&
     a.strike === b.strike &&
     a.inlineCode === b.inlineCode &&
+    a.footnoteRef === b.footnoteRef &&
     inlineLinkTarget(a) === inlineLinkTarget(b)
   );
 }
@@ -101,6 +103,7 @@ export function hasInlineMarks(marks: InlineMarkSet): boolean {
     marks.italic === true ||
     marks.strike === true ||
     marks.inlineCode === true ||
+    marks.footnoteRef === true ||
     inlineLinkTarget(marks) !== undefined
   );
 }
@@ -137,7 +140,12 @@ export function readInlineRuns(text: Y.XmlText | null): InlineRun[] {
     if (typeof op.insert !== "string") continue;
     pushInlineRun(runs, op.insert, marksOf(op.attributes));
   }
-  return runs;
+  const normalized: InlineRun[] = [];
+  for (const run of splitFootnoteRuns(runs)) {
+    if (run.marks.footnoteRef) normalized.push(run);
+    else pushInlineRun(normalized, run.text, run.marks);
+  }
+  return normalized;
 }
 
 /** Prose revisions and edits use plain text; table revisions include cell marks. */

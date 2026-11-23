@@ -26,6 +26,7 @@ import { isCalloutIcon, isCalloutVariant } from "./callout.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import { angleAddressEnd, matchWebAddress } from "./autolinks.js";
+import { footnoteReferences, isFootnoteLabel, splitFootnoteRuns } from "./footnotes.js";
 import type {
   Block,
   BlockType,
@@ -396,7 +397,7 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * code spans without a writable separator.
  */
 // known limit: unbracketed plain addresses link on re-import; revisit when Markdown supports preserving an unlinked address.
-export function renderInline(source: readonly InlineRun[], table = false): string {
+export function renderInline(source: readonly InlineRun[], table = false, footnotes = false): string {
   let out = "";
   const open: OpenMark[] = [];
 
@@ -479,14 +480,17 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
     }
 
 
+    const context = {
+      insideLabel: open.some((entry) => entry.name === "link"),
+      hugged,
+      table,
+    };
     out +=
       marks.inlineCode === true
         ? renderCodeSpan(text)
-        : escapeInline(text, {
-            insideLabel: open.some((entry) => entry.name === "link"),
-            hugged,
-            table,
-          });
+        : footnotes && marks.footnoteRef === true && !context.insideLabel
+          ? renderFootnoteReferences(text, context)
+          : escapeInline(text, context);
   }
 
   if (open.some((entry) => entry.name !== "link")) {
@@ -497,6 +501,18 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
     closeDownTo(0);
   }
   return out;
+}
+
+/** Keep only complete marked references as syntax; damaged marked text is literal. */
+function renderFootnoteReferences(text: string, context: EscapeContext): string {
+  let out = "";
+  let from = 0;
+  for (const reference of footnoteReferences(text)) {
+    out += escapeInline(text.slice(from, reference.from), context);
+    out += text.slice(reference.from, reference.to);
+    from = reference.to;
+  }
+  return out + escapeInline(text.slice(from), context);
 }
 
 /**
@@ -514,7 +530,9 @@ function escapeParagraphLines(text: string): string {
   return lines.map((line, index) => {
     const thematic = THEMATIC_BREAK_LINE.test(line);
     const setext = index > 0 && lines[index - 1]?.trim() !== "" && SETEXT_LINE.test(line);
-    return thematic || setext ? line.replace(/[-=]/, (char) => `\\${char}`) : line;
+    if (thematic || setext) return line.replace(/[-=]/, (char) => `\\${char}`);
+    // A reference followed by a colon is prose, not a definition.
+    return footnoteDefinition(line) === null ? line : line.replace("]:", "]\\:");
   }).join("\n");
 }
 
@@ -533,12 +551,13 @@ function renderBlock(
   inline: readonly InlineRun[],
   /** The list marker, for a `list-item`; ignored by every other type. */
   marker = "",
+  footnotes = true,
 ): string {
   switch (block.type) {
     case "heading": {
       const level = block.level ?? 1;
       // Headings are single-line by definition; fold any stray newlines.
-      const text = renderInline(inline).replace(/\s*\n\s*/g, " ").trim();
+      const text = renderInline(inline, false, footnotes).replace(/\s*\n\s*/g, " ").trim();
       return `${"#".repeat(level)} ${text}`.trimEnd();
     }
     case "code": {
@@ -556,17 +575,17 @@ function renderBlock(
     }
     case "list-item": {
       // Flat items cannot represent continuation blocks; fold to one line.
-      const text = renderInline(inline).replace(/\s*\n\s*/g, " ").trim();
+      const text = renderInline(inline, false, footnotes).replace(/\s*\n\s*/g, " ").trim();
       return `${marker}${THEMATIC_BREAK_LINE.test(`${marker}${text}`) ? `\\${text}` : text}`.trimEnd();
     }
     case "quote":
       // Every line marked, so a multi-line quote comes back as one block.
-      return renderInline(inline)
+      return renderInline(inline, false, footnotes)
         .split("\n")
         .map((line) => `> ${line}`.trimEnd())
         .join("\n");
     case "callout": {
-      const body = renderInline(inline).replace(/^<!-- icon:/, "\\<!-- icon:");
+      const body = renderInline(inline, false, footnotes).replace(/^<!-- icon:/, "\\<!-- icon:");
       const lines = [`[!${(block.variant ?? "note").toUpperCase()}]`];
       if (block.icon !== undefined) lines.push(`<!-- icon: ${block.icon} -->`);
       lines.push(...body.split("\n"));
@@ -581,8 +600,12 @@ function renderBlock(
       return `:::figma\n${block.text}\n:::`;
     case "divider":
       return "---";
+    case "footnote": {
+      const [first = "", ...continuation] = renderInline(inline).split("\n");
+      return [`[^${block.label ?? ""}]: ${first}`, ...continuation.map((line) => `    ${line}`)].join("\n");
+    }
     case "paragraph":
-      return escapeParagraphLines(escapeContainerLines(renderInline(inline)));
+      return escapeParagraphLines(escapeContainerLines(renderInline(inline, false, footnotes)));
   }
 }
 
@@ -624,6 +647,7 @@ export function exportMarkdown(
 ): string {
   const withFrontmatter = options.frontmatter ?? true;
   const annotationMode = options.annotations ?? "drop";
+  const footnotes = getMeta(ydoc, options.uuid).kind !== "decision";
 
   // Annotation sections inside items must also keep the list's tight spacing.
   const sections: Array<{ text: string; listItem: boolean; divider: boolean }> = [];
@@ -688,10 +712,15 @@ export function exportMarkdown(
   // Read blocks and marks together to avoid rescanning the fragment per block.
   const entries = getBlocksWithInline(ydoc);
   const numbers = listNumbers(entries.map((entry) => entry.block));
+  const notes: Array<{ block: Block; inline: InlineRun[] }> = [];
 
   // Annotation comments carry thread IDs, not block IDs: place them after their
   // own item and indent within it so another reader does not end the list.
   for (const [index, { block, inline, table }] of entries.entries()) {
+    if (block.type === "footnote") {
+      notes.push({ block, inline });
+      continue;
+    }
     const listItem = block.type === "list-item";
     const marker = listItem ? listMarker(block, numbers[index] ?? null) : "";
     push(
@@ -701,6 +730,7 @@ export function exportMarkdown(
         block,
         inline.length === 0 ? [{ text: block.text, marks: {} }] : inline,
         marker,
+        footnotes,
       ),
       listItem,
       block.type === "divider",
@@ -731,6 +761,12 @@ export function exportMarkdown(
     push("> Structured document data is omitted from this Markdown export.");
   }
 
+  for (const { block, inline } of notes) {
+    push(renderBlock(block, inline.length === 0 ? [{ text: block.text, marks: {} }] : inline));
+    const comments = annotationsByBlock.get(block.id);
+    if (comments !== undefined) push(comments.join("\n"));
+  }
+
   if (sections.length === 0) return "";
   let out = sections[0]?.divider === true ? "\n" : "";
   for (let i = 0; i < sections.length; i += 1) {
@@ -750,6 +786,8 @@ export interface ImportedBlock {
   text: string;
   level?: HeadingLevel;
   language?: string;
+  /** Footnotes only: the original case-preserving definition label. */
+  label?: string;
   /** Callouts only: the alert marker and optional icon override. */
   variant?: CalloutVariant;
   icon?: string;
@@ -813,6 +851,8 @@ interface Frontmatter {
   description?: string;
   tags?: string[];
   links?: string[];
+  /** Only gates answer parsing; import does not adopt document lifecycle metadata. */
+  kind?: string;
   /** Index of the first body line after the frontmatter block. */
   bodyStart: number;
 }
@@ -880,6 +920,8 @@ function parseFrontmatter(lines: string[]): Frontmatter {
     } else if (key === "description") {
       const description = parseScalar(value);
       if (description !== "") result.description = description;
+    } else if (key === "kind") {
+      result.kind = parseScalar(value);
     } else if (key === "tags" || key === "links") {
       const parsed = parseListValue(lines, i, end, value);
       if (key === "tags") {
@@ -953,6 +995,7 @@ function matchLinkSyntax(
 ): { label: string; href: string; next: number } | null {
   if (source[start] !== "[") return null;
   let i = start + 1;
+  let brackets = 1;
   for (; i < source.length; i += 1) {
     const char = source[i];
     if (char === "\\") {
@@ -967,7 +1010,11 @@ function matchLinkSyntax(
         continue;
       }
     }
-    if (char === "]") break;
+    if (char === "[") brackets += 1;
+    if (char === "]") {
+      brackets -= 1;
+      if (brackets === 0) break;
+    }
   }
   if (source[i] !== "]" || source[i + 1] !== "(") return null;
   const label = source.slice(start + 1, i);
@@ -1137,8 +1184,9 @@ function flanking(
 }
 
 /** Resolve escapes, literal code and recursive link labels before emphasis. */
-function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true, footnotes = false): Token[] {
   const tokens: Token[] = [];
+  const references = new Map((footnotes ? footnoteReferences(source) : []).map((reference) => [reference.from, reference] as const));
   let plain = "";
   const flush = (): void => {
     if (plain !== "") tokens.push({ kind: "text", text: plain, marks });
@@ -1178,6 +1226,16 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false, aut
         flush();
         tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table, autolinks));
         i = link.next;
+        continue;
+      }
+    }
+
+    if (footnotes && char === "[" && inlineLinkTarget(marks) === undefined) {
+      const reference = references.get(i);
+      if (reference !== undefined) {
+        flush();
+        tokens.push({ kind: "text", text: source.slice(i, reference.to), marks: { ...marks, footnoteRef: true } });
+        i = reference.to;
         continue;
       }
     }
@@ -1404,8 +1462,8 @@ function marksFor(
 /**
  * Union tokenizer scope with covering spans; unclaimed delimiters remain text.
  */
-function scanInline(source: string, out: InlineRun[], table = false, autolinks = true): void {
-  const tokens = tokenizeInline(source, {}, table, autolinks);
+function scanInline(source: string, out: InlineRun[], table = false, autolinks = true, footnotes = false): void {
+  const tokens = tokenizeInline(source, {}, table, autolinks, footnotes);
   const { spans, unclaimed } = matchNesting(tokens);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
@@ -1432,9 +1490,11 @@ export function parseInline(source: string, options: boolean | { table?: boolean
 function proseBlock(
   type: ProseBlockType,
   source: string,
+  footnotes = true,
 ): ImportedBlock {
-  const runs: InlineRun[] = [];
-  scanInline(source, runs);
+  const scanned: InlineRun[] = [];
+  scanInline(source, scanned, false, true, footnotes && type !== "footnote");
+  const runs = splitFootnoteRuns(scanned);
   const text = inlinePlainText(runs);
   return runs.some((run) => hasInlineMarks(run.marks))
     ? { type, text, inline: runs }
@@ -1451,13 +1511,13 @@ const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 const QUOTE_LINE = /^ {0,3}>[ \t]?(.*)$/;
 
 /** Classify the source before inline unescaping, so literal alert markers stay quotes. */
-function importedQuote(lines: readonly string[]): ImportedBlock {
+function importedQuote(lines: readonly string[], footnotes = true): ImportedBlock {
   const marker = /^\[!([a-z]+)\]$/i.exec(lines[0] ?? "");
   const variant = marker?.[1]?.toLowerCase();
-  if (!isCalloutVariant(variant)) return proseBlock("quote", lines.join("\n"));
+  if (!isCalloutVariant(variant)) return proseBlock("quote", lines.join("\n"), footnotes);
   const iconLine = /^<!-- icon: (.*) -->$/.exec(lines[1] ?? "");
   const body = lines.slice(iconLine === null ? 1 : 2).join("\n");
-  const block = { ...proseBlock("callout", body), variant };
+  const block = { ...proseBlock("callout", body, footnotes), variant };
   const icon = iconLine?.[1];
   return isCalloutIcon(icon) ? { ...block, icon } : block;
 }
@@ -1466,6 +1526,70 @@ function importedQuote(lines: readonly string[]): ImportedBlock {
 const HEADING_LINE = /^#{1,6}\s/;
 const FENCE_LINE = /^(?:`{3,}|~{3,})/;
 const COMMENT_LINE = /^<!--/;
+
+function footnoteDefinition(line: string): { label: string; source: string } | null {
+  const definition = /^ {0,3}\[\^([^\]]*)\]:[ \t]?(.*)$/.exec(line);
+  const label = definition?.[1];
+  return isFootnoteLabel(label) ? { label, source: definition?.[2] ?? "" } : null;
+}
+
+function importedFootnote(lines: readonly string[], start: number): { block: ImportedBlock; last: number } | null {
+  const definition = footnoteDefinition(lines[start] ?? "");
+  if (definition === null) return null;
+  const source = [definition.source];
+  let last = start;
+  while (last + 1 < lines.length) {
+    const continuation = /^(?: {4}|\t)(\S.*|[ \t]+\S.*)$/.exec(lines[last + 1] ?? "");
+    if (continuation === null) break;
+    source.push(continuation[1] ?? "");
+    last += 1;
+  }
+  return { block: { ...proseBlock("footnote", source.join("\n"), false), label: definition.label }, last };
+}
+
+/** The first definition owns a label; repeated and unused notes retain source order. */
+function orderImportedFootnotes(blocks: ImportedBlock[]): ImportedBlock[] {
+  const notes = blocks.filter((block) => block.type === "footnote");
+  if (notes.length === 0) return blocks;
+  const body = blocks.filter((block) => block.type !== "footnote");
+  const firstNotes = new Map<string, ImportedBlock>();
+  for (const note of notes) {
+    const label = (note.label ?? "").toLowerCase();
+    if (!firstNotes.has(label)) firstNotes.set(label, note);
+  }
+  const ordered: ImportedBlock[] = [];
+  const used = new Set<ImportedBlock>();
+  for (const block of body) {
+    for (const run of block.inline ?? []) {
+      if (run.marks.footnoteRef !== true) continue;
+      for (const reference of footnoteReferences(run.text)) {
+        const note = firstNotes.get(reference.label.toLowerCase());
+        if (note !== undefined && !used.has(note)) {
+          ordered.push(note);
+          used.add(note);
+        }
+      }
+    }
+  }
+  return [...body, ...ordered, ...notes.filter((note) => !used.has(note))];
+}
+
+function finishImport(front: Frontmatter, blocks: ImportedBlock[]): ImportedDoc {
+  let title = front.title ?? "";
+  if (front.title === undefined) {
+    const first = blocks[0];
+    if (first !== undefined && first.type === "heading" && first.level === 1) {
+      title = first.text;
+      blocks.shift();
+    }
+  }
+  // Preserve absent versus explicit empty identity/link fields for callers.
+  const result: ImportedDoc = { title, tags: front.tags ?? [], blocks: orderImportedFootnotes(blocks) };
+  if (front.uuid !== undefined) result.uuid = front.uuid;
+  if (front.description !== undefined) result.description = front.description;
+  if (front.links !== undefined) result.links = front.links;
+  return result;
+}
 
 /**
  * Keep this vocabulary aligned with the import loop. The table parser accepts
@@ -1480,6 +1604,7 @@ function startsBlock(line: string): boolean {
     HEADING_LINE.test(trimmed) ||
     FENCE_LINE.test(trimmed) ||
     COMMENT_LINE.test(trimmed)
+    || footnoteDefinition(line) !== null
     || line === ":::card" || line === ":::figma"
   );
 }
@@ -1518,17 +1643,19 @@ export function importMarkdown(markdown: string): ImportedDoc {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const front = parseFrontmatter(lines);
   const blocks: ImportedBlock[] = [];
+  const footnotes = front.kind !== "decision";
+  const prose = (type: ProseBlockType, source: string): ImportedBlock => proseBlock(type, source, footnotes);
 
   let paragraph: string[] = [];
   let quote: string[] = [];
   const flush = (): void => {
     // Only one of the two can be open, and a quote always opened first.
     if (quote.length > 0) {
-      blocks.push(importedQuote(quote));
+      blocks.push(importedQuote(quote, footnotes));
       quote = [];
     }
     if (paragraph.length === 0) return;
-    blocks.push(proseBlock("paragraph", paragraph.join("\n")));
+    blocks.push(prose("paragraph", paragraph.join("\n")));
     paragraph = [];
   };
 
@@ -1576,6 +1703,15 @@ export function importMarkdown(markdown: string): ImportedDoc {
       continue;
     }
 
+    const definition = footnotes ? importedFootnote(lines, i) : null;
+    if (definition !== null) {
+      flush();
+      openItems = [];
+      blocks.push(definition.block);
+      i = definition.last;
+      continue;
+    }
+
     // The shared table parser distinguishes structural from escaped pipes.
     // Prefer lists for ambiguous delimiter lines such as - | -, or the preceding
     // paragraph would be swallowed into an unintended table.
@@ -1611,7 +1747,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
       paragraph = [];
       flush();
       blocks.push({
-        ...proseBlock("heading", source),
+        ...prose("heading", source),
         level: setext[1]?.startsWith("=") === true ? 1 : 2,
       });
       openItems = [];
@@ -1640,7 +1776,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
       // Read task markers before inline unescaping, so escaped brackets stay text.
       const task = ordered ? null : /^\[([ xX])\](?:[ \t]+|$)/.exec(source);
       blocks.push({
-        ...proseBlock("list-item", task === null ? source : source.slice(task[0].length)),
+        ...prose("list-item", task === null ? source : source.slice(task[0].length)),
         list: ordered ? "ordered" : task === null ? "bullet" : task[1] === " " ? "unchecked" : "checked",
         indent: listLevel(column, contentColumn),
       });
@@ -1708,27 +1844,12 @@ export function importMarkdown(markdown: string): ImportedDoc {
     if (heading !== null) {
       flush();
       const level = (heading[1] ?? "#").length as HeadingLevel;
-      blocks.push({ ...proseBlock("heading", (heading[2] ?? "").trim()), level });
+      blocks.push({ ...prose("heading", (heading[2] ?? "").trim()), level });
       continue;
     }
 
     paragraph.push(line);
   }
   flush();
-
-  let title = front.title ?? "";
-  if (front.title === undefined) {
-    const first = blocks[0];
-    if (first !== undefined && first.type === "heading" && first.level === 1) {
-      title = first.text;
-      blocks.shift();
-    }
-  }
-
-  // Preserve absent versus explicit empty identity/link fields for callers.
-  const result: ImportedDoc = { title, tags: front.tags ?? [], blocks };
-  if (front.uuid !== undefined) result.uuid = front.uuid;
-  if (front.description !== undefined) result.description = front.description;
-  if (front.links !== undefined) result.links = front.links;
-  return result;
+  return finishImport(front, blocks);
 }

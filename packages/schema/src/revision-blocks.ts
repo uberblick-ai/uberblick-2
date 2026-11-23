@@ -141,6 +141,7 @@ function snapshotBlock(element: Y.XmlElement): RevisionBlock {
     if (block.language !== undefined) fields.language = block.language;
     if (block.list !== undefined) fields.list = block.list;
     if (block.indent !== undefined) fields.indent = block.indent;
+    if (block.label !== undefined) fields.label = block.label;
     if (block.type === "callout") {
       fields.variant = element.getAttribute("variant") ?? "note";
       const icon = element.getAttribute("icon");
@@ -181,7 +182,7 @@ function markReader(runs: readonly InlineRun[]): (length: number) => MarkSlice[]
 
 function markKey(marks: InlineMarkSet, field: "formatting" | "link"): string {
   return field === "link" ? contentKey(marks.docLink ?? marks.link ?? null)
-    : contentKey([marks.bold === true, marks.italic === true, marks.strike === true, marks.inlineCode === true]);
+    : contentKey([marks.bold === true, marks.italic === true, marks.strike === true, marks.inlineCode === true, marks.footnoteRef === true]);
 }
 
 function markSignature(slices: readonly MarkSlice[], field: "formatting" | "link", lengths: boolean): string {

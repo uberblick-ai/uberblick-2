@@ -110,7 +110,7 @@ export const inputSchema = strictInput(
     blocks: z
       .array(blockInputSchema)
       .optional()
-      .describe("Initial blocks, in order."),
+      .describe("Initial blocks, in order, with all footnotes after the other blocks."),
     sidebar: sidebarPlacementArg,
   },
   CREATE_DOC_LIFECYCLE_MODES,
@@ -142,8 +142,16 @@ function initialBlocks(
     const failure = decisionAnswerShapeFailure(blocks ?? []);
     if (failure !== null) throw new ToolError(failure, "Decision answers use at most three paragraphs, code blocks, tables or lists.", lifecycle);
   }
-  // Resolve all seed targets before creating a document.
-  const inputs = (blocks ?? []).map(context.blockInputFor);
+  let notesStarted = false;
+  for (const block of blocks ?? []) {
+    if (block.type === "footnote") notesStarted = true;
+    else if (notesStarted) throw new ToolError("footnote_position", "Footnotes must follow all other seed blocks. Nothing was created.", {
+      recoveryClass: "manual",
+      recovery: "Order the create_doc seed blocks with all body blocks first and every footnote after them, then call again. Nothing was created.",
+    });
+  }
+  // Resolve all seed targets and validate notes before creating a document.
+  const inputs = (blocks ?? []).map(block => context.blockInputFor(block, lifecycle?.kind !== "decision"));
   if (lifecycle?.kind === "decision" && lifecycle.status === "decided") {
     const failure = decisionAnswerFailure(inputs, tldr === undefined ? {} : { tldr });
     if (failure !== null) throw new ToolError(failure, "A decided record needs a non-empty answer in one to three supported content blocks.", lifecycle);
