@@ -147,6 +147,9 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
+    "Footnote seeds use `type: \"footnote\"`, a required `label` and prose `text` or `inline`. Put every footnote after all other seeds; " +
+    "`footnote_position` refuses invalid ordering before creating anything. Eligible regular-document prose reads newly written `[^label]` as a reference; " +
+    "an explicit reference run uses `footnoteRef: true` on exactly one `[^label]`. Notes and decision answers take no references. See markdown for labels and literal contexts. " +
     "List-item seeds accept optional `list` (`bullet`, `ordered`, `unchecked` or `checked`, default `bullet`) and `indent` " +
     "(integer 0–3, default 0). These fields apply only to list-item blocks; invalid values refuse before " +
     "creating anything. For example, `{\"type\":\"list-item\",\"text\":\"Review notes\",\"list\":\"ordered\",\"indent\":2}` " +
@@ -244,8 +247,9 @@ export const toolHelpDetails = {
     "## What comes back\n" +
     "\n" +
     "- List items return `list` (`bullet`, `ordered`, `unchecked` or `checked`) and `indent` (0–3). Checklist styles correspond to Markdown `- [ ]` and `- [x]`; their markers are not part of `text`. `get_revision` returns the same list fields.\n" +
+    "- Footnotes return `type: \"footnote\"`, `label` and their prose text and formatting. References return as separate `inline` runs with `footnoteRef: true` and exactly one `[^label]`, including adjacent references. `get_revision` returns the same fields.\n" +
     "- Metadata: `title`, `description` and `tldr` (null when unwritten), `tags`, `links` and, when known, `createdAt`: the creation time as an ISO 8601 UTC string on the creating replica's clock, such as `2026-10-21T18:36:13.213Z`. It is omitted when unknown or outside the supported date range. A regular page whose TL;DR a person removed on purpose returns `tldrOptOut: true`; set_metadata explains opting back in.\n" +
-    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` returns the written characters without Markdown markup; stored links, including automatically linked web addresses, appear in `inline`. A formatted paragraph, heading, list item, quote or callout also carries `inline`: equally marked runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link` and `docLink`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
+    "- Blocks with `id`, `type`, `text` and `rev`. Prose `text` returns the written characters without Markdown markup; stored links, including automatically linked web addresses, appear in `inline`. A formatted paragraph, heading, list item, quote, callout or footnote also carries `inline`: runs, each with `text` and `marks`, covering the whole text in order. Marks are `bold`, `italic`, `strike`, `inlineCode`, `link`, `docLink` and `footnoteRef`; unmarked runs carry `marks: {}`. The runs use insert_block's input shape and can be passed back unchanged, subject to its normal validation of document-link targets. Plain prose and non-prose blocks omit `inline`. get_revision returns the same formatting runs for historical prose, without block edit revs. Tables return GFM and `column_widths`: one entry per column rounded to whole CSS pixels, or null for an unsized column. Widths stay outside block and page `rev`; historical reads omit them. Cards and embeds return their container content; see markdown. Prose that links other documents still carries `doc_links` ranges.\n" +
     "- Comment threads with their anchors, for annotate to reply to, resolve, move, edit or delete. Every comment returned by get_doc and annotate has a stable `id`, used as `comment_id` when editing or deleting. Edited comments also return `editedAt`, the last edit time as an ISO 8601 UTC string that the web's `(edited)` marker reads; unedited comments omit it. Comments may include `account`, the writing client's GitHub username, and `agent`, either `claude` or `codex`. These optional fields are display hints, not verified authorship. Stored principal identity and person/agent kind are not returned.\n" +
     "- `code_check` on regular pages: the latest comparison per repository, or [] when never checked.\n" +
     "- Decision context: a regular page lists the topics it owns (related) and the topics that link to it (linked), one list_docs topic row each that names the topic's records by UUID in `inForce`, `pending` and `conflicts`. A decision record returns its status, related pages in `related` (omitted when it has none), discussion, predecessors, successors and `resolution`: its topic's `inForce`, `pending` and `conflicts` as record UUIDs, plus `archived`. Predecessor and successor entries carry `createdAt` and `updatedAt`, topic rows `updatedAt`, when known, as ISO 8601 UTC strings; timestamps outside the supported date range are omitted. It is context, not permission to act; see decisions.\n" +
@@ -468,6 +472,10 @@ export const toolHelpDetails = {
   edit_block:
     "Replace one block's text by diff-and-splice: only the characters that actually changed are touched, so a " +
     "concurrent human edit elsewhere in the block survives.\n\n" +
+    "On a footnote, optional `label` changes its label with the same old_text/rev assertions; omission keeps it. " +
+    "Invalid labels or label on another block refuse with `invalid_footnote_label` before writing. Newly written `[^label]` " +
+    "becomes a reference only in regular-document paragraph, heading, list-item, quote or callout prose outside links and inline code. " +
+    "Notes and decision answers keep it literal. See markdown for the complete footnote contract.\n\n" +
     "Editing a chart also returns a `chart` summary beside the block's id and rev, using the web's projection " +
     "of this replica's current document data. It reports status, counts and warnings; a ready line mapping " +
     "includes its first and last x, with no other record values. A bound scatter mapping reports recordCount " +
@@ -572,6 +580,8 @@ export const toolHelpDetails = {
   move_block:
     "Move the nonempty, ordered `block_ids` array directly after `after_block_id`, or to the top when " +
     "it is omitted or null. The blocks need not be adjacent; unselected blocks keep their relative order. " +
+    "Place footnotes only among the notes ending the document, and body blocks before those notes; in a mixed selection put body blocks first. " +
+    "`footnote_position` refuses before writing and names a valid `after_block_id`. Notes already stored elsewhere stay there unless moved. " +
     "Each moved block keeps its id, type, attributes, content, inline marks and rev. Comment anchors keep " +
     "their offsets, table coordinates or card/Figma part; threads, replies and resolution are unchanged. " +
     "A thread whose marks survive only outside its recorded block already resolves to the first marked " +
@@ -593,6 +603,10 @@ export const toolHelpDetails = {
     "Insert the ordered, nonempty `blocks` array consecutively after `after_block_id`, or at the top " +
     "when it is omitted. Each entry has the shape of a `create_doc` seed plus optional table `column_widths`; a single block uses a " +
     "one-entry array. The answer's `blocks` lists the inserted blocks in order, each with id and rev. " +
+    "Footnotes use `type: \"footnote\"`, required `label`, and prose `text` or `inline`. Place notes only among the notes ending " +
+    "the document, and body blocks before those notes; mixed batches put body blocks first. `footnote_position` refuses with a valid " +
+    "`after_block_id` and the first invalid `entry_index`. Writing `[^label]` in eligible prose creates a reference, or supply exactly " +
+    "one reference in a run marked `footnoteRef: true`. Invalid labels and explicit runs refuse before any write. See markdown. " +
     "Each chart entry also has a `chart` summary of the web's projection of this replica's current data: " +
     "status, counts and warnings, plus first and last x for ready line mappings. Bound scatter mappings report " +
     "recordCount and plottedCount without record values, and warn when their group field has more than eight values. " +

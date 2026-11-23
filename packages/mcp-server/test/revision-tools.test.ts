@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
-  encodeRevisionResponseFrames, getMeta, readRevisionRequest, readRevisionResponse, roomForDoc,
+  appendBlock, encodeRevisionResponseFrames, getBlocksWithInline, getMeta, getMetaMap, readRevisionRequest, readRevisionResponse, roomForDoc,
   snapshotRevision, upsertDirectoryEntry,
   type RevisionRequest, type RevisionResponse,
 } from "@uberblick/schema";
@@ -126,7 +126,110 @@ function refusal(result: ToolCall, code: string) {
   expect(result.payload).not.toHaveProperty("records");
 }
 
+/** Released readers project an unknown note as prose and omit its new attribute and mark. */
+function releasedFootnoteChecksum(document: Y.Doc): string {
+  const released = new Y.Doc();
+  try {
+    getMetaMap(released).set("title", getMeta(document).title);
+    for (const { block, inline } of getBlocksWithInline(document)) {
+      const { label: _label, ...fields } = block;
+      appendBlock(released, { ...fields, type: block.type === "footnote" ? "paragraph" : block.type,
+        inline: inline.map(({ text, marks: { footnoteRef: _ref, ...marks } }) => ({ text, marks })) });
+    }
+    return createHash("sha256").update(snapshotRevision(released).checksum).digest("hex");
+  } finally {
+    released.destroy();
+  }
+}
+
 describe("historical reads through the MCP boundary", () => {
+  it("refuses released footnote checksums at the real hub name and restore guards without writes", async () => {
+    const { rig, uuid } = await admitted();
+    const page = await rig.ok("get_doc", { uuid });
+    await rig.ok("insert_block", { uuid, after_block_id: page.blocks[0].id, blocks: [
+      { type: "paragraph", text: "Reference[^one]" }, { type: "footnote", label: "one", text: "Note" },
+    ] });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const earlier = (await rig.ok("name_revision", { uuid, name: "Updated client" })).revision;
+    const document = rig.instance.replicas.replica(uuid).doc;
+    const legacyChecksum = releasedFootnoteChecksum(document);
+    expect(legacyChecksum).not.toBe(createHash("sha256").update(snapshotRevision(document).checksum).digest("hex"));
+    const beforeHistory = (await rig.ok("list_revisions", { uuid, refresh: true })).revisions;
+    const before = Y.encodeStateAsUpdate(document);
+    const logged = rig.instance.store.logSize();
+    const request = rig.instance.replicas.sync.requestRevisions.bind(rig.instance.replicas.sync);
+    const requests = vi.spyOn(rig.instance.replicas.sync, "requestRevisions").mockImplementation((room, operation, ...options) =>
+      request(room, operation.operation === "name" || operation.operation === "restore"
+        ? { ...operation, checksum: legacyChecksum } : operation, ...options));
+    for (const [tool, args] of [
+      ["name_revision", { uuid, name: "Released client" }],
+      ["restore_revision", { uuid, revision: earlier.id }],
+    ] as const) {
+      expect(await rig.call(tool, args)).toMatchObject({ isError: true, payload: {
+        error: "revision_stale_state", applied: false, partial: false, synced: false,
+      } });
+      expect(Y.encodeStateAsUpdate(document)).toEqual(before);
+      expect(rig.instance.store.logSize()).toBe(logged);
+    }
+    requests.mockRestore();
+    expect((await rig.ok("list_revisions", { uuid, refresh: true })).revisions).toEqual(beforeHistory);
+  });
+
+  it("refuses footnote snapshots recorded with a released hub's checksum without changing live content", async () => {
+    const fixture = await admitted();
+    const { rig, uuid } = fixture;
+    const page = await rig.ok("get_doc", { uuid });
+    await rig.ok("insert_block", { uuid, after_block_id: page.blocks[0].id, blocks: [
+      { type: "paragraph", text: "Reference[^one]" }, { type: "footnote", label: "one", text: "Note" },
+    ] });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const document = rig.instance.replicas.replica(uuid).doc;
+    const state = snapshotRevision(document).state;
+    const checksum = releasedFootnoteChecksum(document);
+    fixture.reply((request, send) => send(request.operation === "list"
+      ? { requestId: request.requestId, ok: true, revisions: [{ id: revision, author: null, startedAt: 100, endedAt: 200, checksum }], version: "released-hub" }
+      : { requestId: request.requestId, ok: true, state, revisionId: revision, checksum }));
+    const before = Y.encodeStateAsUpdate(document);
+    const logged = rig.instance.store.logSize();
+    await rig.ok("list_revisions", { uuid, refresh: true });
+    refusal(await rig.call("get_revision", { uuid, revision }), "revisions_unreachable");
+    expect(Y.encodeStateAsUpdate(document)).toEqual(before);
+    expect(rig.instance.store.logSize()).toBe(logged);
+  });
+
+  it("names, reads and restores footnote labels and adjacent reference runs through an updated hub", async () => {
+    const { rig, uuid } = await admitted();
+    const current = await rig.ok("get_doc", { uuid });
+    await rig.ok("insert_block", { uuid, after_block_id: current.blocks[0].id, blocks: [
+      { type: "paragraph", text: "Read[^note][^missing]" },
+      { type: "footnote", label: "note", inline: [{ text: "Original note", marks: { italic: true } }] },
+    ] });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const earlier = (await rig.ok("name_revision", { uuid, name: "With footnotes" })).revision;
+    const snapshot = await rig.ok("get_revision", { uuid, revision: earlier.id });
+    expect(snapshot.blocks[1]).toMatchObject({ text: "Read[^note][^missing]", inline: [
+      { text: "Read", marks: {} },
+      { text: "[^note]", marks: { footnoteRef: true } },
+      { text: "[^missing]", marks: { footnoteRef: true } },
+    ] });
+    expect(snapshot.blocks[2]).toMatchObject({ type: "footnote", label: "note", text: "Original note",
+      inline: [{ text: "Original note", marks: { italic: true } }] });
+    const note = (await rig.ok("get_doc", { uuid })).blocks[2];
+    await rig.ok("edit_block", { uuid, block_id: note.id, old_text: note.text, new_text: note.text, rev: note.rev,
+      label: "changed" });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const later = (await rig.ok("name_revision", { uuid, name: "Changed label" })).revision;
+    expect(later.id).not.toBe(earlier.id);
+    expect((await rig.ok("get_revision", { uuid, revision: later.id })).blocks[2]).toMatchObject({ label: "changed" });
+    await rig.ok("delete_block", { uuid, block_id: note.id });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    expect(await rig.ok("restore_revision", { uuid, revision: earlier.id })).toMatchObject({ applied: true, synced: true });
+    expect(await rig.instance.replicas.waitForSettled()).toMatchObject({ caughtUp: true });
+    const restored = await rig.ok("get_doc", { uuid });
+    expect(restored.blocks[1].inline).toEqual(snapshot.blocks[1].inline);
+    expect(restored.blocks[2]).toMatchObject({ type: "footnote", label: "note", text: "Original note", inline: snapshot.blocks[2].inline });
+  });
+
   it.each(["name_revision", "restore_revision"] as const)("refuses %s if its session loses write scope while the hub request waits", async name => {
     const { rig, uuid } = await admitted();
     const replicas = rig.instance.replicas;

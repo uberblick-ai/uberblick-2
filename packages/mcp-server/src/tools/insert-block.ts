@@ -6,6 +6,7 @@ import { strictInput } from "../inputs.js";
 import { insertedBlockInputSchema, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 import { summarizeWrittenBlocks } from "./chart-summary.js";
+import { footnotePositionError, footnotePositionFailure } from "./footnote-position.js";
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -13,8 +14,8 @@ export const inputSchema = strictInput({
     .string()
     .min(1)
     .nullish()
-    .describe("Insert after this block. Omit or null to insert first."),
-  blocks: z.array(insertedBlockInputSchema).min(1).describe("Blocks to insert consecutively, in order. A single block is a one-entry array."),
+    .describe("Insert after this block. Omit or null to insert first. Body blocks go before the trailing footnotes; footnotes go among those trailing notes."),
+  blocks: z.array(insertedBlockInputSchema).min(1).describe("Blocks to insert consecutively, in order, with footnotes after other blocks. A single block is a one-entry array."),
 });
 
 export const insertBlockOperation = documentOperation({ content: true, contentDurability: true }, inputSchema, (context, { uuid, after_block_id, blocks }, _request, replica) => {
@@ -23,6 +24,8 @@ export const insertBlockOperation = documentOperation({ content: true, contentDu
   const after = after_block_id == null ? -1 : existing.findIndex(block => block.id === after_block_id);
   if (after_block_id != null && after === -1) throw new BlockNotFoundError(after_block_id);
   const decision = getMeta(replica.doc, replica.id).kind === "decision";
+  const positionFailure = footnotePositionFailure(existing, blocks, after_block_id ?? null);
+  if (positionFailure !== null) throw footnotePositionError(positionFailure.afterBlockId, positionFailure.entry);
 
   // Yjs cannot roll back. Build the entire update off-replica before applying it
   // once, so a later refusal never reaches the log, observers or peers.
@@ -40,7 +43,7 @@ export const insertBlockOperation = documentOperation({ content: true, contentDu
           ]);
           if (failure !== null) throw new ToolError(failure, "Decision answers use at most three paragraphs, code blocks, tables or lists.", { uuid });
         }
-        anchor = insertBlock(draft, anchor, blockInputFor(entry));
+        anchor = insertBlock(draft, anchor, blockInputFor(entry, !decision));
         ids.push(anchor);
       } catch (error) {
         const { error: code, message, ...detail } = toFailure({ name: "insert_block", writes: "document" }, error).payload;

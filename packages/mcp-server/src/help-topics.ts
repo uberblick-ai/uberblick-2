@@ -192,6 +192,18 @@ Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:1
 
 Write emoji as characters, such as 😃 or 🚀. MCP never converts \`:name:\` to emoji: \`:smiley:\` and \`:rocket:\` remain literal in writes, reads and Markdown import/export. The web editor's typed emoji conversion does not apply to MCP or imported Markdown.
 
+## Footnotes
+
+Write a reference as \`text[^label]\` and its one-paragraph note as \`[^label]: note\`. Labels have one or more characters other than whitespace, \`[\`, \`]\` or backslash, and match ignoring case. The first note with a label supplies its reference; duplicate and unused notes and references without a note are kept. Import places notes after the other blocks, in first-reference order followed by unused notes; export preserves labels, text and references through another import.
+
+References are prose only. They stay literal in inline code, link text, source blocks, tables, cards, Figma captions, notes and decision answers. Escape a reference's opening bracket to keep literal reference-like text in Markdown. Existing literal stored text stays literal until rewritten or imported again.
+
+Over MCP, writing \`[^label]\` in eligible prose creates a reference, or supply one exact \`[^label]\` inline run with \`marks: {footnoteRef: true}\`. \`get_doc\` and \`get_revision\` return each reference as its own run, including adjacent references. Add a note with \`{type: "footnote", label: "label", text: "note"}\` through \`create_doc\` or \`insert_block\`; \`inline\` keeps its formatting. \`edit_block\` changes its text or \`label\`, and \`delete_block\` removes it. Missing or malformed labels refuse with \`invalid_footnote_label\`; an invalid explicit reference run refuses with \`invalid_footnote_reference\`, before writing anything.
+
+\`insert_block\` and \`move_block\` place notes only among the notes ending the document and body blocks before those notes. A \`footnote_position\` refusal supplies a valid \`after_block_id\`; put body blocks before notes in a mixed batch. \`create_doc\` seeds must likewise put all notes last. Notes stored elsewhere stay where they are until moved; moving them to the end is allowed. \`search\` includes note text.
+
+Footnote history needs an updated client and hub. Released clients keep live reference text, note text, labels and marks through edits and moves, but naming or restoring these revisions refuses with \`revision_stale_state\`, and reading a footnote snapshot refuses with \`revisions_unreachable\`. Updating the client and hub is the fix; retrying the unchanged call cannot help. A released hub's footnote snapshots remain unverifiable after it updates.
+
 ## Toggle headings
 
 A toggle heading is a heading whose text starts with \`> \` (a \`>\` and a space). For Markdown import, use an ATX heading:

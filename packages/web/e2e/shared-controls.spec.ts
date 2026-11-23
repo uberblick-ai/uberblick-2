@@ -93,6 +93,38 @@ async function openCalloutFixture(browser: Browser, options: BrowserContextOptio
   return page;
 }
 
+test("footnotes stay plain editable text and retain their labels and references @webkit-touch", async ({ page }, info) => {
+  const url = new URL(calloutFixtureUrl);
+  url.searchParams.set("footnotes", "");
+  await page.goto(url.href);
+  await expect(page.locator("[data-callout-controls-ready=true]")).toBeVisible();
+  const paragraph = page.locator(".tiptap > p").first();
+  const note = page.locator("[data-block-type=footnote]");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expect(paragraph).toHaveText("Read [^Source]");
+    await expect(note).toHaveText("Kept note");
+    await expect(note).toBeVisible();
+    await expect(page.getByText("This block needs a newer version.", { exact: true })).toHaveCount(0);
+  }
+  if (info.project.use.hasTouch === true) await paragraph.tap();
+  else await paragraph.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" afterward");
+  if (info.project.use.hasTouch === true) await note.tap();
+  else await note.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" amended");
+  await expect(paragraph).toHaveText("Read [^Source] afterward");
+  await expect(note).toHaveText("Kept note amended");
+  await expect.poll(async () => JSON.parse(await page.getByLabel("Stored editor blocks").textContent() ?? "[]")).toMatchObject([
+    { type: "paragraph", text: "Read [^Source] afterward", inline: [
+      { text: "Read ", marks: {} }, { text: "[^Source]", marks: { footnoteRef: true } }, { text: " afterward", marks: {} },
+    ] },
+    { type: "footnote", label: "Source", text: "Kept note amended" },
+  ]);
+});
+
 function documentListUrl(scenario = "controls", state = "all"): string {
   const url = new URL(fixtureUrl);
   url.searchParams.set("document-list", scenario);

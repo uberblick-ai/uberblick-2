@@ -15,7 +15,7 @@
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
 import { COMMENT_MARK, MAX_LIST_INDENT, LIST_STYLES } from "@uberblick/schema";
 import type { HeadingLevel, ListIndent } from "@uberblick/schema";
-import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
+import { FOOTNOTE_MARKS, PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
 import {
   codeBlockChrome,
   sourceBlockView,
@@ -94,6 +94,31 @@ export const Paragraph = Node.create({
   },
   renderHTML({ HTMLAttributes }) {
     return ["p", mergeAttributes({ class: "ub-paragraph" }, HTMLAttributes), 0];
+  },
+});
+
+// known limit: splitting a note can repeat its label and trailing blocks can follow notes; revisit when the web has footnote controls.
+export const Footnote = Node.create({
+  name: "footnote",
+  group: "block",
+  content: "inline*",
+  marks: FOOTNOTE_MARKS,
+  addAttributes() {
+    return {
+      id: idAttribute,
+      label: {
+        default: null as string | null,
+        parseHTML: (element: HTMLElement): string | null => element.getAttribute("data-footnote-label"),
+        renderHTML: (attributes: Record<string, unknown>): Record<string, string> =>
+          typeof attributes.label === "string" ? { "data-footnote-label": attributes.label } : {},
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "p[data-block-type=footnote]", priority: 60 }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["p", mergeAttributes({ class: "ub-paragraph", "data-block-type": "footnote" }, HTMLAttributes), 0];
   },
 });
 
@@ -373,6 +398,7 @@ export const paletteExtensions = [
   Doc,
   Text,
   Paragraph,
+  Footnote,
   UnsupportedBlock,
   Divider,
   Heading,

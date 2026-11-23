@@ -8,7 +8,8 @@ import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { findWebAddresses } from "./autolinks.js";
 import { snapshotCommentAnchors, widenShortenedCommentAnchors } from "./comment-edit.js";
-import { getBlocksFragment } from "./doc.js";
+import { getBlocksFragment, getMeta } from "./doc.js";
+import { acceptsFootnoteReferences, footnoteReferences, isFootnoteLabel, validateFootnoteInput } from "./footnotes.js";
 import { CARD_PARTS, buildCardElement, cardButtons, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
 import type { CardButton, CardInline } from "./card.js";
 import { isCalloutIcon, isCalloutVariant, validateCalloutAttributes } from "./callout.js";
@@ -208,6 +209,10 @@ export function toBlock(element: Y.XmlElement): Block {
     const language = element.getAttribute("language") ?? "";
     return { id, type, text, rev: blockRev({ type, text, language }), language };
   }
+  if (type === "footnote") {
+    const label = element.getAttribute("label") ?? "";
+    return { id, type, text, label, rev: blockRev({ type, text, label }) };
+  }
   if (type === "list-item") {
     const list = listOf(element);
     const indent = indentOf(element);
@@ -349,6 +354,7 @@ function validateColumnWidthsType(type: BlockType, widths: unknown): void {
 
 function buildElement(id: string, input: BlockInput): Y.XmlElement {
   // Validate before insertion: Yjs transactions cannot roll back stray blocks.
+  validateFootnoteInput(input);
   validateColumnWidthsType(input.type, input.columnWidths);
   if (input.type === "divider") {
     if ((input.text ?? "") !== "" || (input.inline?.length ?? 0) > 0) {
@@ -385,6 +391,7 @@ function buildElement(id: string, input: BlockInput): Y.XmlElement {
 
   const element = new Y.XmlElement(input.type);
   element.setAttribute("id", id);
+  if (input.type === "footnote" && input.label !== undefined) element.setAttribute("label", input.label);
   if (input.type === "heading") {
     element.setAttribute("level", String(normalizeLevel(input.level)));
   }
@@ -636,6 +643,8 @@ export interface EditBlockOptions {
   variant?: CalloutVariant;
   /** Callout icon to set in place; an empty value removes the override. */
   icon?: string;
+  /** Footnotes only; omitted labels remain unchanged. */
+  label?: string;
   /** Surviving old GFM positions, or null for newly created rows and columns. */
   tableMapping?: TableMapping;
   /** Tables only: one positive whole CSS-pixel width or null per new column. */
@@ -661,10 +670,43 @@ function validateCalloutEdit(type: BlockType, options: EditBlockOptions): void {
   validateCalloutAttributes(options, true);
 }
 
-function writeCalloutAttributes(element: Y.XmlElement, options: EditBlockOptions): void {
+function writeProseAttributes(element: Y.XmlElement, options: EditBlockOptions): void {
   if (options.variant !== undefined) element.setAttribute("variant", options.variant);
   if (options.icon === "") element.removeAttribute("icon");
   else if (options.icon !== undefined) element.setAttribute("icon", options.icon);
+  if (options.label !== undefined) element.setAttribute("label", options.label);
+}
+
+function validateFootnoteEdit(type: BlockType, label: string | undefined): void {
+  if (label !== undefined && (type !== "footnote" || !isFootnoteLabel(label))) {
+    throw new SchemaError("invalid_footnote_label", "label applies only to footnotes and must exclude whitespace, brackets and backslashes");
+  }
+}
+
+function referenceEditedText(text: Y.XmlText, source: string, inserted: Array<{ from: number; to: number }>, type: BlockType, enabled: boolean): void {
+  if (!enabled || !acceptsFootnoteReferences(type)) return;
+  const protectedRanges: Array<{ from: number; to: number }> = [];
+  const markedRanges: Array<{ from: number; to: number }> = [];
+  let offset = 0;
+  for (const op of text.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>) {
+    if (typeof op.insert !== "string") continue;
+    const end = offset + op.insert.length;
+    if (op.attributes?.footnoteRef) markedRanges.push({ from: offset, to: end });
+    offset = end;
+  }
+  offset = 0;
+  for (const run of readInlineRuns(text)) {
+    const end = offset + run.text.length;
+    if (run.marks.inlineCode || run.marks.link !== undefined || run.marks.docLink !== undefined) protectedRanges.push({ from: offset, to: end });
+    offset = end;
+  }
+  const references = footnoteReferences(source).filter((match) =>
+    !protectedRanges.some((range) => range.from < match.to && match.from < range.to)
+    && (inserted.some((range) => range.from < match.to && match.from < range.to)
+      || markedRanges.some((range) => range.from <= match.from && match.to <= range.to)));
+  // Splices inherit left marks, so clear inherited tails and broken references.
+  for (const range of markedRanges) text.format(range.from, range.to - range.from, { footnoteRef: null });
+  for (const match of references) text.format(match.from, match.to - match.from, { footnoteRef: {} });
 }
 
 function linkEditedAddresses(text: Y.XmlText, source: string, inserted: Array<{ from: number; to: number }>, type: BlockType, enabled = false): void {
@@ -736,6 +778,7 @@ export function editBlock(
     }
     validateListAttributes(current.type, options);
     validateCalloutEdit(current.type, options);
+    validateFootnoteEdit(current.type, options.label);
     validateColumnWidthsType(current.type, options.columnWidths);
     if (current.type === "table") {
       const parsedOld = parseTableInput(oldText);
@@ -756,7 +799,7 @@ export function editBlock(
     }
     if (options.list !== undefined) element.setAttribute("list", options.list);
     if (options.indent !== undefined) element.setAttribute("indent", String(options.indent));
-    writeCalloutAttributes(element, options);
+    writeProseAttributes(element, options);
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);
@@ -776,6 +819,7 @@ export function editBlock(
     }
 
     linkEditedAddresses(text, newText, inserted, current.type, options.autolink);
+    referenceEditedText(text, newText, inserted, current.type, getMeta(ydoc).kind !== "decision");
 
     widenShortenedCommentAnchors(text, anchors);
 

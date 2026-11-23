@@ -38,6 +38,43 @@ function mount(before: Y.Doc | null, after: Y.Doc) {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("the detached revision view", () => {
+  it("shows added, removed and relabelled notes and reference changes in both comparisons", () => {
+    const before = new Y.Doc();
+    appendBlock(before, { type: "paragraph", inline: [{ text: "Read [^Source]", marks: {} }] });
+    appendBlock(before, { type: "footnote", label: "Source", text: "Kept note" });
+    const removed = appendBlock(before, { type: "footnote", label: "Removed", text: "Earlier note" });
+    const after = clone(before);
+    const paragraph = getBlocksFragment(after).get(0) as Y.XmlElement;
+    (paragraph.firstChild as Y.XmlText).format(5, "[^Source]".length, { footnoteRef: {} });
+    const note = getBlocksFragment(after).get(1) as Y.XmlElement;
+    note.setAttribute("label", "Relabelled");
+    deleteBlock(after, removed);
+    appendBlock(after, { type: "footnote", label: "Added", text: "Later note" });
+    const original = Y.encodeStateAsUpdate(before);
+    const current = Y.encodeStateAsUpdate(after);
+    const inline = mount(before, after);
+    const left = document.body.appendChild(document.createElement("div"));
+    const right = document.body.appendChild(document.createElement("div"));
+    const split = createRevisionSplit({ beforeElement: left, afterElement: right, before, after });
+    try {
+      const model = revisionViewModel(before, after);
+      expect(model.comparison?.blocks.find((block) => block.afterIndex === 0)?.kind).toBe("changed");
+      expect(model.comparison?.blocks.find((block) => block.afterIndex === 1)?.fields).toContain("label");
+      for (const element of [inline.element, left, right]) {
+        expect(element.querySelector(".ub-unsupported-block")).toBeNull();
+        expect(element.textContent).toContain("Kept note");
+        expect(element.textContent).toContain("Read [^Source]");
+      }
+      expect(inline.element.textContent).toContain("Changed: label");
+      expect(inline.element.querySelector("[data-footnote-label=Removed] .ub-revision-removed")?.textContent).toBe("Earlier note");
+      expect(inline.element.querySelector("[data-footnote-label=Added] .ub-revision-added")?.textContent).toBe("Later note");
+      expect(left.querySelector("[data-footnote-label=Source]")).not.toBeNull();
+      expect(right.querySelector("[data-footnote-label=Relabelled]")).not.toBeNull();
+      expect(Y.encodeStateAsUpdate(before)).toEqual(original);
+      expect(Y.encodeStateAsUpdate(after)).toEqual(current);
+    } finally { inline.destroy(); split.destroy(); left.remove(); right.remove(); before.destroy(); after.destroy(); }
+  });
+
   it("labels added and removed dividers in both views and counts an unchanged divider in folded blocks", () => {
     const before = new Y.Doc();
     const removed = appendBlock(before, { type: "divider" });

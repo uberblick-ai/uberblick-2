@@ -15,6 +15,9 @@ import {
   isCalloutVariant,
   isCalloutIcon,
   linkifyInline,
+  acceptsFootnoteReferences,
+  referenceInline,
+  validateFootnoteInput,
   InvalidCalloutError,
   parseTableCell,
   parseTableInput,
@@ -85,6 +88,7 @@ function inlineMarks(
     ...(marks.italic === true ? { italic: true } : {}),
     ...(marks.strike === true ? { strike: true } : {}),
     ...(marks.inlineCode === true ? { inlineCode: true } : {}),
+    ...(marks.footnoteRef === true ? { footnoteRef: true } : {}),
     ...(marks.link === undefined ? {} : { link: marks.link }),
     ...(marks.docLink === undefined ? {} : { docLink: marks.docLink }),
   };
@@ -108,6 +112,7 @@ function toBlockInput(
     ...(input.indent === undefined ? {} : { indent: input.indent as ListIndent }),
     ...(input.variant === undefined ? {} : { variant: input.variant as CalloutVariant }),
     ...(input.icon === undefined ? {} : { icon: input.icon }),
+    ...(input.label === undefined ? {} : { label: input.label as string }),
     ...(input.column_widths === undefined ? {} : { columnWidths: input.column_widths as (number | null)[] }),
     ...(inline === undefined ? {} : { inline }),
   };
@@ -394,6 +399,7 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
    */
   const blockInputFor = (
     block: z.infer<typeof insertedBlockInputSchema>,
+    allowReferences = true,
   ): BlockInput => {
     // A bad later seed must not leave earlier blocks or metadata behind.
     if (block.type === "divider" && ((block.text ?? "") !== "" || (block.inline?.length ?? 0) > 0)) {
@@ -408,12 +414,15 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
       }
     }
     validateBlockTargets(block.type, block.text ?? "");
-    return toBlockInput(
-      block,
-      isProseBlockType(block.type)
-        ? linkifyInline(resolveInline(block.inline) ?? [{ text: block.text ?? "", marks: {} }])
-        : undefined,
-    );
+    const resolved = isProseBlockType(block.type) ? resolveInline(block.inline)
+      : block.inline?.map(run => ({ text: run.text, marks: inlineMarks(run.marks) }));
+    validateFootnoteInput(toBlockInput(block, resolved));
+    if (!allowReferences && resolved?.some(run => run.marks.footnoteRef)) {
+      throw new ToolError("invalid_footnote_reference", "Decision answers keep footnote syntax as literal text; remove footnoteRef. Nothing was written.");
+    }
+    if (!isProseBlockType(block.type)) return toBlockInput(block);
+    const linked = linkifyInline(resolved ?? [{ text: block.text ?? "", marks: {} }]);
+    return toBlockInput(block, allowReferences && acceptsFootnoteReferences(block.type) ? referenceInline(linked) : linked);
   };
 
   /**

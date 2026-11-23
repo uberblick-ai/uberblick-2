@@ -73,7 +73,7 @@ describe("callout attributes", () => {
     const text = type === "table" ? "| Header |\n| --- |\n| Body |"
       : type === "card" ? "title: Title"
       : type === "figma" ? "url: https://figma.com/design/key" : type === "divider" ? "" : "Text";
-    const id = appendBlock(doc, { type, text, variant: "invalid" as CalloutVariant, icon: "invalid" });
+    const id = appendBlock(doc, { type, text, ...(type === "footnote" ? { label: "note" } : {}), variant: "invalid" as CalloutVariant, icon: "invalid" });
     expect(getBlock(doc, id)).not.toHaveProperty("variant");
     expect(getBlock(doc, id)).not.toHaveProperty("icon");
     expect(findBlockElement(doc, id)?.getAttribute("variant")).toBeUndefined();

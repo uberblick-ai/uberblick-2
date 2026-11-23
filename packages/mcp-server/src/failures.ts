@@ -127,6 +127,18 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Supply type: \"divider\" with no text or inline content. Nothing was written.",
   },
+  invalid_footnote_label: {
+    recoveryClass: "manual",
+    guidance: "Supply a footnote label with one or more characters other than whitespace, [, ] or backslash. Use label only on footnote blocks. Nothing was written.",
+  },
+  invalid_footnote_reference: {
+    recoveryClass: "manual",
+    guidance: "Supply each footnoteRef run as exactly one [^label] in paragraph, heading, list-item, quote or callout prose, without inlineCode, link or docLink. Footnotes and decision answers take no references. Nothing was written.",
+  },
+  footnote_position: {
+    recoveryClass: "manual",
+    guidance: "Place all body blocks before the trailing notes and footnotes among those notes. Use the after_block_id in this failure for insert_block or move_block; order create_doc seeds with every footnote last. Nothing was written.",
+  },
   divider_not_editable: {
     recoveryClass: "manual",
     guidance: "A divider has no text to edit. Use move_block to reposition it or delete_block to remove it. Nothing was written.",

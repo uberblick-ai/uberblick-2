@@ -155,6 +155,7 @@ const readRuns = z.array(z.object({
     italic: z.boolean().optional(),
     strike: z.boolean().optional(),
     inlineCode: z.boolean().optional(),
+    footnoteRef: z.boolean().optional(),
     link: z.string().optional(),
     docLink: z.string().optional(),
   }).strict(),
@@ -168,6 +169,7 @@ function blockSchema(withLinks: boolean, withRev = true) {
   const prose = { ...fields, ...(withLinks ? linkRanges : {}) };
   return z.union([
     z.object({ ...prose, type: z.enum(["paragraph", "quote"]) }).strict(),
+    z.object({ ...prose, type: z.literal("footnote"), label: z.string() }).strict(),
     z.object({ ...prose, type: z.literal("callout"), variant: z.enum(CALLOUT_VARIANTS), icon: z.string().optional() }).strict(),
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(LIST_STYLES).describe("List style: bullet, ordered, unchecked (- [ ]) or checked (- [x])."), indent: z.number().int().min(0).max(MAX_LIST_INDENT) }).strict(),

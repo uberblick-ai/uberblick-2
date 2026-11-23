@@ -89,8 +89,9 @@ export const documentStatusArg = z
   .describe("The recorded lifecycle state. Its kind owns the legal values.");
 
 const INLINE_RUNS =
-  "Prose (paragraph, heading, list-item, quote, callout) runs `[{text, marks}]`: marks are bold, italic, strike, " +
-  "inlineCode, link (external http(s) URL) or docLink (document UUID). Replaces `text` with joined run texts. " +
+  "Prose (paragraph, heading, list-item, quote, callout, footnote) runs `[{text, marks}]`: marks are bold, italic, strike, " +
+  "inlineCode, link (external http(s) URL), docLink (document UUID) or footnoteRef (true on exactly one [^label]). Replaces `text` with joined run texts. " +
+  "Unescaped [^label] becomes a reference in regular-document prose, outside links and inline code; not inside footnotes or decision answers. " +
   "Bare http(s) and www. addresses become external links outside existing link, docLink and inlineCode runs. " +
   "Code, terminal and chart ignore it and use literal `text`; tables, cards and figma ignore it and parse inline " +
   "Markdown from `text` (one GFM table or content inside :::card/:::figma). Empty docLink text takes the target's " +
@@ -124,6 +125,7 @@ export const inlineArg = z
             italic: z.boolean().optional(),
             strike: z.boolean().optional(),
             inlineCode: z.boolean().optional(),
+            footnoteRef: z.boolean().optional(),
             link: z
               .string()
               .regex(EXTERNAL_HREF, "a link is an external http(s) URL")
@@ -151,10 +153,14 @@ export const columnWidthsArg = z.unknown().meta({
   items: { anyOf: [{ type: "integer", exclusiveMinimum: 0 }, { type: "null" }] },
 }).optional().describe("Tables only: one positive whole CSS-pixel width or null per table column. Null clears; omission keeps widths. Sizing guidance: markdown help.");
 
+// Keep malformed labels for the model's named refusal before any write.
+export const footnoteLabelArg = z.unknown().meta({ type: "string" }).optional()
+  .describe("Footnotes only: required nonempty label without whitespace, [, ] or backslash. Labels match ignoring case; duplicates and unused labels are kept. On edit_block, omission keeps the label.");
+
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Prose with automatic links for bare web addresses (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, " +
+    "Prose with automatic links for bare web addresses and footnote references written as [^label] (`inline` supplies other formatting), literal code/terminal/chart source, exactly one GFM table, " +
       "or :::card/:::figma content without delimiters. See markdown help for cell formatting, container keys, " +
       "buttons and links. Invalid content refuses with invalid_table, invalid_card or invalid_figma before writing.",
   ),
@@ -173,6 +179,7 @@ export const blockShape = {
   indent: listIndentArg.optional().describe("List depth, an integer from 0 to 3. List items only; omitted means 0."),
   variant: z.string().optional().describe("Callout variant: note, tip, important, warning or caution; omitted means note. Ignored for other block types."),
   icon: z.string().optional().describe("Callout icon override: one emoji character or a curated :name: icon. Ignored for other block types."),
+  label: footnoteLabelArg,
   inline: inlineArg,
 };
 

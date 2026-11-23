@@ -22,7 +22,7 @@ import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
-import { PROSE_MARKS } from "./marks.js";
+import { FOOTNOTE_MARKS, PROSE_MARKS } from "./marks.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { findForeignBlocks } from "./palette.js";
 import { unchangedRuns } from "./revision-rows.js";
@@ -34,7 +34,7 @@ import { ToggleHeadings } from "./toggle-headings.js";
 import { WireframeBlocks } from "./wireframe.js";
 
 export const SOURCE_NODES = new Set(["code", "terminal", "chart"]);
-const INLINE_NODES = new Set(["paragraph", "heading", "list-item", "quote", "callout", ...SOURCE_NODES]);
+const INLINE_NODES = new Set(["paragraph", "footnote", "heading", "list-item", "quote", "callout", ...SOURCE_NODES]);
 
 const Added = Mark.create({
   name: "revisionAdded",
@@ -82,7 +82,7 @@ export function revisionPalette(ydoc: Y.Doc | null, before: Y.Doc | null = null)
   return [...paletteExtensions.map((base) => {
     const extension = base.name === "chart" ? ChartBlock.configure({ ydoc }) : base;
     if (!(extension instanceof TiptapNode) || !INLINE_NODES.has(extension.name)) return extension;
-    const marks = `${SOURCE_NODES.has(extension.name) ? COMMENT_MARK : PROSE_MARKS} revisionAdded removed`;
+    const marks = `${SOURCE_NODES.has(extension.name) ? COMMENT_MARK : extension.name === "footnote" ? FOOTNOTE_MARKS : PROSE_MARKS} revisionAdded removed`;
     if (!SOURCE_NODES.has(extension.name)) return extension.extend({ marks });
     return extension.extend({
       marks,

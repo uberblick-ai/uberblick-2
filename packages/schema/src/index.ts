@@ -77,6 +77,7 @@ export {
 
 export { EXTERNAL_HREF, isDocId, isExternalHref, readsAsMark } from "./marks.js";
 export { findWebAddresses, linkifyInline, matchWebAddress } from "./autolinks.js";
+export { acceptsFootnoteReferences, footnoteReferences, isFootnoteLabel, referenceInline, validateFootnoteInput } from "./footnotes.js";
 export type { WebAddress } from "./autolinks.js";
 export { readSyncedDocId } from "./synced-doc-id.js";
 export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";

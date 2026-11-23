@@ -40,6 +40,7 @@ const SAFE_THREAD_ID = /^[0-9A-Za-z-]{1,64}$/;
 
 const BLOCK_LABELS: Record<BlockType, string> = {
   paragraph: "Paragraph",
+  footnote: "Footnote",
   heading: "Heading",
   code: "Code block",
   "list-item": "List item",
