@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import type { Editor } from "@tiptap/core";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";
-import { appendBlock, applyDocData, createAnnotation, getBlockInline, getBlocks, getBlocksFragment, getMetaMap } from "@uberblick/schema";
+import { appendBlock, applyDocData, createAnnotation, getBlockInline, getBlocks, getBlocksFragment, getMetaMap, linkifyInline, referenceInline } from "@uberblick/schema";
 import type { CollectionSchema, DataRecord } from "@uberblick/schema";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { inlineValueRanges } from "../src/editor/inline-values.js";
@@ -101,6 +101,34 @@ it("keeps formatting and address typing after an inline-code value opener", () =
     typeText(editor, literal);
     expect(getBlocks(ydoc)[0]?.text).toContain(literal);
     expect(inlineValueRanges(editor.state.doc)).toHaveLength(1);
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
+it.each(["inlineCode", "link"] as const)("retains ordinary link, footnote and icon rendering after a %s value opener", (mark) => {
+  const ydoc = new Y.Doc();
+  appendBlock(ydoc, { type: "paragraph", inline: referenceInline(linkifyInline([
+    { text: ":value{", marks: mark === "inlineCode" ? { inlineCode: true } : { link: "https://protected.example.com" } },
+    { text: '"x":"text https://outside.example.com and [^outside] :claude:"}', marks: {} },
+  ])) });
+  appendBlock(ydoc, { type: "footnote", label: "outside", text: "Outside note" });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    expect(element.querySelector(".ub-inline-value-source")).toBeNull();
+    expect(element.querySelector('a[href="https://outside.example.com"]')?.textContent).toBe("https://outside.example.com");
+    expect(element.querySelector(".ub-footnote-reference")?.textContent).toBe("1");
+    expect(element.querySelector('.ub-inline-icon[data-icon="claude"]')).not.toBeNull();
+  } finally { editor.destroy(); ydoc.destroy(); }
+});
+
+it("keeps an icon inside a complete linked value source literal", () => {
+  const ydoc = new Y.Doc();
+  const literal = ':value{"collection":"results","filter":{"system":":claude:"},"field":"wer"}';
+  appendBlock(ydoc, { type: "paragraph", inline: [{ text: literal, marks: { link: "https://example.org" } }] });
+  const { editor, element } = mountEditor(ydoc);
+  try {
+    expect(element.querySelector(".ub-inline-value-source")).toBeNull();
+    expect(element.querySelector(".ub-inline-icon")).toBeNull();
+    expect(element.querySelector("a")?.textContent).toBe(literal);
   } finally { editor.destroy(); ydoc.destroy(); }
 });
 

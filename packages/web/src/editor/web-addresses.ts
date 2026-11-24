@@ -28,8 +28,9 @@ function addresses(doc: PMNode, range: Range): Address[] {
       unprotected += child.isText && !blocked ? child.text : "\ufffc".repeat(child.nodeSize);
     });
     const source = node.textBetween(0, node.content.size, "", "\n");
+    const matches = findWebAddresses(source, protectedRanges);
     protectedRanges.push(...scanValueSources(unprotected, { includeIncomplete: true }));
-    for (const match of findWebAddresses(source)) {
+    for (const match of matches) {
       const from = pos + 1 + match.from;
       const to = pos + 1 + match.to;
       if (from < range.from || to > range.to || protectedRanges.some((part) => part.from < match.to && match.from < part.to)) continue;

@@ -22,7 +22,14 @@ function ranges(node: ProseMirrorNode): { text: string; icons: IconRange[] } {
     text += child.isText ? child.text : "\ufffc".repeat(child.nodeSize);
     runs.push({ from: offset, to: offset + child.nodeSize, marks: child.marks });
   });
-  const values = scanValueSources(text);
+  const values = scanValueSources(text).filter((value) => {
+    const touched = runs.filter((run) => run.from < value.to && value.from < run.to);
+    const protectedRun = touched.find((run) => run.marks.some((mark) => mark.type.spec.code) || linkMark(run.marks) !== undefined);
+    if (protectedRun === undefined) return true;
+    const link = linkMark(protectedRun.marks);
+    return link === undefined ? touched.every((run) => run.marks.some((mark) => mark.type.spec.code))
+      : touched.every((run) => linkMark(run.marks)?.eq(link));
+  });
   const icons = inlineIconTokens(text).flatMap((token): IconRange[] => {
     if (values.some((value) => value.from < token.to && token.from < value.to)) return [];
     const touched = runs.filter((run) => run.from < token.to && token.from < run.to);

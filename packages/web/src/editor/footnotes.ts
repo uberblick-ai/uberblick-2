@@ -52,7 +52,9 @@ export function footnoteIndex(doc: PMNode): { references: FootnoteReference[]; n
       text += marked ? child.text : "\ufffc".repeat(child.nodeSize);
       runs.push({ from: offset, to: offset + child.nodeSize, marks: child.marks });
     });
-    const values = scanValueSources(node.textContent);
+    const values = scanValueSources(node.textContent).filter((value) => !runs.some((run) =>
+      run.from < value.to && value.from < run.to &&
+      run.marks.some((mark) => mark.type.spec.code || mark.type.name === "link" || mark.type.name === "docLink")));
     for (const range of footnoteReferences(text)) {
       if (values.some((value) => value.from < range.to && range.from < value.to)) continue;
       const touched = runs.filter((run) => run.from < range.to && range.from < run.to);

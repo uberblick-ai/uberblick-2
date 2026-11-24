@@ -158,6 +158,22 @@ function inlineValueSource(sources: ReturnType<typeof valueSourceMap>, source: s
   return sources.get(at) ?? (source[at] === "\\" ? sources.get(at + 1) : undefined);
 }
 
+function protectedInlineRanges(source: string): Array<{ from: number; to: number }> {
+  if (!source.includes(":value{")) return [];
+  const values = valueSourceMap(source, true, false);
+  const ranges: Array<{ from: number; to: number }> = [];
+  for (let at = 0; at < source.length;) {
+    const value = inlineValueSource(values, source, at);
+    if (value !== undefined) { at = value.to; continue; }
+    const code = source[at] === "`" ? matchCodeSpan(source, at) : null;
+    const link = source[at] === "[" ? matchLink(source, at) : null;
+    const next = code?.next ?? link?.next;
+    if (next !== undefined) ranges.push({ from: at, to: next });
+    at = next ?? at + 1;
+  }
+  return ranges;
+}
+
 function valueNewlineToken(source: string): string {
   let token = "\uE000value-newline\uE001";
   while (source.includes(token)) token += "\uE001";
@@ -1284,7 +1300,7 @@ function flanking(
 function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true, footnotes = false, values = table || footnotes): Token[] {
   const tokens: Token[] = [];
   const sources = valueSourceMap(source, values, inlineLinkTarget(marks) !== undefined);
-  const references = new Map((footnotes ? footnoteReferences(source) : []).map((reference) => [reference.from, reference] as const));
+  const references = new Map((footnotes ? footnoteReferences(source, protectedInlineRanges(source)) : []).map((reference) => [reference.from, reference] as const));
   let plain = "";
   const flush = (): void => {
     if (plain !== "") tokens.push({ kind: "text", text: plain, marks });

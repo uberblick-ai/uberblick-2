@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { appendBlock, editBlock, exportMarkdown, findBlockElement, getBlockInline, getBlocksWithInline, importMarkdown, initDoc, isSupportedTable, tableCellText, tableRows, writeGfmTable } from "../src/index.js";
+import { appendBlock, editBlock, exportMarkdown, findBlockElement, getBlock, getBlockInline, getBlocksWithInline, importMarkdown, initDoc, isSupportedTable, linkifyInline, referenceInline, tableCellText, tableRows, writeGfmTable } from "../src/index.js";
 import { renderInline } from "../src/markdown.js";
 
 const source = `:value${JSON.stringify({ collection: "results", filter: { system: '*_[]`\\[^note] https://example.com and <https://other.example.com> | \\| } "' }, field: "wer", format: "number", decimals: 1 })}`;
@@ -121,5 +121,34 @@ describe("Markdown inline data values", () => {
     text.insert(0, ':value{\n"collection":"results","filter":{"system":"x"},"field":"wer"}');
     expect(isSupportedTable(element)).toBe(false);
     doc.destroy();
+  });
+
+  it.each([
+    { inlineCode: true }, { link: "https://existing.example.com" }, { docLink: "11111111-1111-4111-8111-111111111111" },
+  ])("keeps ordinary address and footnote conversion after a protected source opener %j", (marks) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: "66666666-6666-4666-8666-666666666666", title: "Values" });
+    const tail = '"x":"text https://outside.example.com and [^outside]"}';
+    const seed = [{ text: ":value{", marks }, { text: tail, marks: {} }];
+    const id = appendBlock(doc, { type: "paragraph", inline: referenceInline(linkifyInline(seed)) });
+    const expected = [
+      { text: ":value{", marks }, { text: '"x":"text ', marks: {} },
+      { text: "https://outside.example.com", marks: { link: "https://outside.example.com" } },
+      { text: " and ", marks: {} }, { text: "[^outside]", marks: { footnoteRef: true } }, { text: '"}', marks: {} },
+    ];
+    expect(getBlockInline(doc, id)).toEqual(expected);
+    const edited = appendBlock(doc, { type: "paragraph", inline: [{ text: ":value{", marks }, { text: '"x":"placeholder"}', marks: {} }] });
+    const before = getBlock(doc, edited)!.text;
+    editBlock(doc, edited, before, `:value{${tail}`, { autolink: true });
+    expect(getBlockInline(doc, edited)).toEqual(expected);
+    doc.destroy();
+  });
+
+  it.each([
+    "`:value{`", "[:value{](https://existing.example.com)", "[:value{](11111111-1111-4111-8111-111111111111)",
+  ])("keeps outside references after Markdown code or link source text %s", (opener) => {
+    const imported = importMarkdown(`${opener} "x":"text https://outside.example.com and [^outside]"}`);
+    expect(imported.blocks[0]?.inline).toContainEqual({ text: "https://outside.example.com", marks: { link: "https://outside.example.com" } });
+    expect(imported.blocks[0]?.inline).toContainEqual({ text: "[^outside]", marks: { footnoteRef: true } });
   });
 });

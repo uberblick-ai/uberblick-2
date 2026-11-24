@@ -64,9 +64,10 @@ export function matchWebAddress(source: string, from = 0): WebAddress | null {
 }
 
 /** Address ranges in literal prose; this does not interpret Markdown formatting. */
-export function findWebAddresses(source: string): WebAddress[] {
+export function findWebAddresses(source: string, protectedRanges: readonly { from: number; to: number }[] = []): WebAddress[] {
   const result: WebAddress[] = [];
-  const values = new Map(scanValueSources(source).map((range) => [range.from, range]));
+  const values = new Map(scanValueSources(source).filter((value) =>
+    !protectedRanges.some((range) => range.from < value.to && value.from < range.to)).map((range) => [range.from, range]));
   for (let from = 0; from < source.length;) {
     const value = values.get(from);
     if (value !== undefined) { from = value.to; continue; }
@@ -88,7 +89,7 @@ export function linkifyInline(runs: readonly InlineRun[]): InlineRun[] {
     return run.marks.inlineCode === true || inlineLinkTarget(run.marks) !== undefined
       ? [{ from, to: offset }] : [];
   });
-  const addresses = findWebAddresses(source).filter((address) =>
+  const addresses = findWebAddresses(source, protectedRanges).filter((address) =>
     !protectedRanges.some((range) => range.from < address.to && range.to > address.from));
   const result: InlineRun[] = [];
   offset = 0;
