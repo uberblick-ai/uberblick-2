@@ -202,6 +202,23 @@ it("merges documents and current decision topics in shared relevance order while
   ]);
 });
 
+it("keeps memories in ordinary document rows, counts and shared search results without a kind badge", async () => {
+  const records = [
+    entry(ONE, "Ordinary document"),
+    entry(TWO, "Agent memory", { kind: "memory" }),
+    entry(THREE, "Archived memory", { kind: "memory", deleted: true }),
+    entry(FOUR, "Decision", { kind: "decision", status: "open" }),
+  ];
+  const api = { search: vi.fn(async () => [TWO, FOUR, THREE]) };
+  const { container } = await renderSettled(list({ entries: records, searchClient: api }));
+  expect(titles(container)).toEqual(["Agent memory", "Ordinary document"]);
+  expect(within(container).getByRole("tab", { name: "Documents2" }).getAttribute("aria-selected")).toBe("true");
+  expect(container.querySelector(".ub-lifecycle-badge")).toBeNull();
+  await search(container, "memory");
+  expect(titles(container)).toEqual(["Agent memory"]);
+  expect(rankDocumentSearchRows(documentSearchRows(records), [TWO, THREE, FOUR]).map((row) => row.uuid)).toEqual([TWO, FOUR]);
+});
+
 it("combines type, state, query and OR tags; chips and Clear tags preserve the other filters", async () => {
   const onSelect = vi.fn();
   const untagged = "00000000-0000-4000-8000-000000000005";

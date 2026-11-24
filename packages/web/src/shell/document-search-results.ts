@@ -24,7 +24,7 @@ export function documentSearchRows(entries: readonly DirectoryEntry[], groups: r
   for (const group of groups) {
     for (const uuid of group.docs) if (!groupOf.has(uuid)) groupOf.set(uuid, group.name);
   }
-  const documents = entries.filter((entry) => !entry.deleted && entry.kind === undefined)
+  const documents = entries.filter((entry) => !entry.deleted && entry.kind !== "decision")
     .map((entry) => ({ ...entry, pinned: groupOf.has(entry.uuid), groupName: groupOf.get(entry.uuid), recordIds: [entry.uuid] }));
   const topics = resolveDecisionTopics(entries).filter((topic) => !topic.archived).flatMap((topic) => {
     const current = decisionCurrentRecord(topic);

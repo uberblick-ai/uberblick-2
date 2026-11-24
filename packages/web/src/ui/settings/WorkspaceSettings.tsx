@@ -99,8 +99,8 @@ function GeneralSettings({
     connection !== null &&
     connection.room === directoryRoom(workspace.uuid) &&
     status.hasReceivedServerState;
-  const documents = entries.filter((entry) => !entry.kind && !entry.deleted).length;
-  const archived = entries.filter((entry) => !entry.kind && entry.deleted).length;
+  const documents = entries.filter((entry) => entry.kind !== "decision" && !entry.deleted).length;
+  const archived = entries.filter((entry) => entry.kind !== "decision" && entry.deleted).length;
   const tagsReceived = catalogConnection?.room === settingsRoom(workspace.uuid) && catalogStatus.hasReceivedServerState;
   const tags = tagsReceived ? catalog?.entries.length : null;
   const latest = entries.reduce<number | null>((stamp, entry) =>

@@ -736,12 +736,13 @@ export class Replicas {
         return;
       }
       // Live updates and rebuilds must keep archived documents out of the index.
-      if (meta.kind === "decision") this.repairStub(replica, authored);
+      const repairArchived = meta.kind === "decision" || meta.kind === "memory";
+      if (repairArchived) this.repairStub(replica, authored);
       if (isDirectoryEntryArchived(this.directory().doc, replica.id)) {
         this.store.unindexDoc(replica.id);
         return;
       }
-      if (meta.kind !== "decision") this.repairStub(replica, authored);
+      if (!repairArchived) this.repairStub(replica, authored);
       this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);

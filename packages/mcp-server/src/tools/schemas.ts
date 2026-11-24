@@ -1,7 +1,6 @@
 import {
   BLOCK_TYPES,
   DECISION_STATUSES,
-  DOCUMENT_KINDS,
   EXTERNAL_HREF,
   LIST_STYLES,
   MAX_DESCRIPTION_LENGTH,
@@ -80,7 +79,7 @@ export const titleArg = z
   .min(1, "a title cannot be empty or whitespace")
   .describe("Display title. Identity is the document's UUID, never this.");
 
-export const documentKindArg = z.enum(DOCUMENT_KINDS).describe(
+export const documentKindArg = z.enum(["decision"]).describe(
   "The document's record kind. Omit it for an ordinary working document.",
 );
 
