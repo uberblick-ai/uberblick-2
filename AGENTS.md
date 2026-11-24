@@ -191,8 +191,9 @@ with `get_doc` the pages whose descriptions bear on your task. Whenever you
 learn a fact that cost time to find and will matter again, such as a tooling
 gotcha, an environment quirk or where something lives, save it: update the page
 that already holds it, or create one with `create_doc`, the tag, a title naming
-the fact and a one-line description. Check each write like any other corpus
-write. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
+the fact and a one-line description. Before you finish, check whether you
+learned such a fact and have not saved it yet. Check each write like any other
+corpus write. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
 page and follow-ups in issues; never save secrets, personal data or text from
 outside the team. Saving memories is the only corpus edit a delivery role makes
 without a `Corpus update`.
