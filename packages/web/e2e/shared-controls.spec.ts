@@ -405,7 +405,7 @@ for (const touch of [false, true]) {
     await expect(page.getByLabel("Opened document", { exact: true })).toHaveText("");
     if (!touch) {
       await type.focus();
-      for (const [key, name] of [["ArrowLeft", /^Documents/], ["ArrowRight", /^Decisions/], ["Home", /^Documents/], ["End", /^Decisions/]] as const) {
+      for (const [key, name] of [["ArrowLeft", /^Documents/], ["ArrowRight", /^Decisions/], ["ArrowRight", /^Memories/], ["Home", /^Documents/], ["End", /^Memories/], ["ArrowLeft", /^Decisions/]] as const) {
         await page.keyboard.press(key);
         const selected = page.getByRole("tab", { name });
         await expect(selected).toBeFocused();
