@@ -107,7 +107,8 @@ disagree, otherwise `ahead` if any are intentionally undelivered, otherwise
 result. The writing replica supplies `checked_at`. Keep the sampled claims,
 evidence and coverage limits in the report: the entry records that comparison,
 not exhaustive verification of the page. Never write code checks on decision
-records or alter corpus content or other metadata.
+records or alter other corpus content or metadata; shared memories are the
+exception.
 Inspect every write's `applied` and `synced` results and name unsynced writes
 with their pages in the report under
 [AGENTS.md's Edit corpus rules](../../../AGENTS.md#read-for-the-action).
