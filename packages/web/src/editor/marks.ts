@@ -21,7 +21,7 @@ import {
   mergeAttributes,
 } from "@tiptap/core";
 import type { PasteRuleFinder } from "@tiptap/core";
-import type { MarkType } from "@tiptap/pm/model";
+import type { Mark as PMMark, MarkType, Node as PMNode } from "@tiptap/pm/model";
 import {
   COMMENT_MARK,
   INLINE_MARKS,
@@ -61,12 +61,10 @@ const LINK_INPUT = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/;
 function outsideCode(pattern: RegExp): PasteRuleFinder {
   return (text) => {
     const codeSpans = [...text.matchAll(CODE_PASTE)];
-    const values = scanValueSources(text);
     return [...text.matchAll(pattern)]
       .filter((match) => {
         const matchEnd = match.index + match[0].length;
-        return !values.some((value) => value.from <= match.index && match.index < value.to ||
-          value.from < matchEnd && matchEnd <= value.to) && !codeSpans.some((code) => {
+        return !codeSpans.some((code) => {
           const codeEnd = code.index + code[0].length;
           return (
             (code.index <= match.index && match.index < codeEnd) ||
@@ -83,8 +81,44 @@ function outsideCode(pattern: RegExp): PasteRuleFinder {
   };
 }
 
+/** A protected opener cannot give value semantics to ordinary text after it. */
+function touchesValueSource(doc: PMNode, range: { from: number; to: number }): boolean {
+  const $from = doc.resolve(range.from);
+  const parent = $from.parent;
+  if (!parent.isTextblock) return false;
+  const text = parent.textBetween(0, parent.content.size, undefined, "\ufffc");
+  const runs: { from: number; to: number; marks: readonly PMMark[] }[] = [];
+  parent.forEach((child, from) => { runs.push({ from, to: from + child.nodeSize, marks: child.marks }); });
+  const codeSpans = [...text.matchAll(CODE_PASTE)];
+  const link = (marks: readonly PMMark[]): PMMark | undefined => marks.find((mark) => ["link", "docLink"].includes(mark.type.name));
+  const from = range.from - $from.start();
+  const to = range.to - $from.start();
+  return scanValueSources(text).some((value) => {
+    if (!(value.from <= from && from < value.to || value.from < to && to <= value.to)) return false;
+    // Raw code is not marked until later paste rules; backticks inside a value remain opaque.
+    if (codeSpans.some((code) => code.index < value.from && value.from < code.index + code[0].length &&
+      code.index + code[0].length < value.to)) return false;
+    const touched = runs.filter((run) => run.from < value.to && value.from < run.to);
+    const protectedRun = touched.find((run) => run.marks.some((mark) => mark.type.spec.code) || link(run.marks) !== undefined);
+    if (protectedRun === undefined) return true;
+    const target = link(protectedRun.marks);
+    return target === undefined ? touched.every((run) => run.marks.some((mark) => mark.type.spec.code))
+      : touched.every((run) => link(run.marks)?.eq(target));
+  });
+}
+
+function sourcePreservingPasteRule(find: PasteRuleFinder, type: MarkType) {
+  const rule = markPasteRule({ find, type });
+  const handler = rule.handler;
+  rule.handler = (props) => {
+    if (touchesValueSource(props.state.tr.doc, props.range)) return;
+    return handler(props);
+  };
+  return rule;
+}
+
 function formattingPasteRule(find: RegExp, type: MarkType) {
-  const rule = markPasteRule({ find: outsideCode(find), type });
+  const rule = sourcePreservingPasteRule(outsideCode(find), type);
   const handler = rule.handler;
   rule.handler = (props) => {
     const { state, range } = props;
@@ -205,13 +239,7 @@ const InlineCode = Mark.create({
     return [markInputRule({ find: CODE_INPUT, type: this.type })];
   },
   addPasteRules() {
-    return [markPasteRule({ find: (text) => {
-      const values = scanValueSources(text);
-      return [...text.matchAll(CODE_PASTE)].filter((match) =>
-        !values.some((value) => value.from <= match.index && match.index < value.to ||
-          value.from < match.index + match[0].length && match.index + match[0].length <= value.to))
-        .map((match) => ({ index: match.index, text: match[0], replaceWith: match[2] ?? "" }));
-    }, type: this.type })];
+    return [sourcePreservingPasteRule(CODE_PASTE, this.type)];
   },
 });
 
