@@ -15,6 +15,8 @@ import {
   getMetaMap,
   initDoc,
   setKind,
+  setMemoryAgent,
+  setMemoryRepository,
   setStatus,
   setTags,
 } from "@uberblick/schema";
@@ -250,6 +252,22 @@ describe("the document identity line keeps its local controls", () => {
     expect(host.querySelector(".ub-doc-rev")).toBeNull();
     expect(host.textContent).not.toContain("uuid");
     expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
+  });
+
+  it.each([
+    { agent: "reviewer", repository: "uberblick-ai/uberblick-2", label: "Agent: reviewer · Repository: uberblick-ai/uberblick-2" },
+    { agent: undefined, repository: "uberblick-ai/uberblick-2", label: "All agents · Repository: uberblick-ai/uberblick-2" },
+    { agent: "implementer", repository: undefined, label: "Agent: implementer" },
+    { agent: undefined, repository: undefined, label: "All agents" },
+  ])("shows memory scope as $label", ({ agent, repository, label }) => {
+    const fix = fixture();
+    setKind(fix.ydoc, "memory");
+    if (agent !== undefined) setMemoryAgent(fix.ydoc, agent);
+    if (repository !== undefined) setMemoryRepository(fix.ydoc, repository);
+    const { host } = mount(fix);
+    expect(host.querySelector(".ub-memory-scope")?.textContent).toBe(label);
+    expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
+    expect(host.querySelector(".ub-lifecycle-badge")).toBeNull();
   });
 
   it("offers an icon-only copy button immediately before document actions", () => {

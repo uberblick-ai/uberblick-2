@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useRoomStatus } from "../hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
+import { MemoryScope } from "./MemoryScope.js";
 import { PickerList } from "../PickerList.js";
 import { shareUrl } from "../route.js";
 import { useTagCatalog } from "../tags.js";
@@ -380,6 +381,7 @@ export function DocMetaLine({
   canCleanupTags?: (() => boolean) | undefined;
 }): ReactElement {
   return (
+    <>
     <p className="ub-doc-meta">
       {/* Nothing to say about a room that has not answered yet, and nothing to
           tag in it either — but the row itself stands, holding the space. */}
@@ -431,6 +433,8 @@ export function DocMetaLine({
         </>
       )}
     </p>
+    {meta !== null && meta.uuid !== "" && <MemoryScope kind={meta.kind} agent={meta.agent} repository={meta.repository} />}
+    </>
   );
 }
 

@@ -7,6 +7,7 @@ import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagCatalogEntry 
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
 import { LifecycleBadge } from "../ui/document/LifecycleBadge.js";
+import { MemoryScope } from "../ui/document/MemoryScope.js";
 import { TOPIC_STATES } from "../ui/document/decision-state.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { PickerList } from "../ui/PickerList.js";
@@ -38,17 +39,19 @@ const INITIAL_DIRECTION: Record<Order, Direction> = {
   title: "ascending",
 };
 
-const MODES = ["working", "decision"] as const;
+const MODES = ["working", "decision", "memory"] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_LABELS: Record<Mode, string> = {
   working: "Documents",
   decision: "Decisions",
+  memory: "Memories",
 };
 
 const MODE_EMPTY_LABELS: Record<Mode, string> = {
   working: "documents",
   decision: "decisions",
+  memory: "memories",
 };
 
 const STATE_FILTERS = ["all", "not-yet-decided", "under-review", "agent-stance", "conflict", "changed-after-approval"] as const;
@@ -94,7 +97,7 @@ function topicStage(state: DecisionTopicState): Stage {
 }
 
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
-  return mode === "working" ? entry.kind !== "decision" : entry.kind === mode;
+  return mode === "working" ? entry.kind !== "decision" && entry.kind !== "memory" : entry.kind === mode;
 }
 
 /**
@@ -277,6 +280,7 @@ function DocumentTypeTabs({ entries, received }: { entries: readonly DirectoryEn
   const counts: Record<Mode, number> = useMemo(() => ({
     working: entries.filter((entry) => !entry.deleted && inMode(entry, "working")).length,
     decision: resolveDecisionTopics(entries).filter((topic) => !topic.archived && decisionCurrentRecord(topic) !== null).length,
+    memory: entries.filter((entry) => !entry.deleted && inMode(entry, "memory")).length,
   }), [entries]);
   return <TabsList aria-label="Document type" className="ub-docs-tabs">
     {MODES.map((option) => (
@@ -333,7 +337,7 @@ export function DocumentList({
   const searchText = query.trim();
   const { hits, unavailable: searchUnavailable, pending: searchPending } = useDocumentSearch(searchText, searchClient, entries);
   // Browser history may contain a type removed by a newer client.
-  const mode: Mode = listState.mode === "decision" ? "decision" : "working";
+  const mode: Mode = MODES.find((option) => option === listState.mode) ?? "working";
   const updateState = (patch: Partial<DocumentListState>): void => {
     const next = { ...listState, mode, selectedTags, relevance, ...patch };
     setLocalState(next);
@@ -353,7 +357,7 @@ export function DocumentList({
     },
     [modeRows, mode, searchText, searchUnavailable, searchPending, hits, selectedIds, rowTags, stateFilter, sort, relevance],
   );
-  const hasFilters = searchText !== "" || mode === "decision" || selectedIds.length > 0 || stateFilter !== "all";
+  const hasFilters = searchText !== "" || mode !== "working" || selectedIds.length > 0 || stateFilter !== "all";
   const emptyMessage = noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced: status.synced, hasFilters, hasDocuments: entries.some((entry) => !entry.deleted) });
 
   return (
@@ -478,10 +482,13 @@ export function DocumentList({
                       onClick={() => onSelect(entry.uuid)}
                       title={entry.uuid}
                     >
-                      <span className="ub-docs-title">
-                        {entry.title === "" ? <em>Untitled</em> : entry.title}
+                      <span className="min-w-0 flex-1">
+                        <span className="ub-docs-title block">
+                          {entry.title === "" ? <em>Untitled</em> : entry.title}
+                        </span>
+                        <MemoryScope kind={entry.kind} agent={entry.agent} repository={entry.repository} />
                       </span>
-                      {/* Topic rows stay one line like every other row: the
+                      {/* Topic rows stay one line: the
                           answer, detailed state and comments live on the topic
                           page, and the state filter above narrows by state. */}
                       {entry.topicState === undefined && <LifecycleBadge kind={entry.kind} />}
