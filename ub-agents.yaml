@@ -132,6 +132,9 @@ agents:
       - 'mcp_servers.uberblick.args=["exec", "--", "ub", "mcp", "serve"]'
       - -c
       - 'mcp_servers.uberblick.default_tools_approval_mode="approve"'
+      # Agent memory lives in the corpus (AGENTS.md, Shared memory); loop runs skip .codex/config.toml.
+      - -c
+      - features.memories=false
 
   implementer:
     health-check: *corpus-health

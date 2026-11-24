@@ -2,3 +2,7 @@
 command = "mise"
 args = ["exec", "--", "ub", "mcp", "serve"]
 default_tools_approval_mode = "approve"
+
+# Agent memory lives in the corpus (AGENTS.md, Shared memory).
+[features]
+memories = false

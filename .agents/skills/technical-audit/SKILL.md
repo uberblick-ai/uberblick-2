@@ -12,9 +12,10 @@ description: >-
 
 Find a few consequential, evidence-backed risks without turning broad static
 analysis into hypothetical work. Write no code, corpus content, issue, label,
-branch, or PR. Its only corpus write is recording `code_check` metadata for
-the regular pages whose described behavior it compared with code, as specified
-below. The other permitted external write is one report to [Technical
+branch, or PR. Its corpus writes are the [shared memories](../../../AGENTS.md#shared-memory),
+read before starting, and `code_check` metadata for the regular pages whose
+described behavior it compared with code, as specified below. The other
+permitted external write is one report to [Technical
 audit reports](https://github.com/uberblick-ai/uberblick-2/discussions/541),
 posted with the `technical-audit` recipe in `AGENTS.md`'s Project facts —
 never with a guessed discussion id, because a wrong one posts to a stranger's
@@ -106,7 +107,8 @@ disagree, otherwise `ahead` if any are intentionally undelivered, otherwise
 result. The writing replica supplies `checked_at`. Keep the sampled claims,
 evidence and coverage limits in the report: the entry records that comparison,
 not exhaustive verification of the page. Never write code checks on decision
-records or alter corpus content or other metadata.
+records or alter other corpus content or metadata; shared memories are the
+exception.
 Inspect every write's `applied` and `synced` results and name unsynced writes
 with their pages in the report under
 [AGENTS.md's Edit corpus rules](../../../AGENTS.md#read-for-the-action).

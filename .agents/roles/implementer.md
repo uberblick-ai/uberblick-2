@@ -268,7 +268,8 @@ Corpus: not used — <why no product choice needed it> | <title> (<uuid>) — <o
 ```
 
 Link logs instead of pasting counts. The summary links the pull request, names
-the grounding SHA and the reviews owed, and nothing else.
+the grounding SHA, the reviews owed and the memories saved or updated, or
+`none`, and nothing else.
 
 For a qualifying problem, use [retrospectives.md](../protocols/retrospectives.md)
 and the implementer board.

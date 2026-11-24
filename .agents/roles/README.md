@@ -8,6 +8,9 @@ issue contract and [delivery-policy.md](../protocols/delivery-policy.md) the gat
 
 ## One run, one item, one outcome
 
+Before anything else, read the shared memories under
+[AGENTS.md's Shared memory](../../AGENTS.md#shared-memory).
+
 ub-agents is the tool that selects work using priority and other scheduling
 factors, launches delivery roles, and advances the workflow from their reported
 outcomes. A run gets one assigned issue or pull request — for a pull request,
@@ -17,7 +20,7 @@ priority; the human priority rule and shaping exception live in
 
 End with exactly one outcome your role lists and a short handoff: what was
 decided or changed, the grounding commit (or a role-defined not-started status),
-and links to evidence. Carry what the
+links to evidence, and the memories you saved or updated, or `none`. Carry what the
 next run needs and nothing it can read from GitHub itself. `defer` reports a
 retry with no label change. A private transcript is never a handoff: GitHub must
 be sufficient for a fresh run to continue.
