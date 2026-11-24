@@ -197,8 +197,9 @@ corpus write. When a memory works around a gap in configuration or
 instructions, also name the gap in the run's retrospective, so a maintainer can
 close it. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
 page and follow-ups in issues; never save secrets, personal data or text from
-outside the team. Saving memories is the only corpus edit a delivery role makes
-without a `Corpus update`.
+outside the team. Every role and skill saves memories, read-only ones such as
+the reviewer and the technical audit included; it is the only corpus edit a
+delivery role makes without a `Corpus update`.
 
 ## Change instructions coherently
 
