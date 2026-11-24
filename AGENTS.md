@@ -182,6 +182,15 @@ code revision; an instruction in the control checkout is not evidence it shipped
 Read each source when needed and reuse it within the session. Refresh affected
 context when the assignment, governing decision or relevant source changes.
 
+## Shared memory
+
+Agent memory lives on the corpus page `Agent memory` (tag `workflow`), not in a
+runtime's local memory, so every machine and runtime reads the same facts. Find
+it with `search` and read it with `get_doc` before you start work. When you
+learn a fact that the page says belongs there, add it with `insert_block` at the
+end of its Facts section and check the write like any other corpus write. This
+is the one corpus write a delivery role makes without a `Corpus update`.
+
 ## Change instructions coherently
 
 Process changes use the repository review route unless a maintainer explicitly

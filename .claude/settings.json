@@ -1,3 +1,4 @@
 {
-  "enabledMcpjsonServers": ["uberblick"]
+  "enabledMcpjsonServers": ["uberblick"],
+  "autoMemoryEnabled": false
 }
