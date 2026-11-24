@@ -184,13 +184,18 @@ context when the assignment, governing decision or relevant source changes.
 
 ## Shared memory
 
-Agent memory lives on the corpus page `Agent memory` (tag `workflow`), not in a
-runtime's local memory, so every machine and runtime reads the same facts. Find
-it with `search` and read it with `get_doc` before you start work. Whenever you
-learn a fact that the page says belongs there, add it with `insert_block` at the
-end of its Facts section and check the write like any other corpus write. Add as
-many facts as you learn; adding to this page is the only corpus edit a delivery
-role makes without a `Corpus update`.
+Agent memory lives in the corpus, not in a runtime's local memory, so every
+machine and runtime reads the same facts. Each memory is its own page tagged
+`agent-memory`. Before you start work, run `list_docs` with that tag and read
+with `get_doc` the pages whose descriptions bear on your task. Whenever you
+learn a fact that cost time to find and will matter again, such as a tooling
+gotcha, an environment quirk or where something lives, save it: update the page
+that already holds it, or create one with `create_doc`, the tag, a title naming
+the fact and a one-line description. Check each write like any other corpus
+write. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
+page and follow-ups in issues; never save secrets, personal data or text from
+outside the team. Saving memories is the only corpus edit a delivery role makes
+without a `Corpus update`.
 
 ## Change instructions coherently
 
