@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
-import { getMeta, initDoc, setKind, setMemoryAgent, setMemoryRepository } from "@uberblick/schema";
+import { getDirectoryEntry, getDirectoryMap, getMeta, initDoc, setKind, setMemoryAgent, setMemoryRepository } from "@uberblick/schema";
 import { startServer } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
@@ -48,4 +48,27 @@ it("reads and edits an existing memory as a regular page without losing its meta
   expect((await rig.ok("get_doc", { uuid })).blocks).toEqual([
     expect.objectContaining({ type: "paragraph", text: "Keep this note." }),
   ]);
+});
+
+it("repairs an archived memory's legacy stub when its room arrives without making it discoverable", async () => {
+  rig = await startServer();
+  const uuid = randomUUID();
+  const title = "ArchivedMemory";
+  const directory = rig.instance.replicas.directory().doc;
+  getDirectoryMap(directory).set(uuid, { uuid, title, tags: [], deleted: true });
+  const replica = rig.instance.replicas.replica(uuid);
+  replica.doc.transact(() => {
+    initDoc(replica.doc, { uuid, title });
+    setKind(replica.doc, "memory");
+    setMemoryAgent(replica.doc, "implementer");
+    setMemoryRepository(replica.doc, "uberblick-ai/uberblick-2");
+  });
+  const scope = { kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2" };
+  expect(getDirectoryEntry(directory, uuid)).toMatchObject({ ...scope, deleted: true });
+  expect((await rig.ok("list_docs")).docs).toEqual([]);
+  expect((await rig.ok("search", { query: title })).hits).toEqual([]);
+  await rig.ok("restore_doc", { uuid });
+  expect(getDirectoryEntry(directory, uuid)).toMatchObject(scope);
+  expect(getDirectoryEntry(directory, uuid)?.deleted).not.toBe(true);
+  expect(await rig.ok("get_doc", { uuid })).toMatchObject(scope);
 });
