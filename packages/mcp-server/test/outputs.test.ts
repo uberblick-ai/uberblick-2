@@ -291,6 +291,14 @@ describe("successful MCP output contracts", () => {
     }
     await success("get_revision", { uuid, revision: "fixture-revision" });
     await success("list_docs");
+    const memory = await success("create_doc", { title: "Output memory", description: "Scoped memory output contract.",
+      kind: "memory", agent: "implementer", repository: "Uberblick-AI/Uberblick-2" });
+    expect((await success("get_memories", { agent: "implementer", repository: "uberblick-ai/uberblick-2" })).memories)
+      .toEqual([expect.objectContaining({ uuid: memory.uuid, agent: "implementer", repository: "uberblick-ai/uberblick-2" })]);
+    await success("set_metadata", { uuid: memory.uuid, agent: null, repository: "" });
+    const memoryRead = await success("get_doc", { uuid: memory.uuid });
+    expect(memoryRead).not.toHaveProperty("agent");
+    expect(memoryRead).not.toHaveProperty("repository");
     await success("search", { query: "Output contract" });
     await success("find_decisions", { github_ref: "uberblick-ai/uberblick-2#1429" });
     await success("backlinks", { uuid });

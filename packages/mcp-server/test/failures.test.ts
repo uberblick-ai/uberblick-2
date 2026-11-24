@@ -145,6 +145,10 @@ const EXPECTED: Record<
   invalid_list_attributes: { recoveryClass: "manual", detail: [] },
   annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
   invalid_github_reference: { recoveryClass: "manual", detail: ["github_ref"] },
+  invalid_memory_agent: { recoveryClass: "manual", detail: ["field"] },
+  invalid_memory_repository: { recoveryClass: "manual", detail: ["field"] },
+  memory_scope_unsupported: { recoveryClass: "manual", detail: ["kind", "field"] },
+  memory_field_unsupported: { recoveryClass: "manual", detail: ["kind", "field"] },
   unknown_help_topic: { recoveryClass: "manual", detail: ["topics"] },
   persistence_failed: { recoveryClass: "manual", detail: ["room"] },
   workspace_removed: { recoveryClass: "manual", detail: [] },
@@ -330,6 +334,16 @@ describe("the failure contract", () => {
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);
     record((await rig.call("get_data", { uuid: doc.uuid, collection: "missing" })).payload);
     record((await rig.call("find_decisions", { github_ref: "#1" })).payload);
+    record((await rig.call("create_doc", {
+      title: "Invalid memory agent", description: "A memory refusal fixture.", kind: "memory", agent: "Implementer",
+    })).payload);
+    record((await rig.call("create_doc", {
+      title: "Invalid memory repository", description: "A memory refusal fixture.", kind: "memory", repository: "owner/repository/extra",
+    })).payload);
+    record((await rig.call("set_metadata", { uuid: doc.uuid, agent: "implementer" })).payload);
+    record((await rig.call("create_doc", {
+      title: "Memory without lifecycle", description: "A memory refusal fixture.", kind: "memory", status: "open",
+    })).payload);
     record((await rig.call("get_help", { topic: "no-such-help-topic" })).payload);
     record((await rig.call("insert_block", {
       uuid: doc.uuid,

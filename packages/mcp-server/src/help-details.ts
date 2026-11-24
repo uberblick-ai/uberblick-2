@@ -147,6 +147,10 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
+    "Pass `kind: \"memory\"` for an agent memory, with optional `agent` and `repository`. Memories have no status " +
+    "and refuse status and decision-only fields before creating anything. Agent names are lowercase free text " +
+    "without surrounding whitespace; repositories are owner/name and normalize to lowercase. A blank scope " +
+    "string leaves that side general. Scope fields on other kinds refuse. Find memories through get_memories. " +
     "Footnote seeds use `type: \"footnote\"`, a required `label` and prose `text` or `inline`. Put every footnote after all other seeds; " +
     "`footnote_position` refuses invalid ordering before creating anything. Eligible regular-document prose reads newly written `[^label]` as a reference; " +
     "an explicit reference run uses `footnoteRef: true` on exactly one `[^label]`. Notes and decision answers take no references. See markdown for labels and literal contexts. " +
@@ -366,7 +370,8 @@ export const toolHelpDetails = {
     "Every row carries `uuid`, `title`, `tags`, `description`, `updatedAt` and `openThreadCount` when known, and " +
     "`pinned`; archived rows listed with `include_deleted` add `deleted: true`. Code checks, creation stamps, " +
     "decision authority and threads are read per document with get_doc.\n\n" +
-    "The unfiltered orientation listing omits `kind: \"decision\"` records. Pass any `kind`, `status`, `tag` or `has_open_threads` " +
+    "The unfiltered orientation listing omits decisions and memories. `kind: \"memory\"` lists only memories, " +
+    "marked with `kind: \"memory\"` and their optional agent/repository scope. Pass any `kind`, `status`, `tag` or `has_open_threads` " +
     "predicate to ask for its exact matches, including matching decisions; `kind: \"decision\"` lists decision " +
     "topics with one row per topic. Each row presents the record in force, else a pending record, else the " +
     "first record, with `kind`, `status`, `topic`, `discussion` and `answerPreview`, and names the topic's records " +
@@ -424,6 +429,17 @@ export const toolHelpDetails = {
     "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or current name, ignoring name case; a value this " +
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
     "carries its canonical id, current name and optional description. Only existing catalog tags are displayed.",
+  get_memories:
+    "Before starting work and whenever you look for a memory, call `get_memories` with your agent name and repository, " +
+    "then read relevant memories with `get_doc`. The index comes from the directory without opening document rooms. " +
+    "Each live memory carries `uuid`, `title`, `description`, optional `agent` and `repository`, and `updatedAt` " +
+    "when known and representable, as an ISO 8601 UTC string. Archived memories never appear.\n\n" +
+    "With both filters, a memory must name that agent or no agent AND that repository or no repository. " +
+    "Omitting either filter leaves that side unfiltered; no filters returns every live memory. Repositories " +
+    "compare in lowercase. Malformed or blank filters refuse with recovery; omit a filter to leave it unfiltered.\n\n" +
+    "`complete` and optional `directoryHint` follow list_docs: an incomplete directory may miss memories. " +
+    "Local writes appear in the next call even before hub acknowledgement. `updatedAt` is an approximate " +
+    "authoring-clock edit hint, not history. Create memories with create_doc and change scope with set_metadata.",
   search:
     "Full-text search over live document titles, descriptions, content, assigned tag names and code block languages, from the local FTS5 index. " +
     "Languages use their Markdown fence names, including `chart` and `terminal`, without aliases: `ts` does not match `typescript`. " +
@@ -444,7 +460,8 @@ export const toolHelpDetails = {
     "Results use title-weighted bm25 relevance: a title word weighs more than the same word elsewhere, " +
     "without guaranteeing that every title match beats a body-only match or that more matched words come first. " +
     "Pass `kind: regular` for regular documents, including stored requirements, or `kind: decision` for all " +
-    "decision records, including superseded, rejected and withdrawn records. Pass `tag` as one catalog id or " +
+    "decision records, including superseded, rejected and withdrawn records. `kind: memory` returns only memories, " +
+    "marked with `kind: \"memory\"`; `kind: regular` excludes them. An omitted kind searches all kinds. Pass `tag` as one catalog id or " +
     "current name (case ignored), or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
     "score. Filters combine and apply before `limit`, which defaults to 20 and accepts up to 100. Unknown tags " +
     "refuse.\n\n" +
@@ -755,11 +772,16 @@ export const toolHelpDetails = {
     "read their document's collection and never write collection records; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:
-    "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links`, `code_check` and decision `discussion` " +
+    "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links`, `code_check`, decision `discussion`, " +
+    "and a memory's `agent` and `repository` scope " +
     "together. At least one " +
     "must be named, and undeclared fields are refused. Each field keeps its own type and limit; a field " +
     "refusal writes none of the named fields and adds `field` to its existing error. Document-level " +
     "refusals keep their usual shape.\n\n" +
+    "Only memories accept `agent` and `repository`. Agent names are lowercase free text without surrounding " +
+    "whitespace; repositories use owner/name and normalize to lowercase. A blank string or null clears either scope; " +
+    "omitting it keeps the value. Malformed scope or scope on another kind refuses before any field is written. " +
+    "The next get_memories and get_doc on this replica show the new scope.\n\n" +
     "On a regular document, `code_check: {repository, commit, result, rev, paths?}` records the latest comparison " +
     "with code for one repository. Repository is owner/name, case-insensitive; commit is a full 40- or " +
     "64-character hexadecimal Git commit hash, normalized to lowercase. Results are matches (the page agrees " +

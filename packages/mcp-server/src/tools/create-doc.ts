@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getBlocks, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, documentDirectoryFields, getBlocks, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setMemoryAgent, setMemoryRepository, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -9,13 +9,18 @@ import { placeInGroup, requireGroup } from "../sidebar.js";
 import type { SidebarPlacement } from "../sidebar.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
 import { roomStages, stoppedPartWay } from "./helpers.js";
-import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
+import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, memoryAgentArg, memoryRepositoryArg, normalizedMemoryScope, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { DOCUMENT_WRITE, operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
 import { discussionTarget } from "./discussion.js";
 import { summarizeWrittenBlocks } from "./chart-summary.js";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
+  {
+    title: "A memory document (`kind: memory`)",
+    when: { field: "kind", is: "memory" },
+    requires: ["title"],
+  },
   {
     title: "A decision document (`kind: decision`). Decisions help covers topics, titles and answers.",
     when: { field: "kind", is: "decision" },
@@ -93,6 +98,8 @@ export const inputSchema = strictInput(
       "Existing catalog tag ids or names, case ignored. An unknown or deleted tag refuses before anything is created.",
     ),
     kind: documentKindArg.optional(),
+    agent: memoryAgentArg.optional(),
+    repository: memoryRepositoryArg.optional(),
     status: documentStatusArg.optional().describe("The initial lifecycle state. Accepted only with `kind: decision`."),
     related: z.union([uuidArg, z.array(uuidArg).min(1)])
       .optional()
@@ -159,6 +166,43 @@ function initialBlocks(
   return inputs;
 }
 
+function memoryCreation({ kind, agent, repository, status, related, supersedes, answer, discussion }: Pick<
+  z.infer<typeof inputSchema>, "kind" | "agent" | "repository" | "status" | "related" | "supersedes" | "answer" | "discussion"
+>) {
+  if (kind !== "memory") {
+    if (agent !== undefined || repository !== undefined) throw new ToolError("memory_scope_unsupported", "Only a memory can name an agent or repository.", {
+      field: agent !== undefined ? "agent" : "repository", kind: kind ?? null,
+    });
+    return undefined;
+  }
+  const field = Object.entries({ status, related, supersedes, answer, discussion }).find(([, value]) => value !== undefined)?.[0];
+  if (field !== undefined) throw new ToolError("memory_field_unsupported", "Memories have no lifecycle status or decision-only fields.", { kind, field });
+  const name = agent === undefined ? undefined : normalizedMemoryScope("agent", agent);
+  const repo = repository === undefined ? undefined : normalizedMemoryScope("repository", repository);
+  return { ...(name ? { agent: name } : {}), ...(repo ? { repository: repo } : {}) };
+}
+
+function initMemory(doc: Parameters<typeof setKind>[0], memory: ReturnType<typeof memoryCreation>) {
+  if (memory === undefined) return;
+  setKind(doc, "memory");
+  if (memory.agent !== undefined) setMemoryAgent(doc, memory.agent);
+  if (memory.repository !== undefined) setMemoryRepository(doc, memory.repository);
+}
+
+function initialLifecycle(kind: DocumentKind | undefined, status: DocumentStatus | undefined) {
+  if (kind !== "decision") return null;
+  const lifecycle = { kind, status: status ?? DECISION_STATUSES[0] };
+  if (!isDocumentStatusForKind(lifecycle.kind, lifecycle.status)) {
+    const error = new InvalidDocumentLifecycleError(lifecycle.kind, lifecycle.status);
+    throw new ToolError("invalid_document_lifecycle", error.message, {
+      ...lifecycle,
+      recoveryClass: "manual",
+      recovery: `Choose a status in the ${lifecycle.kind} lifecycle and call create_doc again. Nothing was created by this refused call.`,
+    });
+  }
+  return lifecycle;
+}
+
 export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (context, {
       title,
       description,
@@ -166,6 +210,8 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
       answer,
       tags,
       kind,
+      agent,
+      repository,
       status,
       related,
       discussion,
@@ -175,25 +221,9 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     }, _request) => {
   const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, durabilityAcross, tldrReview } = context;
 
-  const lifecycle =
-    kind === undefined ? null : { kind, status: status ?? DECISION_STATUSES[0] };
-  if (
-    lifecycle !== null &&
-    !isDocumentStatusForKind(lifecycle.kind, lifecycle.status)
-  ) {
-    const error = new InvalidDocumentLifecycleError(
-      lifecycle.kind,
-      lifecycle.status,
-    );
-    throw new ToolError("invalid_document_lifecycle", error.message, {
-      kind: lifecycle.kind,
-      status: lifecycle.status,
-      recoveryClass: "manual",
-      recovery:
-        `Choose a status in the ${lifecycle.kind} lifecycle and call create_doc again. ` +
-        "Nothing was created by this refused call.",
-    });
-  }
+  const memory = memoryCreation({ kind, agent, repository, status, related, supersedes, answer, discussion });
+
+  const lifecycle = initialLifecycle(kind, status);
 
   const relatedPages = related === undefined ? undefined :
     [...new Set(typeof related === "string" ? [related] : related)].map(uuid => {
@@ -288,6 +318,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
         setKind(replica.doc, lifecycle.kind);
         setStatus(replica.doc, lifecycle.status);
       }
+      initMemory(replica.doc, memory);
       if (tldr !== undefined) setTldr(replica.doc, tldr);
       if (discussionUuid !== null) setDiscussion(replica.doc, discussionUuid);
       for (const input of inputs) {
@@ -310,7 +341,8 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
       description,
       ...(tags === undefined ? {} : { tags: tagIds }),
       ...(lifecycle === null ? {} : lifecycle),
-      ...decisionDirectoryFields(replica.doc),
+      ...(kind === "memory" ? { kind } : {}),
+      ...documentDirectoryFields(replica.doc),
       createdAt: now,
       updatedAt: now,
     });
@@ -362,6 +394,7 @@ export const createDocOperation = operation(DOCUMENT_WRITE, inputSchema, (contex
     description,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
+    ...(memory === undefined ? {} : { kind: "memory" as const, ...memory }),
     ...(relatedSet === undefined ? {} : { related: relatedSet }),
     ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc, replica.id).topic, discussion: getMeta(replica.doc, replica.id).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),

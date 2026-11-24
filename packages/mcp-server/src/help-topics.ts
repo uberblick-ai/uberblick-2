@@ -12,14 +12,14 @@ export interface HelpTopic {
 
 /** Workspace-independent orientation shared by startup and its help topic. */
 export const STARTUP_ORIENTATION =
-  "Uberblick stores this repo's documents and decision records. " +
-  "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
-  "If the request conflicts with a decision in force, ask before building. " +
-  "`list_docs` lists documents; with `kind: \"decision\"`, decision topics. " +
-  "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
-  "This repo's conventions are in the corpus, not in help. " +
-  "Help topics, through `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
-  "workspaces, markdown, ablauf (diagrams), wireframe (UI sketches), data (charts and tables), tools, tool-contracts.";
+  "Uberblick holds documents, decisions and agent memories. " +
+  "Before starting work and whenever you look for a memory, call `get_memories` with your agent name and repository, then read relevant memories with `get_doc`. " +
+  "Before changes, search the corpus and read relevant documents and decisions with `get_doc`. " +
+  "Ask before building against a decision in force. " +
+  "`list_docs` lists regular pages; `kind: \"decision\"` lists decision topics. " +
+  "Read `get_help(edit_doc)` before document writes; follow failure recovery. Conventions live in the corpus. " +
+  "Help: `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
+  "workspaces, markdown, ablauf, wireframe, data, tools, tool-contracts.";
 
 const workspaces = `# Workspaces and documents
 
@@ -61,9 +61,10 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 - Search first. Change the page that already owns a fact instead of creating another one.
 - Read the document with \`get_doc\`. It returns each block's \`id\`, \`text\` and \`rev\`; edits assert them.
 
-## Regular page or decision record
+## Regular page, memory or decision record
 
 - A **regular page** holds content that changes over time. Most edits belong here.
+- A **memory** (\`kind: "memory"\`) holds what an agent learned. It has no lifecycle status and may name one \`agent\` and one \`repository\`; absent scope applies generally. Discover relevant memories with \`get_memories\` and change scope with \`set_metadata\`.
 - A **decision record** (\`kind: "decision"\`) holds the short answer to one lasting question. Once decided, its answer is read-only and changes only through a successor record. Read \`decisions\` before you create or change one.
 - Archived documents are read-only until \`restore_doc\`.
 
@@ -73,7 +74,7 @@ Create and change documents with the fewest calls. Details live in \`decisions\`
 - \`insert_block\` adds blocks after a block id, or at the top. \`edit_block\` changes one block against the \`old_text\` and \`rev\` you read. \`move_block\` reorders existing blocks with their ids and comment anchors intact; read its help for the concurrent-edit limit. \`delete_block\` removes one. \`restore_revision\` is the whole-document exception: it restores title, blocks and data from a hub revision as a new revision, preserving history and other metadata.
 - Documents merge live (Yjs): people and other agents may edit at the same time and watch your changes. Change only the words that need changing; \`edit_block\` keeps everyone else's edits and comment anchors, while deleting and re-inserting a block drops them. Keep the page's overall shape; reshape a section when needed instead of lengthening a paragraph.
 - A refused edit returns \`currentText\` and \`currentRev\`: apply your change to them and retry, without another read.
-- \`set_metadata\` changes title, description, tags, links and TL;DR, a regular page's code check and an open decision's \`discussion\`. Structured data uses \`get_data\` and \`update_data\`.
+- \`set_metadata\` changes title, description, tags, links and TL;DR, a regular page's code check, an open decision's \`discussion\` and a memory's \`agent\` and \`repository\`. Structured data uses \`get_data\` and \`update_data\`.
 
 ## Markdown essentials
 

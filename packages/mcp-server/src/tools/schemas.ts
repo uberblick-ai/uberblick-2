@@ -8,7 +8,9 @@ import {
   MAX_TLDR_LENGTH,
   canonicalDocumentUuid,
 } from "@uberblick/schema";
+import { normalizeMemoryAgent, normalizeMemoryRepository } from "../../../schema/src/memory.js";
 import { z } from "zod";
+import { ToolError } from "../failures.js";
 
 // Refuse identities that cannot resolve as document UUIDs.
 // Format metadata omits the advertised regex while retaining runtime validation.
@@ -79,9 +81,24 @@ export const titleArg = z
   .min(1, "a title cannot be empty or whitespace")
   .describe("Display title. Identity is the document's UUID, never this.");
 
-export const documentKindArg = z.enum(["decision"]).describe(
-  "The document's record kind. Omit it for an ordinary working document.",
+export const documentKindArg = z.enum(["decision", "memory"]).describe(
+  "The document's kind. Memory holds what an agent learns and has no lifecycle status. Omit kind for an ordinary working document.",
 );
+
+// Keep malformed scope values for a named refusal with recovery before writing.
+export const memoryAgentArg = z.unknown().meta({ type: "string" })
+  .describe("Memory only: one lowercase agent name, without leading or trailing whitespace. Omit for every agent; a blank string clears it.");
+export const memoryRepositoryArg = z.unknown().meta({ type: "string" })
+  .describe("Memory only: one repository as owner/name; identity ignores letter case and is stored lowercase. Omit for the whole workspace; a blank string clears it.");
+
+export function normalizedMemoryScope(field: "agent" | "repository", value: unknown): string {
+  const normalized = field === "agent" ? normalizeMemoryAgent(value) : normalizeMemoryRepository(value);
+  if (normalized !== null) return normalized;
+  const rule = field === "agent" ? "a lowercase agent name without leading or trailing whitespace" : "a repository in owner/name form";
+  throw new ToolError(`invalid_memory_${field}`, `A memory ${field} needs ${rule}.`, {
+    field,
+  });
+}
 
 export const documentStatusArg = z
   .enum(DECISION_STATUSES)
