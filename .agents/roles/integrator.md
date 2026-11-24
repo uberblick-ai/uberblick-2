@@ -80,7 +80,8 @@ code and records checks on every regular page it compared or changed, including
 pages needing no rewrite, under [After the merge](../protocols/integration.md#after-the-merge).
 Its evidence names unsynced corpus writes under
 [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action). A
-`changes` record says only what failed and where. Do not add a wrapper comment
+`changes` record says only what failed and where, plus the memories line every
+handoff carries. Do not add a wrapper comment
 for a Copilot review that already exists or for a no-comment result.
 
 ## Outcomes
