@@ -196,7 +196,7 @@ Before saving, check the memory index and the instructions: update the page that
 already holds the fact instead of adding one, or create one with `create_doc`,
 the tag, a title naming
 the fact and a one-line description that opens with when it holds, such as
-the runtime, a headless or interactive session and the operating system where
+the repository when the workspace serves others, the runtime, a headless or interactive session and the operating system where
 it matters. Before relying on a memory, check that it holds where you run; when
 it does not, narrow its conditions in place rather than saving one that
 contradicts it. Nothing that binds a memory to one machine, such as a local
