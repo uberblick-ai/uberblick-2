@@ -94,7 +94,7 @@ function topicStage(state: DecisionTopicState): Stage {
 }
 
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
-  return mode === "working" ? entry.kind === undefined : entry.kind === mode;
+  return mode === "working" ? entry.kind !== "decision" : entry.kind === mode;
 }
 
 /**

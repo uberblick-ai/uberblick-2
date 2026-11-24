@@ -6,6 +6,7 @@
 
 import type * as Y from "yjs";
 import { normalizeCodeCheck, readCodeCheck } from "./code-check.js";
+import { normalizeMemoryAgent, normalizeMemoryRepository, readMemoryFields } from "./memory.js";
 import {
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
@@ -268,6 +269,7 @@ export function getMeta(ydoc: Y.Doc, authoritativeUuid?: string): DocMeta & { tl
     // Summary text wins over a separately merged mark, including older writers.
     ...(!decision && tldr === null && meta.get("tldrOptOut") === true ? { tldrOptOut: true as const } : {}),
     ...lifecycle,
+    ...readMemoryFields(lifecycle.kind, meta.get("agent"), meta.get("repository")),
     ...(supersedes === undefined ? {} : { supersedes }),
     ...(governs === undefined ? {} : { governs, related }),
     ...(decision ? { discussion } : {}),
@@ -317,6 +319,21 @@ export function setDescription(ydoc: Y.Doc, description: string): void {
   ydoc.transact(() => {
     meta.set("description", description);
   });
+}
+
+/** Scope changes leave content, identity and the other scope key untouched. */
+export function setMemoryAgent(ydoc: Y.Doc, agent: string): void {
+  const normalized = normalizeMemoryAgent(agent);
+  if (normalized === null) throw new Error("Invalid memory agent");
+  if (getMeta(ydoc).kind !== "memory") throw new Error("Only memories carry an agent");
+  ydoc.transact(() => { getMetaMap(ydoc).set("agent", normalized); });
+}
+
+export function setMemoryRepository(ydoc: Y.Doc, repository: string): void {
+  const normalized = normalizeMemoryRepository(repository);
+  if (normalized === null) throw new Error("Invalid memory repository");
+  if (getMeta(ydoc).kind !== "memory") throw new Error("Only memories carry a repository");
+  ydoc.transact(() => { getMetaMap(ydoc).set("repository", normalized); });
 }
 
 /**

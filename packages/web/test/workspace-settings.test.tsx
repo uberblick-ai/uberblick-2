@@ -439,6 +439,18 @@ it("counts regular documents and active tags live, and takes the newest stamp fr
   expect(facts(host).get("Tags")).toBe("1");
 });
 
+it("counts live and archived memories as ordinary documents", async () => {
+  const directory = statusRoom(SYNCED);
+  const uuid = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid, title: "Memory", kind: "memory" });
+  const host = await mount(directory.connection);
+  expect(facts(host).get("Documents")).toBe("1");
+  act(() => tombstoneDirectoryEntry(directory.connection.ydoc, uuid));
+  expect(facts(host).get("Documents")).toBe("0 (1 archived)");
+  act(() => restoreDirectoryEntry(directory.connection.ydoc, uuid));
+  expect(facts(host).get("Documents")).toBe("1");
+});
+
 it("waits for the routed settings room without seeding or requesting more data", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);

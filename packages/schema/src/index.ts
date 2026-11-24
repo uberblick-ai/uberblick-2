@@ -14,6 +14,8 @@ export {
   setTldr,
   setTldrOptOut,
   setKind,
+  setMemoryAgent,
+  setMemoryRepository,
   setLinks,
   setStatus,
   setTags,

@@ -1,10 +1,14 @@
 /** Real search, client convergence, current-answer navigation and browser history. */
 
 import { devices, expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import * as Y from "yjs";
+import { appendBlock, initDoc, setKind, setMemoryAgent, setMemoryRepository } from "@uberblick/schema";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import type { Locator, Page } from "@playwright/test";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { expectMcp } from "./settle.js";
 
 const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-document-sidebar" } });
 
@@ -116,6 +120,45 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   await page.getByRole("tab", { name: /^Decisions/ }).click();
   await page.getByRole("combobox", { name: "Decision state" }).selectOption("not-yet-decided");
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(1);
+});
+
+test("a memory remains an ordinary document in discovery and editing @webkit", async ({ browser }, testInfo) => {
+  const uuid = randomUUID();
+  const title = docTitle("Memory compatibility");
+  const source = new Y.Doc();
+  try {
+    initDoc(source, { uuid, title, description: "A schema-created memory." });
+    setKind(source, "memory");
+    setMemoryAgent(source, "implementer");
+    setMemoryRepository(source, "uberblick-ai/uberblick-2");
+    appendBlock(source, { type: "paragraph", text: "A note to edit." });
+    await harness().seedDocument(source);
+  } finally { source.destroy(); }
+  const page = await openApp(browser, `/${harness().workspace}/all`, { readySelector: ".ub-docs-heading" });
+  await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
+  const row = page.locator(".ub-docs-row", { hasText: title });
+  await expect(row).toBeVisible();
+  await expect(row.locator(".ub-lifecycle-badge")).toHaveCount(0);
+  const search = page.getByRole("searchbox", { name: "Search", exact: true });
+  await search.fill(title);
+  await expect(listedTitles(page)).toHaveText([title]);
+  if (testInfo.project.name === "chromium") {
+    const apple = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform));
+    await page.keyboard.press(apple ? "Meta+k" : "Control+k");
+    const palette = page.getByRole("dialog", { name: "Command palette", exact: true });
+    await palette.getByRole("combobox", { name: "Search documents and decisions", exact: true }).fill(title);
+    await expect(palette.getByRole("option", { name: `${title} Document`, exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+  await activateControl(row.locator(".ub-docs-open"));
+  await expect(editor(page)).toHaveText("A note to edit.");
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveCount(0);
+  await editor(page).fill("An edited note.");
+  const reader = agent().open({ name: "memory-compatibility-e2e" });
+  await expectMcp(() => reader.call<{ kind: string; agent: string; repository: string; blocks: Array<{ text: string }> }>("get_doc", { uuid }), (doc) => {
+    expect(doc).toMatchObject({ kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2" });
+    expect(doc.blocks.map((block) => block.text)).toEqual(["An edited note."]);
+  });
 });
 
 test("the list and palette search fragments and block languages through the serving replica", async ({ browser }) => {

@@ -459,6 +459,8 @@ export const outputSchemas = {
     tags,
     links: z.array(z.string()),
     ...lifecycle,
+    agent: z.string().optional().describe("Memory's optional agent name; absent means every agent."),
+    repository: z.string().optional().describe("Memory's optional lowercase owner/name repository; absent means the whole workspace."),
     related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
