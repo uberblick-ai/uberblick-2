@@ -31,6 +31,7 @@ import { inputSchema as findDecisionsInput, findDecisionsOperation } from "./too
 import { inputSchema as getDataInput, getDataOperation } from "./tools/get-data.js";
 import { inputSchema as getDocInput, getDocOperation } from "./tools/get-doc.js";
 import { inputSchema as getHelpInput, getHelpOperation } from "./tools/get-help.js";
+import { inputSchema as getMemoriesInput, getMemoriesOperation } from "./tools/get-memories.js";
 import { inputSchema as getRevisionInput, getRevisionOperation } from "./tools/get-revision.js";
 import { inputSchema as insertBlockInput, insertBlockOperation } from "./tools/insert-block.js";
 import { inputSchema as linkRangeInput, linkRangeOperation } from "./tools/link-range.js";
@@ -173,9 +174,10 @@ export const tools: readonly Tool[] = [
     name: "create_doc",
     title: "Create a document",
     description:
-      "Create a regular page or a decision record, optionally with starting blocks, tags, a TL;DR (regular " +
-      "pages only) and a sidebar pin. A description is required, and a title except on a decision successor, " +
-      "which takes its topic's title. References are checked before writing; refusals create nothing. " +
+      "Create a regular page, memory or decision record, optionally with starting blocks, tags, a TL;DR (regular " +
+      "pages and memories) and a sidebar pin. A description is required, and a title except on a decision successor, " +
+      "which takes its topic's title. Memories accept optional agent and repository scope and have no lifecycle status. " +
+      "References are checked before writing; refusals create nothing. " +
       "Create a decision record only for a significant, lasting choice with meaningful alternatives that " +
       "current guidance doesn't settle; routine details belong on the owning regular page. Its answer " +
       "states only the decision, in about 60 words; reasoning and alternatives go in the linked discussion " +
@@ -335,7 +337,7 @@ export const tools: readonly Tool[] = [
       "List documents from this replica's directory, including local writes the hub has not acknowledged " +
       "yet, without opening document rooms. Rows carry uuid, title, tags, description, updatedAt (ISO 8601 " +
       "UTC when known and representable), openThreadCount (absent when unknown) and pinned. Unfiltered " +
-      "listings omit decisions; kind, status, tag and has_open_threads include them. A decision topic row " +
+      "listings omit decisions and memories; kind, status, tag and has_open_threads select matches. Memory rows carry kind and optional scope. A decision topic row " +
       "shows the record in force, else pending, else first, with status, topic, discussion, answerPreview " +
       "and inForce/pending/conflicts UUIDs. include_superseded lists every record; include_deleted adds " +
       "archived rows (`deleted: true`). Filters combine; unknown tags refuse; has_open_threads accepts only " +
@@ -347,6 +349,21 @@ export const tools: readonly Tool[] = [
     details: toolHelpDetails.list_docs,
   }),
   tool({
+    name: "get_memories",
+    title: "Read the memory index",
+    description:
+      "Before starting work and whenever you look for a memory, call get_memories with your agent name and repository. " +
+      "Read the relevant memories with get_doc. Returns live memory UUIDs, titles, descriptions, optional agent and " +
+      "repository scope, and last change from the directory without opening document rooms. Each supplied filter " +
+      "includes matching and unscoped memories; omitted filters leave that side unfiltered. No filters returns all " +
+      "live memories. complete:false means the directory has not fully arrived.",
+    input: getMemoriesInput,
+    operation: getMemoriesOperation,
+    example: { agent: "implementer", repository: "uberblick-ai/uberblick-2" },
+    related: documentContracts,
+    details: toolHelpDetails.get_memories,
+  }),
+  tool({
     name: "search",
     title: "Search documents",
     description:
@@ -354,7 +371,7 @@ export const tools: readonly Tool[] = [
       "English word forms match; case/accents fold, underscores join adjacent words, trailing * matches stem prefixes. " +
       "Use whole words or short prefixes: `decisi*` can miss `decision`, unlike `decis*`. Punctuation/emoji alone " +
       "matches nothing. Title-weighted bm25 ranks without strict title-first or matched-word-count order. " +
-      "kind narrows to regular documents or decisions. tag accepts a catalog id/current name (case ignored) " +
+      "kind narrows to regular documents, decisions or memories; regular excludes memories. tag accepts a catalog id/current name (case ignored) " +
       "or list: any listed tag matches, more boost relevance; unknown tags refuse. Hits carry kind and canonical " +
       "tags; decisions carry current state, including superseded/conflict. No hits proves neither an empty index " +
       "nor replica completeness. Ask whether to create a missing needed page.",
@@ -489,7 +506,8 @@ export const tools: readonly Tool[] = [
     title: "Set document metadata together",
     description:
       "Change one or more of a document's title, description, TL;DR, tags, curated links and code check, or " +
-      "an open decision's discussion RFC. Name at least one field; omitted fields keep their values. The " +
+      "an open decision's discussion RFC or a memory's agent and repository scope. Blank or null scope clears it. " +
+      "Name at least one field; omitted fields keep their values. The " +
       "call is all or nothing: a refusal writes none of the named fields and names the failing `field`. " +
       "Tags and links replace the whole set, and `[]` clears it. Title and description cannot be cleared; " +
       "`tldr: null` clears the TL;DR. Decision records take no TL;DR or code check, and decided records " +

@@ -12,6 +12,8 @@ import {
   setDescription,
   setDiscussion,
   setLinks,
+  setMemoryAgent,
+  setMemoryRepository,
   setTitle,
   setTldr,
 } from "@uberblick/schema";
@@ -21,10 +23,11 @@ import { strictInput } from "../inputs.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
 import { DOCUMENT_WRITE, operation } from "./operation.js";
 import { roomStages } from "./helpers.js";
-import { descriptionArg, docLinkTargetArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
+import { descriptionArg, docLinkTargetArg, memoryAgentArg, memoryRepositoryArg, normalizedMemoryScope, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { discussionTarget } from "./discussion.js";
+import type { ToolContext } from "./context.js";
 
-const fields = ["title", "description", "tldr", "tags", "links", "discussion", "code_check"] as const;
+const fields = ["title", "description", "tldr", "tags", "links", "discussion", "code_check", "agent", "repository"] as const;
 const linkArg = docLinkTargetArg.describe("Target document UUID.");
 
 // Keep malformed entries intact for the shared validator so every refusal
@@ -46,6 +49,8 @@ export const inputSchema = strictInput({
   uuid: uuidArg,
   title: titleArg.optional().describe("Display title. A decision topic has one title stored on its first record; title on any live record renames the topic without changing answer approval. Successors take the topic's title."),
   description: descriptionArg.optional(),
+  agent: memoryAgentArg.nullable().optional().describe("Memory only: one lowercase agent name without leading or trailing whitespace. A blank string or null clears it; omission keeps it."),
+  repository: memoryRepositoryArg.nullable().optional().describe("Memory only: one repository as owner/name, stored lowercase. A blank string or null clears it; omission keeps it."),
   tldr: tldrArg.optional().describe(`Person-facing regular-document summary, at most ${MAX_TLDR_LENGTH} characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.`),
   tldr_opt_in: z.boolean().optional().describe("Pass true with a non-null tldr to lift a person's deliberate TL;DR removal. Requires a non-null tldr; false does not lift the mark."),
   tags: z.array(z.string().min(1)).optional().describe("The complete tag set, as existing catalog ids or names with case ignored. It replaces the current tags; [] clears them."),
@@ -57,7 +62,7 @@ export const inputSchema = strictInput({
     if (fields.every((field) => args[field] === undefined)) {
       ctx.addIssue({
         code: "custom",
-        message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags`, `links`, `discussion` or `code_check`",
+        message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags`, `links`, `discussion`, `code_check`, `agent` or `repository`",
       });
     }
     if (args.tldr_opt_in !== undefined && (args.tldr === undefined || args.tldr === null)) {
@@ -94,23 +99,42 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
   }
 }
 
+function memoryMetadata(kind: ReturnType<typeof getMeta>["kind"], { uuid, agent, repository }: Pick<z.infer<typeof inputSchema>, "uuid" | "agent" | "repository">) {
+  if (kind !== "memory" && (agent !== undefined || repository !== undefined)) {
+    throw new ToolError("memory_scope_unsupported", "Only a memory can name an agent or repository.", {
+      uuid, field: agent !== undefined ? "agent" : "repository", kind: kind ?? null,
+    });
+  }
+  return {
+    agent: agent === undefined ? undefined : normalizedMemoryScope("agent", agent === null ? "" : agent),
+    repository: repository === undefined ? undefined : normalizedMemoryScope("repository", repository === null ? "" : repository),
+  };
+}
+
+function metadataCodeCheck(replica: ReturnType<ToolContext["requireWritableDoc"]>, value: unknown) {
+  const codeCheck = value === undefined ? undefined : normalizeCodeCheck(value);
+  if (codeCheck === null || (codeCheck !== undefined && (codeCheck.rev === undefined || codeCheck.rev !== docRev(replica.doc)))) {
+    throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit, matches, ahead or drift result, the current page rev and optional valid paths. Read the page again with get_doc and compare it with code before recording a check.", { uuid: replica.id, field: "code_check" });
+  }
+  const current = getMeta(replica.doc, replica.id);
+  if (codeCheck !== undefined && current.kind === "decision") {
+    throw new ToolError("decision_code_check_unsupported", "Code checks describe regular pages' comparison with code and cannot be written to decision records.", {
+      uuid: replica.id, kind: current.kind, status: current.status ?? null, field: "code_check",
+    });
+  }
+  return codeCheck;
+}
+
 export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (context, args, _request) => {
-  const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check } = args;
+  const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check, agent, repository } = args;
   const replica = context.requireWritableDoc(uuid);
   const current = getMeta(replica.doc, replica.id);
+  const memory = memoryMetadata(current.kind, { uuid, agent, repository });
   // The addressed record's gate checks the topic archive. The first answer's
   // individual archive does not lock the shared topic title.
   const titleReplica = title === undefined || current.kind !== "decision" ? replica :
     forField("title", () => context.requireDoc(current.topic ?? uuid));
-  const codeCheck = code_check === undefined ? undefined : normalizeCodeCheck(code_check);
-  if (codeCheck === null || (codeCheck !== undefined && (codeCheck.rev === undefined || codeCheck.rev !== docRev(replica.doc)))) {
-    throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit, matches, ahead or drift result, the current page rev and optional valid paths. Read the page again with get_doc and compare it with code before recording a check.", { uuid, field: "code_check" });
-  }
-  if (codeCheck !== undefined && current.kind === "decision") {
-    throw new ToolError("decision_code_check_unsupported", "Code checks describe regular pages' comparison with code and cannot be written to decision records.", {
-      uuid, kind: current.kind, status: current.status ?? null, field: "code_check",
-    });
-  }
+  const codeCheck = metadataCodeCheck(replica, code_check);
   if (discussion !== undefined && (current.kind !== "decision" || current.status !== "open")) {
     const code = current.kind === "decision" && current.status === "decided" ? "decision_read_only" : "discussion_not_writable";
     throw new ToolError(code, "Only an open decision record's discussion reference can change; settled references remain in history.", {
@@ -153,6 +177,8 @@ export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (cont
     if (description !== undefined) setDescription(replica.doc, description);
     if (tldr !== undefined) setTldr(replica.doc, tldr);
     if (links !== undefined) setLinks(replica.doc, links);
+    if (memory.agent !== undefined) setMemoryAgent(replica.doc, memory.agent);
+    if (memory.repository !== undefined) setMemoryRepository(replica.doc, memory.repository);
     if (discussionUuid !== undefined) setDiscussion(replica.doc, discussionUuid);
     if (codeCheck !== undefined) setCodeCheck(replica.doc, codeCheck);
     cleanupDeletedDocumentTags(replica.doc, context.tagCatalog());
@@ -187,6 +213,7 @@ export const setMetadataOperation = operation(DOCUMENT_WRITE, inputSchema, (cont
     tags: context.documentTags(replica),
     links: meta.links,
     ...(meta.kind === "decision" ? { discussion: meta.discussion } : {}),
+    ...(meta.kind === "memory" ? { kind: meta.kind, ...(meta.agent === undefined ? {} : { agent: meta.agent }), ...(meta.repository === undefined ? {} : { repository: meta.repository }) } : {}),
     ...(meta.kind === "decision" ? {} : { code_check: meta.code_check }),
     ...durability,
   };

@@ -767,7 +767,7 @@ export class Replicas {
       {
         uuid: replica.id,
         title: topic === undefined ? meta.title : decisionTopicTitle(topic),
-        kind: meta.kind === "decision" ? "decision" : "regular",
+        kind: meta.kind === "decision" || meta.kind === "memory" ? meta.kind : "regular",
         tags: tags.map((entry) => entry.id),
         tagNames: tags.flatMap((entry) => entry.name === null ? [] : [entry.name]),
         blockLanguages: [...new Set(blocks.flatMap(({ block }) =>

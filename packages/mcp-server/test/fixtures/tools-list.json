@@ -146,9 +146,18 @@
         "kind": {
           "type": "string",
           "enum": [
-            "decision"
+            "decision",
+            "memory"
           ],
-          "description": "The document's record kind. Omit it for an ordinary working document."
+          "description": "The document's kind. Memory holds what an agent learns and has no lifecycle status. Omit kind for an ordinary working document."
+        },
+        "agent": {
+          "type": "string",
+          "description": "Memory only: one lowercase agent name, without leading or trailing whitespace. Omit for every agent; a blank string clears it."
+        },
+        "repository": {
+          "type": "string",
+          "description": "Memory only: one repository as owner/name; identity ignores letter case and is stored lowercase. Omit for the whole workspace; a blank string clears it."
         },
         "status": {
           "description": "The initial lifecycle state. Accepted only with `kind: decision`.",
@@ -345,7 +354,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create a regular page or a decision record, optionally with starting blocks, tags, a TL;DR (regular pages only) and a sidebar pin. A description is required, and a title except on a decision successor, which takes its topic's title. References are checked before writing; refusals create nothing. Create a decision record only for a significant, lasting choice with meaningful alternatives that current guidance doesn't settle; routine details belong on the owning regular page. Its answer states only the decision, in about 60 words; reasoning and alternatives go in the linked discussion RFC. The document, directory and sidebar are separate writes; persistence_failed reports completed rooms and duplicate-safe recovery.\n\nHelp: create_doc, edit_doc, workspaces, tool-contracts, decisions, markdown.",
+    "description": "Create a regular page, memory or decision record, optionally with starting blocks, tags, a TL;DR (regular pages and memories) and a sidebar pin. A description is required, and a title except on a decision successor, which takes its topic's title. Memories accept optional agent and repository scope and have no lifecycle status. References are checked before writing; refusals create nothing. Create a decision record only for a significant, lasting choice with meaningful alternatives that current guidance doesn't settle; routine details belong on the owning regular page. Its answer states only the decision, in about 60 words; reasoning and alternatives go in the linked discussion RFC. The document, directory and sidebar are separate writes; persistence_failed reports completed rooms and duplicate-safe recovery.\n\nHelp: create_doc, edit_doc, workspaces, tool-contracts, decisions, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -716,7 +725,8 @@
           "description": "Only documents of this kind.",
           "type": "string",
           "enum": [
-            "decision"
+            "decision",
+            "memory"
           ]
         },
         "status": {
@@ -746,7 +756,33 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List documents from this replica's directory, including local writes the hub has not acknowledged yet, without opening document rooms. Rows carry uuid, title, tags, description, updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent when unknown) and pinned. Unfiltered listings omit decisions; kind, status, tag and has_open_threads include them. A decision topic row shows the record in force, else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. include_superseded lists every record; include_deleted adds archived rows (`deleted: true`). Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, threads and lifecycle details.\n\nHelp: list_docs, workspaces, tool-contracts, decisions.",
+    "description": "List documents from this replica's directory, including local writes the hub has not acknowledged yet, without opening document rooms. Rows carry uuid, title, tags, description, updatedAt (ISO 8601 UTC when known and representable), openThreadCount (absent when unknown) and pinned. Unfiltered listings omit decisions and memories; kind, status, tag and has_open_threads select matches. Memory rows carry kind and optional scope. A decision topic row shows the record in force, else pending, else first, with status, topic, discussion, answerPreview and inForce/pending/conflicts UUIDs. include_superseded lists every record; include_deleted adds archived rows (`deleted: true`). Filters combine; unknown tags refuse; has_open_threads accepts only true. get_doc reads code checks, threads and lifecycle details.\n\nHelp: list_docs, workspaces, tool-contracts, decisions.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "get_memories",
+    "title": "Read the memory index",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "The lowercase agent name to include, together with memories naming no agent. Omit to leave agents unfiltered.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The owner/name repository to include, together with memories naming no repository. Case is ignored. Omit to leave repositories unfiltered.",
+          "type": "string"
+        }
+      },
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "description": "Before starting work and whenever you look for a memory, call get_memories with your agent name and repository. Read the relevant memories with get_doc. Returns live memory UUIDs, titles, descriptions, optional agent and repository scope, and last change from the directory without opening document rooms. Each supplied filter includes matching and unscoped memories; omitted filters leave that side unfiltered. No filters returns all live memories. complete:false means the directory has not fully arrived.\n\nHelp: get_memories, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -789,11 +825,12 @@
           ]
         },
         "kind": {
-          "description": "Only regular documents (including stored requirements) or decision records, including superseded, rejected and withdrawn records.",
+          "description": "Only regular documents (including stored requirements), memories or decision records, including superseded, rejected and withdrawn records.",
           "type": "string",
           "enum": [
             "regular",
-            "decision"
+            "decision",
+            "memory"
           ]
         }
       },
@@ -803,7 +840,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Find live documents matching any query word in titles, descriptions, content, assigned tag names or code block languages. English word forms match; case/accents fold, underscores join adjacent words, trailing * matches stem prefixes. Use whole words or short prefixes: `decisi*` can miss `decision`, unlike `decis*`. Punctuation/emoji alone matches nothing. Title-weighted bm25 ranks without strict title-first or matched-word-count order. kind narrows to regular documents or decisions. tag accepts a catalog id/current name (case ignored) or list: any listed tag matches, more boost relevance; unknown tags refuse. Hits carry kind and canonical tags; decisions carry current state, including superseded/conflict. No hits proves neither an empty index nor replica completeness. Ask whether to create a missing needed page.\n\nHelp: search, workspaces, tool-contracts, decisions.",
+    "description": "Find live documents matching any query word in titles, descriptions, content, assigned tag names or code block languages. English word forms match; case/accents fold, underscores join adjacent words, trailing * matches stem prefixes. Use whole words or short prefixes: `decisi*` can miss `decision`, unlike `decis*`. Punctuation/emoji alone matches nothing. Title-weighted bm25 ranks without strict title-first or matched-word-count order. kind narrows to regular documents, decisions or memories; regular excludes memories. tag accepts a catalog id/current name (case ignored) or list: any listed tag matches, more boost relevance; unknown tags refuse. Hits carry kind and canonical tags; decisions carry current state, including superseded/conflict. No hits proves neither an empty index nor replica completeness. Ask whether to create a missing needed page.\n\nHelp: search, workspaces, tool-contracts, decisions.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -1269,6 +1306,30 @@
           "maxLength": 300,
           "description": "Regular pages: agent-only discovery text; a keyword list is fine. Decisions: short line on why this answer was chosen or what changed, shown in the topic's history."
         },
+        "agent": {
+          "description": "Memory only: one lowercase agent name without leading or trailing whitespace. A blank string or null clears it; omission keeps it.",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Memory only: one lowercase agent name, without leading or trailing whitespace. Omit for every agent; a blank string clears it."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repository": {
+          "description": "Memory only: one repository as owner/name, stored lowercase. A blank string or null clears it; omission keeps it.",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Memory only: one repository as owner/name; identity ignores letter case and is stored lowercase. Omit for the whole workspace; a blank string clears it."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tldr": {
           "description": "Person-facing regular-document summary, at most 300 characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.",
           "anyOf": [
@@ -1381,7 +1442,7 @@
         }
       }
     },
-    "description": "Change one or more of a document's title, description, TL;DR, tags, curated links and code check, or an open decision's discussion RFC. Name at least one field; omitted fields keep their values. The call is all or nothing: a refusal writes none of the named fields and names the failing `field`. Tags and links replace the whole set, and `[]` clears it. Title and description cannot be cleared; `tldr: null` clears the TL;DR. Decision records take no TL;DR or code check, and decided records also refuse discussion. Archived documents refuse every field; lifecycle status belongs to set_status.\n\nHelp: set_metadata, workspaces, tool-contracts, decisions.",
+    "description": "Change one or more of a document's title, description, TL;DR, tags, curated links and code check, or an open decision's discussion RFC or a memory's agent and repository scope. Blank or null scope clears it. Name at least one field; omitted fields keep their values. The call is all or nothing: a refusal writes none of the named fields and names the failing `field`. Tags and links replace the whole set, and `[]` clears it. Title and description cannot be cleared; `tldr: null` clears the TL;DR. Decision records take no TL;DR or code check, and decided records also refuse discussion. Archived documents refuse every field; lifecycle status belongs to set_status.\n\nHelp: set_metadata, workspaces, tool-contracts, decisions.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

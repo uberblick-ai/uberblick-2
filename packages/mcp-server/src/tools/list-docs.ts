@@ -36,7 +36,7 @@ export const listDocsOperation = operation(READ, inputSchema, (context, { tag, k
       (status === undefined || entry.status === status) &&
       (has_open_threads !== true || (entry.openThreadCount ?? 0) > 0);
   };
-  const documents = entries.filter(entry => entry.kind !== "decision" &&
+  const documents = entries.filter(entry => entry.kind !== "decision" && (hasPredicate || entry.kind !== "memory") &&
     (include_deleted || !entry.deleted) && matches(entry));
   const topics = resolveDecisionTopics(entries);
   const decisionRows = !hasPredicate ? [] : include_superseded
