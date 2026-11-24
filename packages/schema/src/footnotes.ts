@@ -1,5 +1,6 @@
 import { SchemaError } from "./errors.js";
 import type { BlockInput, InlineRun } from "./types.js";
+import { scanValueSources } from "./value-data.js";
 
 export function isFootnoteLabel(value: unknown): value is string {
   return typeof value === "string" && /^[^\s[\]\\]+$/u.test(value);
@@ -12,7 +13,9 @@ export function acceptsFootnoteReferences(type: string): boolean {
 /** Literal syntax ranges; odd backslash escapes keep an opener literal. */
 export function footnoteReferences(text: string): Array<{ from: number; to: number; label: string }> {
   const matches: Array<{ from: number; to: number; label: string }> = [];
+  const values = scanValueSources(text);
   for (const match of text.matchAll(/\[\^([^\s[\]\\]+)\]/gu)) {
+    if (values.some((range) => range.from <= match.index && match.index < range.to)) continue;
     let slashes = 0;
     for (let at = match.index - 1; at >= 0 && text[at] === "\\"; at -= 1) slashes += 1;
     if (slashes % 2 === 0) matches.push({ from: match.index, to: match.index + match[0].length, label: match[1] ?? "" });

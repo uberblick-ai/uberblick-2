@@ -3,7 +3,7 @@ import type { Mark, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { COMMENT_MARK, INLINE_ICONS } from "@uberblick/schema";
+import { COMMENT_MARK, INLINE_ICONS, scanValueSources } from "@uberblick/schema";
 import type { InlineIconName } from "@uberblick/schema";
 import { inlineIconSvg, inlineIconTokens } from "../inline-icons.js";
 import type { InlineIconToken } from "../inline-icons.js";
@@ -22,7 +22,9 @@ function ranges(node: ProseMirrorNode): { text: string; icons: IconRange[] } {
     text += child.isText ? child.text : "\ufffc".repeat(child.nodeSize);
     runs.push({ from: offset, to: offset + child.nodeSize, marks: child.marks });
   });
+  const values = scanValueSources(text);
   const icons = inlineIconTokens(text).flatMap((token): IconRange[] => {
+    if (values.some((value) => value.from < token.to && token.from < value.to)) return [];
     const touched = runs.filter((run) => run.from < token.to && token.from < run.to);
     const first = touched[0];
     if (first === undefined || touched.some((run) => run.marks.some((mark) => mark.type.spec.code || mark.type.name === "footnoteRef"))) return [];

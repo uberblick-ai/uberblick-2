@@ -27,6 +27,7 @@ import {
   INLINE_MARKS,
   canonicalDocumentUuid,
   isExternalHref,
+  scanValueSources,
 } from "@uberblick/schema";
 
 /**
@@ -60,10 +61,12 @@ const LINK_INPUT = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/;
 function outsideCode(pattern: RegExp): PasteRuleFinder {
   return (text) => {
     const codeSpans = [...text.matchAll(CODE_PASTE)];
+    const values = scanValueSources(text);
     return [...text.matchAll(pattern)]
       .filter((match) => {
         const matchEnd = match.index + match[0].length;
-        return !codeSpans.some((code) => {
+        return !values.some((value) => value.from <= match.index && match.index < value.to ||
+          value.from < matchEnd && matchEnd <= value.to) && !codeSpans.some((code) => {
           const codeEnd = code.index + code[0].length;
           return (
             (code.index <= match.index && match.index < codeEnd) ||
@@ -202,7 +205,13 @@ const InlineCode = Mark.create({
     return [markInputRule({ find: CODE_INPUT, type: this.type })];
   },
   addPasteRules() {
-    return [markPasteRule({ find: CODE_PASTE, type: this.type })];
+    return [markPasteRule({ find: (text) => {
+      const values = scanValueSources(text);
+      return [...text.matchAll(CODE_PASTE)].filter((match) =>
+        !values.some((value) => value.from <= match.index && match.index < value.to ||
+          value.from < match.index + match[0].length && match.index + match[0].length <= value.to))
+        .map((match) => ({ index: match.index, text: match[0], replaceWith: match[2] ?? "" }));
+    }, type: this.type })];
   },
 });
 

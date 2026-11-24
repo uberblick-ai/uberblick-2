@@ -1,5 +1,6 @@
 import { inlineLinkTarget, isExternalHref, pushInlineRun } from "./marks.js";
 import type { InlineRun } from "./types.js";
+import { scanValueSources } from "./value-data.js";
 
 export interface WebAddress {
   /** The address itself; angle delimiters, when present, are outside this range. */
@@ -65,7 +66,10 @@ export function matchWebAddress(source: string, from = 0): WebAddress | null {
 /** Address ranges in literal prose; this does not interpret Markdown formatting. */
 export function findWebAddresses(source: string): WebAddress[] {
   const result: WebAddress[] = [];
+  const values = new Map(scanValueSources(source).map((range) => [range.from, range]));
   for (let from = 0; from < source.length;) {
+    const value = values.get(from);
+    if (value !== undefined) { from = value.to; continue; }
     const angleEnd = angleAddressEnd(source, from);
     const address = matchWebAddress(source, from);
     if (address !== null) result.push(address);

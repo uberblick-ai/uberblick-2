@@ -3,7 +3,7 @@ import type { Mark, Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
-import { COMMENT_MARK, acceptsFootnoteReferences, footnoteReferences } from "@uberblick/schema";
+import { COMMENT_MARK, acceptsFootnoteReferences, footnoteReferences, scanValueSources } from "@uberblick/schema";
 import { absolutePositionToRelativePosition, relativePositionToAbsolutePosition, ySyncPluginKey } from "y-prosemirror";
 import type { ProsemirrorBinding } from "y-prosemirror";
 import type * as Y from "yjs";
@@ -52,7 +52,9 @@ export function footnoteIndex(doc: PMNode): { references: FootnoteReference[]; n
       text += marked ? child.text : "\ufffc".repeat(child.nodeSize);
       runs.push({ from: offset, to: offset + child.nodeSize, marks: child.marks });
     });
+    const values = scanValueSources(node.textContent);
     for (const range of footnoteReferences(text)) {
+      if (values.some((value) => value.from < range.to && range.from < value.to)) continue;
       const touched = runs.filter((run) => run.from < range.to && range.from < run.to);
       if (touched.length === 0 || touched.some((run) => !run.marks.some((mark) => mark.type.name === "footnoteRef") ||
         run.marks.some((mark) => mark.type.spec.code || mark.type.name === "link" || mark.type.name === "docLink"))) continue;

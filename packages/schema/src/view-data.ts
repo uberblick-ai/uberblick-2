@@ -53,7 +53,7 @@ interface CollectionProblem {
 }
 
 /** Collection validation never repairs or modifies the detached shared snapshot. */
-export function bindCollection(data: DocData | null, collectionName: string, label: "Chart" | "Table"):
+export function bindCollection(data: DocData | null, collectionName: string, label: "Chart" | "Table" | "Value"):
   { status: "ready"; collection: DataCollection; schema: DataSchema } | CollectionProblem {
   const collection = data?.collections.find((candidate) => candidate.name === collectionName);
   if (collection === undefined) return { status: "collection-absent", message: `${label} collection “${collectionName}” is absent.` };
