@@ -191,7 +191,12 @@ with `get_doc` the pages whose descriptions bear on your task. Whenever you
 learn a fact that cost time to find and will matter again, such as a tooling
 gotcha, an environment quirk or where something lives, save it: update the page
 that already holds it, or create one with `create_doc`, the tag, a title naming
-the fact and a one-line description. Before you finish, check whether you
+the fact and a one-line description that opens with when it holds, such as
+the runtime, a headless or interactive session and the operating system where
+it matters. Before relying on a memory, check that it holds where you run; when
+it does not, narrow its conditions in place rather than saving one that
+contradicts it. Nothing that binds a memory to one machine, such as a local
+path, a hostname or one person's setup, belongs in it. Before you finish, check whether you
 learned such a fact and have not saved it yet. Check each write like any other
 corpus write. When a memory works around a gap in configuration or
 instructions, also name the gap in the run's retrospective, so a maintainer can
