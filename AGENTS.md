@@ -186,10 +186,11 @@ context when the assignment, governing decision or relevant source changes.
 
 Agent memory lives on the corpus page `Agent memory` (tag `workflow`), not in a
 runtime's local memory, so every machine and runtime reads the same facts. Find
-it with `search` and read it with `get_doc` before you start work. When you
+it with `search` and read it with `get_doc` before you start work. Whenever you
 learn a fact that the page says belongs there, add it with `insert_block` at the
-end of its Facts section and check the write like any other corpus write. This
-is the one corpus write a delivery role makes without a `Corpus update`.
+end of its Facts section and check the write like any other corpus write. Add as
+many facts as you learn; adding to this page is the only corpus edit a delivery
+role makes without a `Corpus update`.
 
 ## Change instructions coherently
 
