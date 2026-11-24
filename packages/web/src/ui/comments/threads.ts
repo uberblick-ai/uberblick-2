@@ -54,7 +54,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   figma: "Figma",
 };
 
-/** Use one-based kind and position labels in both composer and cards. */
+/** Use one-based kind and position labels for comment targets. */
 export function blockRefLabel(type: BlockType, index: number, source = ""): string {
   let label = BLOCK_LABELS[type];
   if (type === "chart") {
@@ -63,6 +63,8 @@ export function blockRefLabel(type: BlockType, index: number, source = ""): stri
       if (mapping !== null && typeof mapping === "object" && "type" in mapping) {
         if (mapping.type === "table") label = "Data table";
         else if (mapping.type === "scatter") label = "Scatter plot";
+        else if (mapping.type === "bar") label = "Bar chart";
+        else if (mapping.type === "dot") label = "Dot plot";
       }
     } catch { /* Incomplete source keeps the chart label. */ }
   }

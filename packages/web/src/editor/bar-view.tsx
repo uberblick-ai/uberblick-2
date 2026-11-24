@@ -112,7 +112,7 @@ export function chartTooltipLines(label: string, width: number, measure: (text: 
 function references(read: () => BarReady | null, readColors: () => CSSStyleDeclaration): Plugin<"bar"> {
   return {
     id: "category-bar-references",
-    beforeDatasetsDraw(instance) {
+    afterDatasetsDraw(instance) {
       const result = read();
       if (result === null) return;
       const horizontal = result.config.orientation === "horizontal";
