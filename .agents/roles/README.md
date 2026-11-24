@@ -8,6 +8,9 @@ issue contract and [delivery-policy.md](../protocols/delivery-policy.md) the gat
 
 ## One run, one item, one outcome
 
+Before anything else, read the shared memories under
+[AGENTS.md's Shared memory](../../AGENTS.md#shared-memory).
+
 ub-agents is the tool that selects work using priority and other scheduling
 factors, launches delivery roles, and advances the workflow from their reported
 outcomes. A run gets one assigned issue or pull request — for a pull request,
