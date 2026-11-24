@@ -120,12 +120,24 @@ A topic is the question; it keeps its identity while its answer changes. The fir
 
 - \`create_doc\` with \`kind: "decision"\` creates an open record, or a decided one with its answer. \`set_status\` moves it later, or turns an ordinary page into a decision record.
 - An open record may be empty or hold a proposal. Moving to \`decided\` needs a non-blank answer.
-- A topic's first record may be decided as an agent stance without a person. Every later decision, and confirming a stance, needs \`answer: {who, when, where}\`: who gave the answer, when and where. \`when\` is an ISO 8601 date-time with a time zone, e.g. \`2026-10-24T10:55:00Z\`; pass the current time if the answer was given just now. MCP normalises it to UTC and stores the attribution without verifying it, so have that authority first.
+- The decision's answer text goes in \`blocks\`. The \`answer: {who, when, where}\` field records a person's approval or rejection: who answered, when and where. It does not contain the decision text. \`when\` is an ISO 8601 date-time with a time zone, e.g. \`2026-10-24T10:55:00Z\`; pass the current time if the answer was given just now. MCP normalises it to UTC.
+- Where workspace rules permit, the first record may become \`decided\` as an \`agentStance\` without human attribution and may be in force. An open successor needs no approval. Deciding a successor or confirming an agent stance requires recording a person's actual answer. Follow workspace authority rules; MCP does not verify that approval.
 - An open proposal may be withdrawn. Rejecting needs a reason and a person's answer. Decided records cannot reopen; rejected and withdrawn records are final.
+
+To confirm an existing agent stance after a person accepts its current answer:
+
+\`\`\`javascript
+set_status({
+  uuid: "<record-uuid>", status: "decided",
+  answer: {who: "<person>", when: "2026-10-24T10:55:00Z", where: "<source>"}
+})
+\`\`\`
+
+Use the actual attribution; confirmation keeps the record \`decided\` and clears its agent-stance marker.
 
 ## Changing a decided answer
 
-A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable after the record is decided, and a rename keeps the approval. The description is a short line on why this answer was chosen or what changed; people see it in the topic's history. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State only the changed decision in the successor's answer; put the reasoning in the successor's own linked RFC. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\` until a person's answer is recorded again.
+A decided record's answer is read-only: content writes refuse with \`decision_read_only\`. Title, description, tags, links and comments stay editable after the record is decided, and a rename keeps the approval. The description is a short line on why this answer was chosen or what changed; people see it in the topic's history. To change the answer, create a successor with \`create_doc\`, \`kind: "decision"\` and \`supersedes\` naming the record it replaces. It joins the same topic, and the current answer stays in force while the successor is open. State only the changed decision in the successor's answer; put the reasoning in the successor's own linked RFC. An answer edit that still arrives, for example from an offline editor, shows \`approvalChanged: true\`: the current content differs from what was approved. Record approval again only when a person accepts that current content.
 
 ## Discussion and related pages
 

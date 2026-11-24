@@ -18,9 +18,14 @@ afterEach(async () => {
   removeTempDirs();
 });
 
-it("documents the zoned decision-answer time and current-time guidance", async () => {
+it("documents decision approval authority and zoned answer-time guidance", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "decisions" });
+  expect(text).toContain("Where workspace rules permit, the first record may become `decided` as an `agentStance`");
+  expect(text).toContain("To confirm an existing agent stance after a person accepts its current answer:");
+  expect(text).toContain("Use the actual attribution; confirmation keeps the record `decided` and clears its agent-stance marker.");
+  expect(text).toContain("`approvalChanged: true`: the current content differs from what was approved.");
+  expect(text).toContain("Record approval again only when a person accepts that current content.");
   expect(text).toContain("`when` is an ISO 8601 date-time with a time zone");
   expect(text).toContain("`2026-10-24T10:55:00Z`");
   expect(text).toContain("pass the current time if the answer was given just now");
