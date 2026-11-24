@@ -3,7 +3,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
-import { findWebAddresses } from "@uberblick/schema";
+import { findWebAddresses, scanValueSources } from "@uberblick/schema";
 import { ySyncPluginKey } from "y-prosemirror";
 import { endUndoCapture } from "./blocks.js";
 
@@ -21,12 +21,16 @@ function addresses(doc: PMNode, range: Range): Address[] {
     if (!node.isTextblock) return !node.type.spec.code;
     if (node.type.spec.code || !node.type.allowsMarkType(link)) return false;
     const protectedRanges: Range[] = [];
+    let unprotected = "";
     node.forEach((child, offset) => {
       const blocked = child.marks.some((mark) => mark.type.spec.code || mark.type.name === "link" || mark.type.name === "docLink" || mark.type.name === "footnoteRef");
       if (!child.isText || blocked) protectedRanges.push({ from: offset, to: offset + child.nodeSize });
+      unprotected += child.isText && !blocked ? child.text : "\ufffc".repeat(child.nodeSize);
     });
     const source = node.textBetween(0, node.content.size, "", "\n");
-    for (const match of findWebAddresses(source)) {
+    const matches = findWebAddresses(source, protectedRanges);
+    protectedRanges.push(...scanValueSources(unprotected, { includeIncomplete: true }));
+    for (const match of matches) {
       const from = pos + 1 + match.from;
       const to = pos + 1 + match.to;
       if (from < range.from || to > range.to || protectedRanges.some((part) => part.from < match.to && match.from < part.to)) continue;

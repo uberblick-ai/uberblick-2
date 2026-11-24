@@ -1,5 +1,6 @@
 import { SchemaError } from "./errors.js";
 import type { BlockInput, InlineRun } from "./types.js";
+import { scanValueSources } from "./value-data.js";
 
 export function isFootnoteLabel(value: unknown): value is string {
   return typeof value === "string" && /^[^\s[\]\\]+$/u.test(value);
@@ -10,9 +11,12 @@ export function acceptsFootnoteReferences(type: string): boolean {
 }
 
 /** Literal syntax ranges; odd backslash escapes keep an opener literal. */
-export function footnoteReferences(text: string): Array<{ from: number; to: number; label: string }> {
+export function footnoteReferences(text: string, protectedRanges: readonly { from: number; to: number }[] = []): Array<{ from: number; to: number; label: string }> {
   const matches: Array<{ from: number; to: number; label: string }> = [];
+  const values = scanValueSources(text).filter((value) =>
+    !protectedRanges.some((range) => range.from < value.to && value.from < range.to));
   for (const match of text.matchAll(/\[\^([^\s[\]\\]+)\]/gu)) {
+    if (values.some((range) => range.from <= match.index && match.index < range.to)) continue;
     let slashes = 0;
     for (let at = match.index - 1; at >= 0 && text[at] === "\\"; at -= 1) slashes += 1;
     if (slashes % 2 === 0) matches.push({ from: match.index, to: match.index + match[0].length, label: match[1] ?? "" });
@@ -62,7 +66,7 @@ export function referenceInline(runs: readonly InlineRun[]): InlineRun[] {
     offset += run.text.length;
     return run.marks.inlineCode || run.marks.link !== undefined || run.marks.docLink !== undefined ? [{ from, to: offset }] : [];
   });
-  const matches = footnoteReferences(source).filter((match) => !protectedRanges.some((range) => range.from < match.to && match.from < range.to));
+  const matches = footnoteReferences(source, protectedRanges).filter((match) => !protectedRanges.some((range) => range.from < match.to && match.from < range.to));
   const result: InlineRun[] = [];
   offset = 0;
   let at = 0;

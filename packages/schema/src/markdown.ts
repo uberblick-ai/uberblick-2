@@ -27,6 +27,7 @@ import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import { angleAddressEnd, matchWebAddress } from "./autolinks.js";
 import { footnoteReferences, isFootnoteLabel, splitFootnoteRuns } from "./footnotes.js";
+import { scanValueSources } from "./value-data.js";
 import type {
   Block,
   BlockType,
@@ -146,6 +147,78 @@ interface EscapeContext {
    * A neighboring emitted ~~ can absorb a lone ~ across a run boundary.
    */
   hugged: boolean;
+  values?: boolean;
+}
+
+function valueSourceMap(text: string, enabled: boolean | undefined, insideLabel: boolean) {
+  return new Map((enabled && !insideLabel ? scanValueSources(text) : []).map((range) => [range.from, range]));
+}
+
+function inlineValueSource(sources: ReturnType<typeof valueSourceMap>, source: string, at: number) {
+  return sources.get(at) ?? (source[at] === "\\" ? sources.get(at + 1) : undefined);
+}
+
+function protectedInlineRanges(source: string): Array<{ from: number; to: number }> {
+  if (!source.includes(":value{")) return [];
+  const values = valueSourceMap(source, true, false);
+  const ranges: Array<{ from: number; to: number }> = [];
+  for (let at = 0; at < source.length;) {
+    const value = inlineValueSource(values, source, at);
+    if (value !== undefined) { at = value.to; continue; }
+    const code = source[at] === "`" ? matchCodeSpan(source, at) : null;
+    const link = source[at] === "[" ? matchLink(source, at) : null;
+    const next = code?.next ?? link?.next;
+    if (next !== undefined) ranges.push({ from: at, to: next });
+    at = next ?? at + 1;
+  }
+  return ranges;
+}
+
+function valueNewlineToken(source: string): string {
+  let token = "\uE000value-newline\uE001";
+  while (source.includes(token)) token += "\uE001";
+  return token;
+}
+
+function restoreValueNewlines(source: string, token: string): string {
+  return source.replaceAll(`${token}n`, "\n").replaceAll(`${token}r`, "\r").replaceAll(`${token}c`, "\r\n");
+}
+
+/** Only JSON whitespace is hidden from block-level line handling. */
+function maskValueNewlines(source: string, token = valueNewlineToken(source)) {
+  const sources = valueSourceMap(source, true, false);
+  const replacements: Array<{ from: number; to: number; source: string }> = [];
+  for (let at = 0; at < source.length;) {
+    const value = inlineValueSource(sources, source, at);
+    if (value !== undefined) {
+      if (/[\r\n]/.test(value.source)) {
+        try {
+          JSON.parse(value.source.slice(6));
+          replacements.push(value);
+        } catch { /* Malformed JSON follows ordinary block boundaries. */ }
+      }
+      at = value.to;
+      continue;
+    }
+    const code = source[at] === "`" ? matchCodeSpan(source, at) : null;
+    const link = source[at] === "[" ? matchLink(source, at) : null;
+    at = code?.next ?? link?.next ?? at + 1;
+  }
+  let text = "";
+  let from = 0;
+  for (const replacement of replacements) {
+    text += source.slice(from, replacement.from) + replacement.source.replace(/\r\n?|\n/g,
+      (ending) => `${token}${ending === "\n" ? "n" : ending === "\r" ? "r" : "c"}`);
+    from = replacement.to;
+  }
+  text += source.slice(from);
+  return { text, restore: (value: string) => restoreValueNewlines(value, token) };
+}
+
+function withValueNewlines(source: string, render: (source: string) => string, enabled = true): string {
+  if (!enabled) return render(source);
+  const masked = maskValueNewlines(source);
+  return masked.restore(render(masked.text));
 }
 
 /**
@@ -155,7 +228,10 @@ interface EscapeContext {
  */
 function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
+  const values = valueSourceMap(text, context.values, context.insideLabel);
   for (let i = 0; i < text.length; i += 1) {
+    const value = values.get(i);
+    if (value !== undefined) { out += value.source; i = value.to - 1; continue; }
     const char = text[i] as string;
     if (char === "\\" || char === "`" || char === "*" || char === "[" || char === "<" || (context.table === true && [">", "&", "!", "]"].includes(char))) {
       out += `\\${char}`;
@@ -397,11 +473,11 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
  * code spans without a writable separator.
  */
 // known limit: unbracketed plain addresses link on re-import; revisit when Markdown supports preserving an unlinked address.
-export function renderInline(source: readonly InlineRun[], table = false, footnotes = false): string {
+export function renderInline(source: readonly InlineRun[], table = false, footnotes = false, values = table || footnotes): string {
   let out = "";
   const open: OpenMark[] = [];
 
-  const runs: InlineRun[] = whitespaceSafe(coalesceCodeRuns(merged(source)));
+  const runs: InlineRun[] = whitespaceSafe(coalesceCodeRuns(merged(values ? valueSourceRuns(source) : source)));
   // A single unmarked run has no delimiter anywhere near it; anything else might.
   const hugged = runs.length > 1 || hasInlineMarks(runs[0]?.marks ?? {});
   const orders = markOrders(runs);
@@ -484,6 +560,7 @@ export function renderInline(source: readonly InlineRun[], table = false, footno
       insideLabel: open.some((entry) => entry.name === "link"),
       hugged,
       table,
+      values,
     };
     out +=
       marks.inlineCode === true
@@ -499,6 +576,40 @@ export function renderInline(source: readonly InlineRun[], table = false, footno
     closeDownTo(0, held);
   } else {
     closeDownTo(0);
+  }
+  return out;
+}
+
+/** Source bytes stay contiguous even when stored formatting splits the object. */
+function valueSourceRuns(runs: readonly InlineRun[]): InlineRun[] {
+  const text = runs.map((run) => run.text).join("");
+  let offset = 0;
+  const protectedRanges = runs.flatMap((run) => {
+    const from = offset;
+    offset += run.text.length;
+    return run.marks.inlineCode || inlineLinkTarget(run.marks) !== undefined ? [{ from, to: offset }] : [];
+  });
+  const sources = scanValueSources(text).filter((source) =>
+    !protectedRanges.some((range) => source.from < range.to && range.from < source.to));
+  const out: InlineRun[] = [];
+  offset = 0;
+  let at = 0;
+  for (const run of runs) {
+    const end = offset + run.text.length;
+    let from = offset;
+    while (from < end) {
+      while (sources[at] !== undefined && (sources[at]?.to ?? 0) <= from) at += 1;
+      const source = sources[at];
+      if (source !== undefined && source.from <= from) {
+        if (source.from === from) pushInlineRun(out, source.source, run.marks);
+        from = Math.min(end, source.to);
+      } else {
+        const to = Math.min(end, source?.from ?? end);
+        pushInlineRun(out, text.slice(from, to), run.marks);
+        from = to;
+      }
+    }
+    offset = end;
   }
   return out;
 }
@@ -557,7 +668,7 @@ function renderBlock(
     case "heading": {
       const level = block.level ?? 1;
       // Headings are single-line by definition; fold any stray newlines.
-      const text = renderInline(inline, false, footnotes).replace(/\s*\n\s*/g, " ").trim();
+      const text = withValueNewlines(renderInline(inline, false, footnotes), (source) => source.replace(/\s*\n\s*/g, " ").trim(), footnotes);
       return `${"#".repeat(level)} ${text}`.trimEnd();
     }
     case "code": {
@@ -575,21 +686,23 @@ function renderBlock(
     }
     case "list-item": {
       // Flat items cannot represent continuation blocks; fold to one line.
-      const text = renderInline(inline, false, footnotes).replace(/\s*\n\s*/g, " ").trim();
+      const text = withValueNewlines(renderInline(inline, false, footnotes), (source) => source.replace(/\s*\n\s*/g, " ").trim(), footnotes);
       return `${marker}${THEMATIC_BREAK_LINE.test(`${marker}${text}`) ? `\\${text}` : text}`.trimEnd();
     }
     case "quote":
       // Every line marked, so a multi-line quote comes back as one block.
-      return renderInline(inline, false, footnotes)
+      return withValueNewlines(renderInline(inline, false, footnotes), (source) => source
         .split("\n")
         .map((line) => `> ${line}`.trimEnd())
-        .join("\n");
+        .join("\n"), footnotes);
     case "callout": {
       const body = renderInline(inline, false, footnotes).replace(/^<!-- icon:/, "\\<!-- icon:");
-      const lines = [`[!${(block.variant ?? "note").toUpperCase()}]`];
-      if (block.icon !== undefined) lines.push(`<!-- icon: ${block.icon} -->`);
-      lines.push(...body.split("\n"));
-      return lines.map((line) => line === "" ? ">" : `> ${line}`).join("\n");
+      return withValueNewlines(body, (source) => {
+        const lines = [`[!${(block.variant ?? "note").toUpperCase()}]`];
+        if (block.icon !== undefined) lines.push(`<!-- icon: ${block.icon} -->`);
+        lines.push(...source.split("\n"));
+        return lines.map((line) => line === "" ? ">" : `> ${line}`).join("\n");
+      }, footnotes);
     }
     case "table":
       // Unnormalized tables have no structured marked cells to render.
@@ -1184,9 +1297,10 @@ function flanking(
 }
 
 /** Resolve escapes, literal code and recursive link labels before emphasis. */
-function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true, footnotes = false): Token[] {
+function tokenizeInline(source: string, marks: InlineMarkSet, table = false, autolinks = true, footnotes = false, values = table || footnotes): Token[] {
   const tokens: Token[] = [];
-  const references = new Map((footnotes ? footnoteReferences(source) : []).map((reference) => [reference.from, reference] as const));
+  const sources = valueSourceMap(source, values, inlineLinkTarget(marks) !== undefined);
+  const references = new Map((footnotes ? footnoteReferences(source, protectedInlineRanges(source)) : []).map((reference) => [reference.from, reference] as const));
   let plain = "";
   const flush = (): void => {
     if (plain !== "") tokens.push({ kind: "text", text: plain, marks });
@@ -1196,6 +1310,13 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false, aut
   let i = 0;
   while (i < source.length) {
     const char = source[i] as string;
+
+    const value = inlineValueSource(sources, source, i);
+    if (value !== undefined) {
+      plain += value.source;
+      i = value.to;
+      continue;
+    }
 
     if (char === "\\") {
       const next = source[i + 1];
@@ -1224,7 +1345,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false, aut
       const link = matchLink(source, i);
       if (link !== null) {
         flush();
-        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table, autolinks));
+        tokens.push(...tokenizeInline(link.label, { ...marks, ...link.marks }, table, autolinks, false, false));
         i = link.next;
         continue;
       }
@@ -1632,6 +1753,31 @@ function advanceColumn(text: string, column: number): number {
   return at;
 }
 
+/** Prose can contain JSON whitespace without letting it start another block. */
+function proseValueLine(lines: readonly string[], endings: readonly string[], start: number, token: string): { line: string; last: number } {
+  const line = lines[start] ?? "";
+  const literal = !line.includes(":value{") || FENCE_LINE.test(line.trim()) || COMMENT_LINE.test(line.trim()) ||
+    line === ":::card" || line === ":::figma" || footnoteDefinition(line) !== null;
+  if (literal) return { line, last: start };
+  const complete = new Set(scanValueSources(line).map((source) => source.from));
+  if (scanValueSources(line, { includeIncomplete: true }).every((source) => complete.has(source.from))) {
+    return { line, last: start };
+  }
+  const tail = lines.slice(start).map((part, offset) => part + (endings[start + offset] ?? "")).join("");
+  const masked = maskValueNewlines(tail, token).text.replace(/\r\n?/g, "\n");
+  const end = masked.indexOf("\n");
+  const joined = end === -1 ? masked : masked.slice(0, end);
+  return { line: joined, last: start + joined.split(token).length - 1 };
+}
+
+function restoreImportedValueNewlines(blocks: readonly ImportedBlock[], token: string): ImportedBlock[] {
+  return blocks.map((block) => ({
+    ...block,
+    text: restoreValueNewlines(block.text, token),
+    ...(block.inline === undefined ? {} : { inline: block.inline.map((run) => ({ ...run, text: restoreValueNewlines(run.text, token) })) }),
+  }));
+}
+
 /**
  * Frontmatter title wins; otherwise consume a leading H1 as title. Other
  * headings stay blocks. Flat list items cannot contain continuation/nested blocks;
@@ -1641,9 +1787,11 @@ function advanceColumn(text: string, column: number): number {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One line scanner owns the open paragraph, quote and list-column state that every block syntax must flush or extend.
 export function importMarkdown(markdown: string): ImportedDoc {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const lineEndings = markdown.match(/\r\n?|\n/g) ?? [];
   const front = parseFrontmatter(lines);
   const blocks: ImportedBlock[] = [];
   const footnotes = front.kind !== "decision";
+  const valueNewline = valueNewlineToken(markdown);
   const prose = (type: ProseBlockType, source: string): ImportedBlock => proseBlock(type, source, footnotes);
 
   let paragraph: string[] = [];
@@ -1675,7 +1823,9 @@ export function importMarkdown(markdown: string): ImportedDoc {
   };
 
   for (let i = front.bodyStart; i < lines.length; i += 1) {
-    const line = lines[i] ?? "";
+    const logical = footnotes ? proseValueLine(lines, lineEndings, i, valueNewline) : { line: lines[i] ?? "", last: i };
+    const line = logical.line;
+    i = logical.last;
     const trimmed = line.trim();
 
     if (trimmed === "") {
@@ -1717,6 +1867,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
     // paragraph would be swallowed into an unintended table.
     const delimiterLine = lines[i + 1] ?? "";
     if (
+      !line.includes(valueNewline) &&
       parseGfmTable(`${line}\n${delimiterLine}`) !== null &&
       LIST_LINE.exec(delimiterLine) === null
     ) {
@@ -1851,5 +2002,5 @@ export function importMarkdown(markdown: string): ImportedDoc {
     paragraph.push(line);
   }
   flush();
-  return finishImport(front, blocks);
+  return finishImport(front, restoreImportedValueNewlines(blocks, valueNewline));
 }

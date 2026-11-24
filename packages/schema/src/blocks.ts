@@ -700,7 +700,7 @@ function referenceEditedText(text: Y.XmlText, source: string, inserted: Array<{ 
     if (run.marks.inlineCode || run.marks.link !== undefined || run.marks.docLink !== undefined) protectedRanges.push({ from: offset, to: end });
     offset = end;
   }
-  const references = footnoteReferences(source).filter((match) =>
+  const references = footnoteReferences(source, protectedRanges).filter((match) =>
     !protectedRanges.some((range) => range.from < match.to && match.from < range.to)
     && (inserted.some((range) => range.from < match.to && match.from < range.to)
       || markedRanges.some((range) => range.from <= match.from && match.to <= range.to)));
@@ -720,7 +720,7 @@ function linkEditedAddresses(text: Y.XmlText, source: string, inserted: Array<{ 
     }
     offset = end;
   }
-  for (const match of findWebAddresses(source)) {
+  for (const match of findWebAddresses(source, protectedRanges)) {
     if (!inserted.some(range => range.from < match.to && match.from < range.to)) continue;
     // known limit: editing a link's label keeps its target; revisit when explicit retarget-on-edit is supported.
     if (protectedRanges.some(range => range.from < match.to && match.from < range.to)) continue;

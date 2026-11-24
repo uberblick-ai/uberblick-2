@@ -20,6 +20,7 @@ import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
+import { InlineValues } from "./inline-values.js";
 import { Footnotes } from "./footnotes.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
@@ -513,6 +514,7 @@ export function createRevisionInline(options: CreateRevisionEditorOptions): Revi
       GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }), InlineIcons, PersonMentions, ToggleHeadings,
       // known limit: Inline footnote numbers include removed references; revisit when comparison sides have separate reference projections.
       Footnotes.configure({ history: true }),
+      InlineValues.configure({ ydoc: options.after }),
     ],
     content: model.content,
     editable: false,

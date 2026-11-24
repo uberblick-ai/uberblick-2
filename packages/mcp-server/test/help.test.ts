@@ -37,6 +37,41 @@ function jsonSection(text: string, heading: string): any {
   return JSON.parse(json);
 }
 
+it("teaches sentence values while MCP preserves source and reads values deliberately", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "data" });
+  const section = text.split("### Values in sentences\n")[1]?.split("A `chart` block")[0];
+  const source = section?.match(/:value\{[^\n]+\}/)?.[0];
+  expect(source).toBeDefined();
+  expect(JSON.parse(source!.slice(6))).toMatchObject({
+    collection: "results", filter: { system: "Whisper turbo" }, field: "wer", format: "number", decimals: 1,
+  });
+  for (const rule of ["exactly one schema-valid record", "Required keys", "0 to 10",
+    "paragraphs, headings, list items, quotes, callouts and ordinary table cells",
+    "Inline code, link text, cards, Figma captions, footnote notes, decision answers and source blocks",
+    "Absent, Null and Invalid", "Unreadable sources, missing collections, unusable collections, no matching record and several matching records",
+    "no record is picked by position", "Hovering, selecting or focusing", "shown revision's data",
+    "clipboard carries the stored source", "Use `get_data` to read the value itself"]) {
+    expect(section, rule).toContain(rule);
+  }
+  expect((await rig.ok("get_help", { topic: "markdown" })).text)
+    .toContain("[Structured data and views](uberblick://help/data)");
+  const invalid = ':value{"collection":"results","filter":{},"field":"wer","label":"Keep as written"}';
+  const created = await rig.ok("create_doc", {
+    title: "Sentence values", description: "A deliberate data read.",
+    blocks: [{ type: "paragraph", text: source }, { type: "paragraph", text: invalid }],
+  });
+  expect(created.blocks.every((block: Record<string, unknown>) => !Object.hasOwn(block, "chart"))).toBe(true);
+  await rig.ok("update_data", {
+    uuid: created.uuid, operations: [{ collection: "results", schema: { version: 1, schema: { type: "object" } },
+      upsert: [{ id: "turbo", value: { system: "Whisper turbo", wer: 10 } }] }],
+  });
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks.map((block: { text: string }) => block.text))
+    .toEqual([source, invalid]);
+  expect((await rig.ok("get_data", { uuid: created.uuid, collection: "results" })).records)
+    .toMatchObject([{ id: "turbo", value: { system: "Whisper turbo", wer: 10 } }]);
+});
+
 it("publishes a valid category-bar example and its private summary on every chart-writing help surface", async () => {
   const rig = await local();
   for (const topic of ["data", "create_doc", "insert_block", "edit_block"]) {

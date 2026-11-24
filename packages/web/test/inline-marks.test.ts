@@ -150,3 +150,30 @@ it.each(forms.filter(([delimiter]) => delimiter === "**" || delimiter === "_"))(
     ]);
   },
 );
+
+it.each(["stored code", "stored link", "raw code"] as const)("pastes ordinary marks after a %s value opener", (context) => {
+  const { ydoc, blockId, editor } = typingDoc();
+  const tail = '"x":"**bold** _italic_ ~~strike~~ `code`"}';
+  if (context === "raw code") pastePlainText(editor, `\`:value{\` ${tail}`);
+  else {
+    const opener = context === "stored code" ? "<code>:value{</code>" : '<a href="https://example.org">:value{</a>';
+    const event = new Event("paste") as ClipboardEvent;
+    const html = `<p>${opener} ${tail}</p>`;
+    Object.defineProperty(event, "clipboardData", { value: { getData: () => html } });
+    editor.view.pasteHTML(html, event);
+  }
+  const inline = getBlockInline(ydoc, blockId)!;
+  for (const [text, mark] of [["bold", "bold"], ["italic", "italic"], ["strike", "strike"], ["code", "inlineCode"]] as const) {
+    expect(inline).toContainEqual({ text, marks: { [mark]: true } });
+  }
+});
+
+it.each([false, true])("keeps punctuation in a complete pasted source literal (linked %s)", (linked) => {
+  const { ydoc, blockId, editor } = typingDoc();
+  const source = ':value{"collection":"results","filter":{"system":"**bold** _italic_ ~~strike~~ `code`"},"field":"wer"}';
+  const html = linked ? `<p><a href="https://example.org">${source}</a></p>` : `<p>${source}</p>`;
+  const event = new Event("paste") as ClipboardEvent;
+  Object.defineProperty(event, "clipboardData", { value: { getData: () => html } });
+  editor.view.pasteHTML(html, event);
+  expect(getBlockInline(ydoc, blockId)).toEqual([{ text: source, marks: linked ? { link: "https://example.org" } : {} }]);
+});

@@ -21,6 +21,7 @@ import { WebAddresses } from "./web-addresses.js";
 import { GitHubLinks } from "./github-links.js";
 import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
+import { InlineValues } from "./inline-values.js";
 import { PersonMentions } from "./person-mentions.js";
 import { EmojiTyping } from "./emoji-menu.js";
 import { FootnoteTyping } from "./footnote-menu.js";
@@ -143,6 +144,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     WebAddresses,
     GitHubLinks.configure({ settings: options.workspaceSettings ?? null, states: options.githubStates ?? null }),
     InlineIcons,
+    InlineValues.configure({ ydoc, decisionAnswer: options.decisionAnswer ?? (() => false) }),
     PersonMentions,
     EmojiTyping,
     ToggleHeadings,

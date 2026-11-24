@@ -23,6 +23,7 @@ import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
 import type { GitHubItemStates } from "../github-item-states.js";
 import { InlineIcons } from "./inline-icons.js";
+import { InlineValues } from "./inline-values.js";
 import { Footnotes } from "./footnotes.js";
 import { PersonMentions } from "./person-mentions.js";
 import { ListBlocks } from "./list-keys.js";
@@ -343,6 +344,7 @@ function sideEditor(element: Element, content: JSONContent, data: Y.Doc, rows: r
       DocLinks.configure({ context: docLinks }), ExternalLinks,
       GitHubLinks.configure({ settings: workspaceSettings, states: githubStates }), InlineIcons, PersonMentions, ToggleHeadings,
       Footnotes.configure({ history: true }),
+      InlineValues.configure({ ydoc: data }),
     ],
     content,
     editable: false,

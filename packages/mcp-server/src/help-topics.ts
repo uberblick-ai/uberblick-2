@@ -162,6 +162,8 @@ A \`json-tree\` fence is an ordinary code block that the web editor shows as a f
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Bare \`http(s)://\` and \`www.\` addresses and \`<https://example.com>\` become ordinary external links when written; \`www.\` opens with HTTPS. Sentence-ending punctuation and unmatched closing parentheses stay outside the link. Other schemes in angle brackets stay text. Existing links and document links, inline code and source blocks are excluded. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
+The web draws \`:value{…}\` source in prose as one value from the document's data; [Structured data and views](uberblick://help/data) describes its format, supported contexts and problem markers. Markdown preserves the stored source exactly, apart from pipe escaping in GFM table cells.
+
 **Column widths.** Unsized columns share the width equally. After writing a table, give each short column (names, labels, states, dates, numbers) the width of its longest cell, header included: about 8 px per character plus 32 px, at least 120 px. Leave the prose column unsized so it takes the rest; when two columns hold prose, leave both unsized. Never narrow a prose column to fit more columns: if a row still reads badly at full width, use a list or split the table.
 
 Example: in a table with columns \`Circle\` and \`Who is in it\`, the longest Circle value is "Subscribers" (11 × 8 + 32 = 120), so the agent sends \`{ "column_widths": [120, null] }\`.
@@ -744,6 +746,22 @@ Records are ordinary JSON objects, including nested objects and arrays, with fin
 Canonical UTF-8 JSON limits are ${DATA_LIMITS.area} bytes (4 MiB) for the data area including keys, ${DATA_LIMITS.record} bytes (64 KiB) per record and per collection schema, and ${DATA_LIMITS.operation} bytes (1 MiB) for schemas plus changed record values in one operation. JSON container depth is at most ${DATA_LIMITS.depth}, counting the schema envelope with its root at depth one. There is no record-count ceiling. An already over-limit merged area may shrink incrementally if touched collections are otherwise valid. Split larger writes into calls; separate calls are not atomic together. Encoded transport size and retained CRDT history are outside these budgets.
 
 ## Bind a document view to data
+
+### Values in sentences
+
+Write \`:value\` directly followed by one JSON object to quote one field of exactly one schema-valid record from this document:
+
+\`\`\`text
+Whisper turbo differs on :value{"collection":"results","filter":{"system":"Whisper turbo"},"field":"wer","format":"number","decimals":1}% of words.
+\`\`\`
+
+Required keys are \`collection\`, \`filter\` and \`field\`. The filter is a nonempty object of literal top-level fields and string, finite number, boolean or null values, matched exactly without coercion; absent fields never match. Optional \`format\` is \`text\` (the default), \`number\` or \`date\`. Only number accepts \`unit\` and integer \`decimals\` from 0 to 10. Any other key, format or option, including \`label\`, \`link\`, \`bar\` or \`version\`, makes the source unreadable.
+
+The web draws values only in paragraphs, headings, list items, quotes, callouts and ordinary table cells. Inline code, link text, cards, Figma captions, footnote notes, decision answers and source blocks keep literal text. A value uses the same text and Absent, Null and Invalid markers as a generated table cell. Unreadable sources, missing collections, unusable collections, no matching record and several matching records each show a distinct text marker; no record is picked by position. Hovering, selecting or focusing a value shows its collection, filter, field and format; unreadable sources show their source text.
+
+Values redraw when data changes without writing prose, including in read-only documents; history reads the shown revision's data. In editable prose, each value is one unit for caret movement, selection, deletion, cut and undo. Type or paste the complete source to add one; delete it and write another to change its mapping. The clipboard carries the stored source. Markdown import and export preserve it, and MCP reads and writes it as ordinary prose \`text\`, including invalid sources, with no validation refusal or mapping-write summary. Use \`get_data\` to read the value itself; \`get_doc\` returns the source. Search, history diffs, GitHub and older clients show source text.
+
+### Chart mappings
 
 A \`chart\` block holds editable JSON source, configured with ordinary \`create_doc\`, \`insert_block\` or \`edit_block\` calls. A line chart, bar chart, scatter plot, dot plot or data table reads a collection from its own document. Its mapping names literal top-level fields and defines a read-only view:
 

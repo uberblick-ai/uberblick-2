@@ -2344,12 +2344,34 @@ h6.ub-heading {
 .ub-person-mention-text,
 .ub-toggle-heading-marker,
 .ub-inline-icon-text,
-.ub-footnote-source {
+.ub-footnote-source,
+.ub-inline-value-source {
   font-size: 0;
   line-height: 0;
   letter-spacing: 0;
   word-spacing: 0;
 }
+.ub-inline-value {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dotted var(--muted-foreground);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.ub-inline-value::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  transform: translate(-50%, -50%);
+}
+.ub-inline-value[data-value-state]:not([data-value-state="valid"]) { color: var(--muted-foreground); }
 .ub-footnote-reference,
 .ub-footnote-number,
 .ub-footnote-unused,
@@ -2379,7 +2401,8 @@ a.ub-footnote-reference::after,
 .ub-editor .ProseMirror > .ub-footnotes-start { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 @media (pointer: coarse) {
   a.ub-footnote-reference::after,
-  .ub-footnote-backlink::after { min-width: 2.75rem; min-height: 2.75rem; }
+  .ub-footnote-backlink::after,
+  .ub-inline-value::after { min-width: 2.75rem; min-height: 2.75rem; }
 }
 .ub-editor .ProseMirror > .ub-toggle-folded { display: none; }
 /* The disclosure takes a fixed slot before the heading text, centred on the
