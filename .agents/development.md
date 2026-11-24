@@ -10,6 +10,7 @@ The commands that build, run and validate a change:
 | `ub update` | update the Homebrew installation; a checkout binary refuses and names `git pull`, then `mise run setup` |
 | `mise run build-web` | build the default bundle for checkout `ub open`, which refuses a missing or stale bundle without building it |
 | `mise run dev` | local development services |
+| `mise exec -- pnpm --filter @uberblick/<package> exec vitest run [<path>]` | one package's tests while editing; mcp-server splits its suite into the `core`, `integration` and `process` projects, chosen with `--project` |
 | `mise run lint`, `mise run typecheck`, `mise run test` | the final checks on an implementation |
 | `mise run test-os` | the macOS CI job: only the suites whose behaviour can differ by OS |
 | `mise run e2e` | the browser proof, owed when the outcome is browser-observable |

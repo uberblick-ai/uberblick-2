@@ -187,20 +187,25 @@ context when the assignment, governing decision or relevant source changes.
 Agent memory lives in the corpus, not in a runtime's local memory, so every
 machine and runtime reads the same facts. Each memory is its own page tagged
 `agent-memory`. Before you start work, run `list_docs` with that tag and read
-with `get_doc` the pages whose descriptions bear on your task. Whenever you
-learn a fact that cost time to find and will matter again, such as a tooling
-gotcha, an environment quirk or where something lives, save it: update the page
-that already holds it, or create one with `create_doc`, the tag, a title naming
+with `get_doc` the pages whose descriptions bear on your task. Save a memory
+when something cost you real effort and a fresh run on another task would hit
+it again: a command or approach failed before one worked, a tool or permission
+refused you, or finding a command, file or rule took several attempts. Facts
+you read once and used, and anything only this task needs, are not memories.
+Before saving, check the memory index and the instructions: update the page that
+already holds the fact instead of adding one, or create one with `create_doc`,
+the tag, a title naming
 the fact and a one-line description that opens with when it holds, such as
 the runtime, a headless or interactive session and the operating system where
 it matters. Before relying on a memory, check that it holds where you run; when
 it does not, narrow its conditions in place rather than saving one that
 contradicts it. Nothing that binds a memory to one machine, such as a local
 path, a hostname or one person's setup, belongs in it. Before you finish, check whether you
-learned such a fact and have not saved it yet. Check each write like any other
+hit such a trigger and have not saved it yet. Check each write like any other
 corpus write. When a memory works around a gap in configuration or
 instructions, also name the gap in the run's retrospective, so a maintainer can
-close it. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
+close it. When a change closes that gap, archive the memory in the same
+pass. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
 page and follow-ups in issues; never save secrets, personal data or text from
 outside the team. Every role and skill saves memories, read-only ones such as
 the reviewer and the technical audit included; it is the only corpus edit a
