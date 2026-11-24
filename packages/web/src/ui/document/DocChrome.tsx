@@ -381,13 +381,13 @@ export function DocMetaLine({
   canCleanupTags?: (() => boolean) | undefined;
 }): ReactElement {
   return (
-    <>
     <p className="ub-doc-meta">
       {/* Nothing to say about a room that has not answered yet, and nothing to
           tag in it either — but the row itself stands, holding the space. */}
       {meta !== null && meta.uuid !== "" && (
         <>
           <LifecycleBadge kind={meta.kind} />
+          <MemoryScope kind={meta.kind} agent={meta.agent} repository={meta.repository} />
           <TagStrip
             ydoc={connection.ydoc}
             tags={meta.tags}
@@ -433,8 +433,6 @@ export function DocMetaLine({
         </>
       )}
     </p>
-    {meta !== null && meta.uuid !== "" && <MemoryScope kind={meta.kind} agent={meta.agent} repository={meta.repository} />}
-    </>
   );
 }
 

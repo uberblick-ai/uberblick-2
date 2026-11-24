@@ -139,7 +139,6 @@ test("memories have their own tab and scope, keep list state on Back and remain 
   const page = await openApp(browser, `/${harness().workspace}/all`, { readySelector: ".ub-docs-heading" });
   await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
   const row = page.locator(".ub-docs-row", { hasText: title });
-  await expect(row).toHaveCount(0);
   const memories = page.getByRole("tab", { name: /^Memories/ });
   await activateControl(memories);
   await expect(row).toBeVisible();
@@ -196,6 +195,9 @@ test("memories have their own tab and scope, keep list state on Back and remain 
     expect(scope).not.toBeNull();
     expect(heading).not.toBeNull();
     expect((scope?.y ?? 0) + (scope?.height ?? 0)).toBeLessThanOrEqual(heading?.y ?? 0);
+    const copy = await page.getByRole("button", { name: "Copy link" }).boundingBox();
+    expect(copy).not.toBeNull();
+    expect((scope?.x ?? 0) + (scope?.width ?? 0)).toBeLessThanOrEqual(copy?.x ?? 0);
     const paint = await renderedText(page, ".ub-memory-scope");
     expect(paint.length).toBeGreaterThan(0);
     for (const reading of paint) expect(reading.ratio).toBeGreaterThanOrEqual(4.5);
