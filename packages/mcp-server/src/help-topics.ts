@@ -12,15 +12,14 @@ export interface HelpTopic {
 
 /** Workspace-independent orientation shared by startup and its help topic. */
 export const STARTUP_ORIENTATION =
-  "Uberblick stores this repo's documents, decision records and agent memories. " +
+  "Uberblick holds documents, decisions and agent memories. " +
   "Before starting work and whenever you look for a memory, call `get_memories` with your agent name and repository, then read relevant memories with `get_doc`. " +
-  "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
-  "If the request conflicts with a decision in force, ask before building. " +
-  "`list_docs` lists documents; with `kind: \"decision\"`, decision topics. " +
-  "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
-  "This repo's conventions are in the corpus, not in help. " +
-  "Help topics, through `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
-  "workspaces, markdown, ablauf (diagrams), wireframe (UI sketches), data (charts and tables), tools, tool-contracts.";
+  "Before changes, search the corpus and read relevant documents and decisions with `get_doc`. " +
+  "Ask before building against a decision in force. " +
+  "`list_docs` lists regular pages; `kind: \"decision\"` lists decision topics. " +
+  "Read `get_help(edit_doc)` before document writes; follow failure recovery. Conventions live in the corpus. " +
+  "Help: `get_help({topic})` or uberblick://help/{topic}: orientation, edit_doc, decisions, " +
+  "workspaces, markdown, ablauf, wireframe, data, tools, tool-contracts.";
 
 const workspaces = `# Workspaces and documents
 
