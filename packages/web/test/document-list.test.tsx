@@ -170,9 +170,9 @@ function openButtons(host: HTMLElement): HTMLButtonElement[] {
   );
 }
 
-/** The title is the first child; the button's full name also carries metadata. */
+/** A row's open button also carries scope metadata after its title. */
 function rowTitles(host: HTMLElement): string[] {
-  return openButtons(host).map((button) => button.firstChild?.textContent ?? "");
+  return openButtons(host).map((button) => button.querySelector(".ub-docs-title")?.textContent ?? "");
 }
 
 /** The uuid each row opens, which is what a row is when two share a title. */
@@ -233,35 +233,41 @@ function entry(over: Partial<DirectoryEntry> & { uuid: string }): DirectoryEntry
 }
 
 describe("the All documents tab counts", () => {
-  /** "Documents 2 · Decisions 1", with an empty number until the directory answers. */
+  /** Each type has an empty number until the directory answers. */
   function countLine(host: HTMLElement): string {
     return within(within(host).getByRole("tablist", { name: "Document type" })).getAllByRole("tab")
       .map((tab) => `${tab.firstChild?.textContent ?? ""} ${tab.querySelector(".ub-docs-tab-count")?.textContent ?? ""}`.trim())
       .join(" · ");
   }
 
-  it("counts live regular documents and decision topics and follows create, archive and restore", async () => {
+  it("counts live documents, decision topics and memories and follows create, archive and restore", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
     upsertDirectoryEntry(peer, { uuid: TWO, title: "Cache choice", kind: "decision", status: "open" });
-    upsertDirectoryEntry(peer, { uuid: GONE, title: "Archived" });
+    upsertDirectoryEntry(peer, { uuid: FOUR, title: "Agent memory", kind: "memory" });
+    upsertDirectoryEntry(peer, { uuid: GONE, title: "Archived memory", kind: "memory" });
     tombstoneDirectoryEntry(peer, GONE);
     const host = await openApp(allPath(WORKSPACE));
-    expect(countLine(host)).toBe("Documents 1 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 1 · Memories 1");
+
+    await act(async () => tombstoneDirectoryEntry(peer, FOUR));
+    expect(countLine(host)).toBe("Documents 1 · Decisions 1 · Memories 0");
+    await act(async () => restoreDirectoryEntry(peer, FOUR));
+    expect(countLine(host)).toBe("Documents 1 · Decisions 1 · Memories 1");
 
     await act(async () => upsertDirectoryEntry(peer, { uuid: THREE, title: "New document" }));
-    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
     await act(async () => tombstoneDirectoryEntry(peer, ONE));
-    expect(countLine(host)).toBe("Documents 1 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 1 · Memories 1");
     await act(async () => restoreDirectoryEntry(peer, ONE));
-    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
     await act(async () => {
       tombstoneDirectoryEntry(peer, ONE);
       tombstoneDirectoryEntry(peer, THREE);
     });
-    expect(countLine(host)).toBe("Documents 0 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 0 · Decisions 1 · Memories 1");
     await act(async () => tombstoneDirectoryEntry(peer, TWO));
-    expect(countLine(host)).toBe("Documents 0 · Decisions 0");
+    expect(countLine(host)).toBe("Documents 0 · Decisions 0 · Memories 1");
   });
 
   it("keeps the workspace counts when search, type, tag and state filters change", async () => {
@@ -269,25 +275,29 @@ describe("the All documents tab counts", () => {
       entry({ uuid: ONE, title: "Overview" }),
       entry({ uuid: TWO, title: "Editing" }),
       entry({ uuid: THREE, title: "Cache choice", kind: "decision", status: "open" }),
+      entry({ uuid: FOUR, title: "Agent memory", kind: "memory" }),
     ];
     const props = {
       connection: room(directoryRoom(WORKSPACE)), entries, groups: [],
-      searchClient: { search: async () => [ONE, THREE] },
+      searchClient: { search: async () => [ONE, THREE, FOUR] },
       onSelect: () => {}, onTogglePin: null,
     };
     const host = await mount(<DocumentList {...props} />);
-    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
     await act(async () => typeInto(filter(host), "overview"));
     expect(rowTitles(host)).toEqual(["Overview"]);
-    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
     await act(async () => fireEvent.keyDown(within(host).getByRole("tab", { name: /^Decisions/ }), { key: "Enter" }));
     expect(rowTitles(host)).toEqual(["Cache choice"]);
-    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
+    await act(async () => fireEvent.keyDown(within(host).getByRole("tab", { name: /^Memories/ }), { key: "Enter" }));
+    expect(rowTitles(host)).toEqual(["Agent memory"]);
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
     await act(async () => mounted?.rerender(<DocumentList {...props} state={{
       ...INITIAL_DOCUMENT_LIST_STATE, mode: "decision", stateFilter: "conflict", selectedTags: ["missing-tag"],
     }} />));
     expect(rowTitles(host)).toEqual([]);
-    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1 · Memories 1");
   });
 
   it("shows no number until directory state arrives and keeps it after disconnect", async () => {
@@ -305,13 +315,13 @@ describe("the All documents tab counts", () => {
       connection={connection} entries={[entry({ uuid: ONE, title: "Overview" })]} groups={[]}
       searchClient={{ search: async () => [] }} onSelect={() => {}} onTogglePin={null}
     />);
-    expect(countLine(host)).toBe("Documents · Decisions");
+    expect(countLine(host)).toBe("Documents · Decisions · Memories");
     await act(async () => publishStatus({ ...waiting, hasAnswered: true, storeRefused: true }));
-    expect(countLine(host)).toBe("Documents · Decisions");
+    expect(countLine(host)).toBe("Documents · Decisions · Memories");
     await act(async () => publishStatus(LIVE));
-    expect(countLine(host)).toBe("Documents 1 · Decisions 0");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 0 · Memories 0");
     await act(async () => publishStatus({ ...LIVE, connected: false, synced: false }));
-    expect(countLine(host)).toBe("Documents 1 · Decisions 0");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 0 · Memories 0");
   });
 });
 
@@ -319,8 +329,8 @@ describe("the document type tabs", () => {
   it("switches the panel's type while keeping the search text", async () => {
     const host = await mount(<DocumentList
       connection={room(directoryRoom(WORKSPACE))}
-      entries={[entry({ uuid: ONE, title: "Overview" }), entry({ uuid: TWO, title: "Cache choice", kind: "decision", status: "open" })]}
-      groups={[]} searchClient={{ search: async () => [ONE, TWO] }} onSelect={() => {}} onTogglePin={null}
+      entries={[entry({ uuid: ONE, title: "Overview" }), entry({ uuid: TWO, title: "Cache choice", kind: "decision", status: "open" }), entry({ uuid: THREE, title: "Agent memory", kind: "memory" })]}
+      groups={[]} searchClient={{ search: async () => [ONE, TWO, THREE] }} onSelect={() => {}} onTogglePin={null}
     />);
     const tab = (name: string): HTMLElement => within(host).getByRole("tab", { name: new RegExp(`^${name}`) });
     expect(tab("Documents").getAttribute("aria-controls")).toBe(within(host).getByRole("tabpanel").id);
@@ -331,6 +341,13 @@ describe("the document type tabs", () => {
     expect(filter(host).value).toBe("c");
     expect(filter(host).placeholder).toBe("Search decisions");
     expect(within(host).getByRole("combobox", { name: "Decision state" })).toBeDefined();
+    await act(async () => fireEvent.keyDown(tab("Memories"), { key: "Enter" }));
+    expect(tab("Memories").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Memories").getAttribute("aria-controls")).toBe(within(host).getByRole("tabpanel").id);
+    expect(filter(host).value).toBe("c");
+    expect(filter(host).placeholder).toBe("Search memories");
+    expect(rowTitles(host)).toEqual(["Agent memory"]);
+    expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
     await act(async () => fireEvent.keyDown(tab("Documents"), { key: "Enter" }));
     expect(tab("Documents").getAttribute("aria-selected")).toBe("true");
     expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();

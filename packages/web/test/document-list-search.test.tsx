@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import { fireEvent, within } from "@testing-library/react";
 import * as Y from "yjs";
 import { createTagCatalogEntry, getTagCatalogIdentities, deleteTagCatalogEntry } from "@uberblick/schema";
-import type { DirectoryEntry } from "@uberblick/schema";
+import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../src/shell/DocumentList.js";
 import type { DocumentListState } from "../src/shell/DocumentList.js";
@@ -59,6 +59,8 @@ function list(props: {
   onStateChange?: (state: DocumentListState) => void;
   synced?: boolean;
   onSelect?: (uuid: string) => void;
+  groups?: SidebarGroup[];
+  onTogglePin?: (uuid: string) => void;
 }) {
   return <DocumentList connection={connection(undefined, props.synced)} catalog={catalog()} groups={[]}
     onSelect={props.onSelect ?? (() => {})} onTogglePin={() => {}} {...props} />;
@@ -202,21 +204,88 @@ it("merges documents and current decision topics in shared relevance order while
   ]);
 });
 
-it("keeps memories in ordinary document rows, counts and shared search results without a kind badge", async () => {
+it("separates live memories into their own tab and shows their scope while preserving shared search rows", async () => {
+  const general = "00000000-0000-4000-8000-000000000005";
   const records = [
     entry(ONE, "Ordinary document"),
-    entry(TWO, "Agent memory", { kind: "memory" }),
+    entry(TWO, "Agent memory", { kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2" }),
     entry(THREE, "Archived memory", { kind: "memory", deleted: true }),
     entry(FOUR, "Decision", { kind: "decision", status: "open" }),
+    entry(general, "General memory", { kind: "memory" }),
   ];
-  const api = { search: vi.fn(async () => [TWO, FOUR, THREE]) };
+  const api = { search: vi.fn(async () => [general, TWO, FOUR, THREE]) };
   const { container } = await renderSettled(list({ entries: records, searchClient: api }));
-  expect(titles(container)).toEqual(["Agent memory", "Ordinary document"]);
-  expect(within(container).getByRole("tab", { name: "Documents2" }).getAttribute("aria-selected")).toBe("true");
+  expect(titles(container)).toEqual(["Ordinary document"]);
+  expect(within(container).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Documents1", "Decisions1", "Memories2"]);
+  expect(within(container).getByRole("tab", { name: "Documents1" }).getAttribute("aria-selected")).toBe("true");
+  expect(container.querySelector(".ub-memory-scope")).toBeNull();
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: "Memories2" }), { key: "Enter" }));
+  expect(titles(container)).toEqual(["Agent memory", "General memory"]);
+  const scopedRow = within(container).getByText("Agent memory").closest("tr") as HTMLElement;
+  expect(scopedRow.textContent).toContain("Agent: implementer");
+  expect(scopedRow.textContent).toContain("Repository: uberblick-ai/uberblick-2");
+  const generalRow = within(container).getByText("General memory").closest("tr") as HTMLElement;
+  expect(generalRow.textContent).toContain("All agents");
+  expect(generalRow.textContent).not.toContain("Repository:");
   expect(container.querySelector(".ub-lifecycle-badge")).toBeNull();
   await search(container, "memory");
-  expect(titles(container)).toEqual(["Agent memory"]);
+  expect(titles(container)).toEqual(["General memory", "Agent memory"]);
+  expect(within(container).getByRole("tab", { name: "Memories2" })).toBeDefined();
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: "Decisions1" }), { key: "Enter" }));
+  expect(titles(container)).toEqual(["Decision"]);
+  expect(container.querySelector(".ub-memory-scope")).toBeNull();
   expect(rankDocumentSearchRows(documentSearchRows(records), [TWO, THREE, FOUR]).map((row) => row.uuid)).toEqual([TWO, FOUR]);
+});
+
+it("keeps memory search, tag filtering, column sorting, pinning and Group on the shared list path", async () => {
+  const onSelect = vi.fn();
+  const onTogglePin = vi.fn();
+  const records = [
+    entry(ONE, "Alpha memory", { kind: "memory", tags: [RELEASE], updatedAt: 20 }),
+    entry(TWO, "Zebra memory", { kind: "memory", agent: "reviewer", tags: [CLI], updatedAt: 10 }),
+    entry(THREE, "Regular document", { tags: [RELEASE] }),
+    entry(FOUR, "Decision", { kind: "decision", status: "open", tags: [RELEASE] }),
+  ];
+  const api = { search: vi.fn(async () => [TWO, FOUR, ONE, THREE]) };
+  const { container } = await renderSettled(list({
+    entries: records, searchClient: api, onSelect, onTogglePin,
+    groups: [{ id: "reading", name: "Reading", docs: [ONE] }],
+  }));
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: "Memories2" }), { key: "Enter" }));
+  expect(titles(container)).toEqual(["Alpha memory", "Zebra memory"]);
+  expect(within(container).getByRole("columnheader", { name: "Group" })).toBeDefined();
+  const pinned = within(container).getByText("Alpha memory").closest("tr") as HTMLElement;
+  expect(within(pinned).getByText("Reading").getAttribute("title")).toBe("Reading");
+  expect(within(pinned).getByRole("button", { name: "Unpin Alpha memory from the sidebar" }).getAttribute("aria-pressed")).toBe("true");
+  await click(container, "Unpin Alpha memory from the sidebar");
+  expect(onTogglePin).toHaveBeenCalledWith(ONE);
+  await click(container, "Pin Zebra memory to the sidebar");
+  expect(onTogglePin).toHaveBeenCalledWith(TWO);
+  expect(onSelect).not.toHaveBeenCalled();
+  await search(container, "notes");
+  expect(titles(container)).toEqual(["Zebra memory", "Alpha memory"]);
+  await click(container, "Title");
+  expect(titles(container)).toEqual(["Alpha memory", "Zebra memory"]);
+  expect(container.querySelector("[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
+  await click(container, "Filter by tags");
+  await act(async () => within(within(document.body).getByRole("listbox", { name: "Tags" })).getByRole("option", { name: "release" }).click());
+  await act(async () => fireEvent.keyDown(document.body, { key: "Escape" }));
+  expect(titles(container)).toEqual(["Alpha memory"]);
+  expect(within(container).getByRole("tab", { name: "Memories2" }).getAttribute("aria-selected")).toBe("true");
+  expect(within(container).getByRole<HTMLInputElement>("searchbox", { name: "Search" }).value).toBe("notes");
+  expect(container.querySelector("[aria-sort]")?.getAttribute("aria-sort")).toBe("ascending");
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+it("names an empty Memories tab and clears it back to Documents", async () => {
+  const { container } = await renderSettled(list({
+    entries: [entry(ONE, "Ordinary document")],
+  }));
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: "Memories0" }), { key: "Enter" }));
+  expect(within(container).getByText("No memories.")).toBeDefined();
+  await click(container, "Clear filters");
+  expect(within(container).getByRole("tab", { name: "Documents1" }).getAttribute("aria-selected")).toBe("true");
+  expect(titles(container)).toEqual(["Ordinary document"]);
 });
 
 it("combines type, state, query and OR tags; chips and Clear tags preserve the other filters", async () => {
