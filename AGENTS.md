@@ -185,18 +185,33 @@ context when the assignment, governing decision or relevant source changes.
 ## Shared memory
 
 Agent memory lives in the corpus, not in a runtime's local memory, so every
-machine and runtime reads the same facts. Each memory is its own page tagged
-`agent-memory`. Before you start work, run `list_docs` with that tag and read
-with `get_doc` the pages whose descriptions bear on your task. Whenever you
-learn a fact that cost time to find and will matter again, such as a tooling
-gotcha, an environment quirk or where something lives, save it: update the page
-that already holds it, or create one with `create_doc`, the tag, a title naming
-the fact and a one-line description. Before you finish, check whether you
-learned such a fact and have not saved it yet. Check each write like any other
-corpus write. Rules belong in `AGENTS.md` or `.agents/`, product intent on its owning
-page and follow-ups in issues; never save secrets, personal data or text from
-outside the team. Saving memories is the only corpus edit a delivery role makes
-without a `Corpus update`.
+machine and runtime reads the same facts. Each memory is its own memory
+document (`kind: "memory"`). Before you start work, and whenever you look for a
+memory, call `get_memories` with repository `uberblick-ai/uberblick-2` and your
+agent name: `issue-preparer`, `implementer`, `reviewer` (both `issue-reviewer`
+and `pr-reviewer`), `integrator` or `technical-audit`. A session acting as none
+of these omits `agent`, so it sees every agent's memories for this repository
+and the general ones. Then read with `get_doc` the returned memories whose
+descriptions bear on your task.
+
+Whenever you learn a fact that cost time to find and will matter again, such
+as a tooling gotcha, an environment quirk or where something lives, save it:
+update the memory document that already holds it, or create one with
+`create_doc`, `kind: "memory"`, a title naming the fact and a one-line
+description. Set `agent` to the name above only for a fact just that agent
+needs; omit it for a fact every agent needs. Set `repository` only when the
+fact holds only in that repository. Change an existing memory's scope with
+`set_metadata`. Before you finish, check whether you learned such a fact and
+have not saved it yet.
+
+The description opens with when the memory holds: runtime, headless or
+interactive, and operating system where it matters. Check that a memory holds
+where you run; narrow it in place instead of saving one that contradicts it.
+Never save machine-bound facts such as local paths or hostnames. Check each
+write like any other corpus write. Rules belong in `AGENTS.md` or
+`.agents/`, product intent on its owning page and follow-ups in issues; never
+save secrets, personal data or text from outside the team. Saving memories is
+the only corpus edit a delivery role makes without a `Corpus update`.
 
 ## Change instructions coherently
 
