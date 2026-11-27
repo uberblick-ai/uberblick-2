@@ -251,7 +251,7 @@ it("the CLI prints each contracted result and exits 1 for account and workspace 
     expect(refused.errors()).toBe(`ub-hub: Error: ${message}\n`);
     expect(refused.output()).toBe("");
   }
-}, 10_000);
+});
 
 it("help replaces setup, malformed arguments print usage with exit 2, and an absent socket reports an unknown result", async () => {
   const path = tempDatabasePath();
