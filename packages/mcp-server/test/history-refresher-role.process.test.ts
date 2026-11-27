@@ -47,20 +47,27 @@ afterEach(async () => {
 });
 
 describe("process-held history refresher role", () => {
-  it("admits one simultaneous contender and lets a running loser take over after exit", async () => {
+  it("admits at most one simultaneous contender per attempt, elects one as they retry and lets a running loser take over after exit", async () => {
     const path = cachePath();
     const contenders = Array.from({ length: 4 }, () => worker(path));
     await Promise.all(contenders.map(child => once(child, "message")));
-    const replies = await Promise.all(contenders.map(child => request(child, "start")));
-    expect(replies.filter(reply => (reply as { type: string }).type === "acquired")).toHaveLength(1);
-    expect(replies.filter(reply => (reply as { type: string }).type === "refused")).toHaveLength(3);
-    const winnerIndex = replies.findIndex(reply => (reply as { type: string }).type === "acquired");
-    const winner = contenders[winnerIndex]!;
-    const successor = contenders.find(child => child !== winner)!;
+    // The role is a try-lock: contenders escalating their sidecar locks at once
+    // can all be refused, and the refresher's next pass retries.
+    let winner: ChildProcess | undefined;
+    for (let attempt = 0; winner === undefined; attempt += 1) {
+      if (attempt === 20) throw new Error("no simultaneous attempt elected a history refresher");
+      const replies = await Promise.all(contenders.map(child => request(child, "start")));
+      const acquired = contenders.filter((_, index) => (replies[index] as { type: string }).type === "acquired");
+      expect(acquired.length).toBeLessThanOrEqual(1);
+      expect(replies.filter(reply => (reply as { type: string }).type === "refused")).toHaveLength(contenders.length - acquired.length);
+      winner = acquired[0];
+    }
+    const losers = contenders.filter(child => child !== winner);
+    expect(await Promise.all(losers.map(child => request(child, "start")))).toEqual(losers.map(() => ({ type: "refused" })));
     const exited = once(winner, "exit");
     winner.send({ type: "close" });
     await exited;
-    expect(await request(successor, "start")).toEqual({ type: "acquired" });
+    expect(await request(losers[0]!, "start")).toEqual({ type: "acquired" });
   });
 
   it("releases a killed holder's lock without deleting any sidecar", async () => {
