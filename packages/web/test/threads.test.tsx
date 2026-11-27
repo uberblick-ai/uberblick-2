@@ -100,7 +100,7 @@ function replicas(): { local: Y.Doc; remote: Y.Doc; blocks: string[] } {
 }
 
 describe("a thread over a marked range becomes a card", () => {
-  it("names chart-table threads consistently and tolerates incomplete source", () => {
+  it("names chart-view threads consistently and tolerates incomplete source", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "table-view-threads", title: "View comments" });
     const source = '{"version":1,"type":"table","collection":"records","columns":[{"field":"value"}]}';
@@ -109,6 +109,10 @@ describe("a thread over a marked range becomes a card", () => {
     expect(threadsFromDoc(ydoc)[0]).toMatchObject({ blockRef: "Data table 1" });
     expect(blockRefLabel("chart", 0, source)).toBe("Data table 1");
     expect(blockRefLabel("chart", 0, '{"type":"line"}')).toBe("Line chart 1");
+    expect(blockRefLabel("chart", 0, '{"type":"scatter"}')).toBe("Scatter plot 1");
+    expect(blockRefLabel("chart", 0, '{"type":"bar"}')).toBe("Bar chart 1");
+    expect(blockRefLabel("chart", 0, '{"type":"dot"}')).toBe("Dot plot 1");
+    expect(blockRefLabel("chart", 0, '{"type":"dot","connect":true}')).toBe("Dot plot 1");
     expect(blockRefLabel("chart", 0, '{"type":')).toBe("Line chart 1");
     expect(blockRefLabel("table", 0, source)).toBe("Table 1");
     editBlock(ydoc, id, source, source.replace('"table"', '"line"'));

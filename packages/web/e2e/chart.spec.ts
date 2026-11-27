@@ -661,7 +661,7 @@ for (const orientation of ["vertical", "horizontal"] as const) {
       expect(bars.some(bar => horizontal ? bar.left > zero.x + 1 : bar.bottom < zero.y - 1)).toBe(true);
       const bounds = bars[0]?.clip;
       if (bounds === null || bounds === undefined) throw new Error("e2e: category plot clip absent");
-      expect(await categoryReferenceInk(page, horizontal, bounds)).toBeGreaterThan(0.75);
+      expect(await categoryReferenceInk(page, horizontal, bounds)).toBeGreaterThan(0.99);
       const canvas = page.locator(".ub-chart-screen canvas"), box = await canvas.boundingBox();
       if (box === null) throw new Error("e2e: category canvas absent");
       const longLabel = probe.ink.find(entry => entry.text.startsWith("Search"));

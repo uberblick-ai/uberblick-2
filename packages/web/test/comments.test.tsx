@@ -536,6 +536,26 @@ describe("the prose selection toolbar", () => {
     }
   });
 
+  it.each([
+    { view: "category bars", type: "bar", y: [{ field: "value" }], label: "Bar chart 4" },
+    { view: "dots", type: "dot", y: [{ field: "value" }], label: "Dot plot 4" },
+    { view: "dumbbells", type: "dot", y: [{ field: "before" }, { field: "after" }], connect: true, label: "Dot plot 4" },
+  ])("names $view in the source comment button and open form", ({ type, y, connect, label }) => {
+    const { ydoc } = annotatedDoc();
+    const source = JSON.stringify({ version: 1, type, collection: "records", category: { field: "name" }, y, connect });
+    appendBlock(ydoc, { type: "chart", text: source });
+    const view = mountComposer(ydoc);
+    try {
+      select(view.editor, 3, 0, source.length);
+      expect(within(commentComposer()).getByRole("button", { name: `Comment on ${label}` })).not.toBeNull();
+      view.open();
+      expect(within(commentComposer()).getByText(label, { exact: true })).not.toBeNull();
+      expect(within(commentComposer()).getByPlaceholderText("Comment as ben…")).not.toBeNull();
+    } finally {
+      view.unmount();
+    }
+  });
+
   it("leaves link mode when the selection changes to a cross-block range", () => {
     const { ydoc } = annotatedDoc();
     const view = mountComposer(ydoc);
