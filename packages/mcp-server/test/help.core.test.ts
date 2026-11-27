@@ -18,6 +18,15 @@ afterEach(async () => {
   removeTempDirs();
 });
 
+it("directs agents to discover scoped memories at startup and whenever looking for memory", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "orientation" });
+  expect(text).toContain("Before starting work and whenever you look for a memory");
+  expect(text).toContain("call `get_memories` with your agent name and repository");
+  expect(toolNamed("get_memories").description).toContain("Before starting work and whenever you look for a memory");
+  expect(toolNamed("get_memories").description).toContain("with your agent name and repository");
+});
+
 it("documents decision approval authority and zoned answer-time guidance", async () => {
   const rig = await local();
   const { text } = await rig.ok("get_help", { topic: "decisions" });

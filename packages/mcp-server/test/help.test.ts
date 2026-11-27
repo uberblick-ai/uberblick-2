@@ -407,12 +407,12 @@ it("advertises the server identity and instructions in initialize", async () => 
 it("serves the short startup orientation verbatim and directs clients to the complete help catalog", async () => {
   const rig = await local();
   const instructions = rig.client.getInstructions()!;
-  const corpusOrientation = "Uberblick stores this repo's documents and decision records. " +
-    "Before you change anything, search the corpus for relevant documents and decisions, then read them with `get_doc`. " +
-    "If the request conflicts with a decision in force, ask before building. " +
-    "`list_docs` lists documents; with `kind: \"decision\"`, decision topics. " +
-    "Read `get_help(edit_doc)` before you create or edit a document, and follow each failure's recovery. " +
-    "This repo's conventions are in the corpus, not in help.";
+  const corpusOrientation = "Uberblick holds documents, decisions and agent memories. " +
+    "Before starting work and whenever you look for a memory, call `get_memories` with your agent name and repository, then read relevant memories with `get_doc`. " +
+    "Before changes, search the corpus and read relevant documents and decisions with `get_doc`. " +
+    "Ask before building against a decision in force. " +
+    "`list_docs` lists regular pages; `kind: \"decision\"` lists decision topics. " +
+    "Read `get_help(edit_doc)` before document writes; follow failure recovery. Conventions live in the corpus.";
   expect(instructions.replace(/\s+/g, " ")).toContain(corpusOrientation);
   // Some clients repeat the instructions in every tool's description.
   expect(instructions.length).toBeLessThanOrEqual(700);

@@ -92,10 +92,15 @@ async function fixture(limits: McpHostConfig["limits"] = {}, hub?: Hub, freeSpac
     });
     return runtime;
   });
+  // Tests advance `now` and sweep explicitly. The host's one-second sweep would otherwise close
+  // sessions and runtimes a test has just made idle, at an arbitrary point between its steps.
+  const idleTimer = vi.spyOn(globalThis, "setInterval").mockReturnValueOnce({ unref() {} } as unknown as NodeJS.Timeout);
   const host = createMcpHost({
     issuer: undefined, allowedOrigins: [], hubUrl: hub?.url ?? "ws://127.0.0.1:1", databaseDirectory: tempDir(),
     limits: { minFreeBytes: 0, ...limits },
   }, { checkToken, credentialsForGrant, now: () => now, ...(freeSpace === undefined ? {} : { freeSpace }) });
+  expect(idleTimer).toHaveBeenCalledOnce();
+  idleTimer.mockRestore();
   hosts.push(host);
   const responses: ServerResponse[] = [];
   host.server.on("request", (_incoming, response) => { responses.push(response); });

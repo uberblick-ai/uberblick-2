@@ -173,8 +173,9 @@ export const MAX_DESCRIPTION_LENGTH = 300;
 /** Ceiling for a person-facing summary of one or two plain-English sentences. */
 export const MAX_TLDR_LENGTH = 300;
 
-/** The document shapes whose lifecycle the schema records. */
-export const DOCUMENT_KINDS = ["decision"] as const;
+/** The document shapes; memory has no lifecycle status. */
+// Decision: fcc28ff0-98f2-47ee-b4b0-67304d95a825
+export const DOCUMENT_KINDS = ["decision", "memory"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
 /** The states of a decision record, in lifecycle order. */
@@ -184,7 +185,7 @@ export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 export type DocumentStatus = DecisionStatus;
 
 export function isDocumentKind(value: unknown): value is DocumentKind {
-  return value === "decision";
+  return value === "decision" || value === "memory";
 }
 
 /** Whether `status` belongs to `kind`'s closed lifecycle. */
@@ -241,12 +242,15 @@ export interface DocMeta {
    * Optional for additive consumers; getMeta normalizes unwritten values to null.
    */
   tldr?: string | null;
-  /** Present only for a regular document with no summary on purpose. */
+  /** Present only for a non-decision document with no summary on purpose. */
   tldrOptOut?: true;
-  /** Latest check per repository; regular document reads include an empty list. */
+  /** Latest check per repository; non-decision reads include an empty list. */
   code_check?: CodeCheck[];
   /** The record shape. Absent means an ordinary document. */
   kind?: DocumentKind;
+  /** Memory-only scope; absence applies to every agent/across the workspace. */
+  agent?: string;
+  repository?: string;
   /** The lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
   /** First related page, retained for older clients. */
@@ -385,11 +389,14 @@ export interface DirectoryEntry {
   description?: string;
   /** Cached record shape; absent means an ordinary document. */
   kind?: DocumentKind;
+  /** Memory-only scope caches; absence means general applicability. */
+  agent?: string;
+  repository?: string;
   /** Cached lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
   /** Cached unresolved thread count; absent when the cache is unknown. */
   openThreadCount?: number;
-  /** Regular-only check cache; absence means it has not been cached yet. */
+  /** Non-decision check cache; absence means it has not been cached yet. */
   code_check?: CodeCheck[];
   /** Decision-only metadata caches. Other document kinds carry none of these. */
   governs?: string;

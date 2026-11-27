@@ -12,6 +12,7 @@ import { listAnnotations } from "./annotations.js";
 import { decisionApprovalChanged } from "./approval.js";
 import { decisionAnswerPreview } from "./decision-answer.js";
 import { readCodeChecks } from "./code-check.js";
+import { normalizeMemoryAgent, normalizeMemoryRepository, readMemoryFields } from "./memory.js";
 import { resolveDecisionTopics } from "./decisions.js";
 import { canonicalRelatedPages, readRelatedPages } from "./decision-related.js";
 import type {
@@ -57,6 +58,8 @@ interface StoredEntry {
   updatedAt?: number;
   description?: string;
   kind?: DocumentKind;
+  agent?: string;
+  repository?: string;
   status?: DocumentStatus;
   openThreadCount?: number;
   code_check?: CodeCheck[];
@@ -110,6 +113,7 @@ export function directoryStubDiffers(
     (stub.description ?? "") !== (meta.description ?? "") ||
     stub.kind !== meta.kind ||
     stub.status !== meta.status ||
+    (meta.kind === "memory" && (stub.agent !== meta.agent || stub.repository !== meta.repository)) ||
     (fields?.openThreadCount !== undefined && stub.openThreadCount !== fields.openThreadCount) ||
     (meta.kind !== "decision" && fields?.code_check !== undefined && !sameCodeChecks(stub.code_check, fields.code_check)) ||
     (meta.kind === "decision" && (
@@ -400,6 +404,7 @@ function readStored(value: unknown): StoredEntry | null {
     ...(updatedAt === undefined ? {} : { updatedAt }),
     ...(description === undefined ? {} : { description }),
     ...lifecycle,
+    ...readMemoryFields(lifecycle.kind, candidate.agent, candidate.repository),
     ...(openThreadCount === undefined ? {} : { openThreadCount }),
     ...(codeCheck === undefined ? {} : { code_check: codeCheck }),
     ...(lifecycle.kind === "decision" ? readDecisionFields(value as Record<string, unknown>) : {}),
@@ -420,6 +425,7 @@ function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry 
       : { description: from.description }),
     ...(from?.kind === undefined ? {} : { kind: from.kind }),
     ...(from?.status === undefined ? {} : { status: from.status }),
+    ...readMemoryFields(from?.kind, from?.agent, from?.repository),
     ...(from?.openThreadCount === undefined ? {} : { openThreadCount: from.openThreadCount }),
     ...(from?.kind === "decision" || from?.code_check === undefined ? {} : { code_check: from.code_check }),
     ...(from?.kind === "decision" ? readDecisionFields(from as unknown as Record<string, unknown>) : {}),
@@ -451,6 +457,9 @@ export interface DirectoryUpsert {
    * the empty string clears both kind and status.
    */
   kind?: DocumentKind | "";
+  /** Memory-only scope: omission preserves, null/blank clears. */
+  agent?: string | null;
+  repository?: string | null;
   /**
    * The document's lifecycle state. Omission carries it forward; the empty
    * string clears only status. Pair validation belongs to the document setters.
@@ -458,7 +467,7 @@ export interface DirectoryUpsert {
   status?: DocumentStatus | "";
   /** Omission preserves the cache; null clears it to unknown. */
   openThreadCount?: number | null;
-  /** Regular-only cache: omission preserves it, null clears it to unknown. */
+  /** Non-decision cache: omission preserves it, null clears it to unknown. */
   code_check?: CodeCheck[] | null;
   /** Decision-only fields: omission preserves, null/empty clears. */
   governs?: string | null;
@@ -479,13 +488,14 @@ export type DecisionDirectoryFields = Pick<DirectoryUpsert,
   "governs" | "related" | "topic" | "supersedes" | "agentStance" |
   "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview" | "discussion">;
 
-export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number; code_check?: CodeCheck[] };
+export type DocumentDirectoryFields = DecisionDirectoryFields & Pick<DirectoryUpsert, "agent" | "repository"> & { openThreadCount: number; code_check?: CodeCheck[] };
 
 /** Hydrated writers recompute every document cache instead of carrying stale values. */
 export function documentDirectoryFields(doc: Y.Doc, authoritativeUuid?: string): DocumentDirectoryFields {
   const meta = getMeta(doc, authoritativeUuid);
   return {
     ...decisionDirectoryFields(doc, authoritativeUuid),
+    ...(meta.kind === "memory" ? { agent: meta.agent ?? null, repository: meta.repository ?? null } : {}),
     openThreadCount: listAnnotations(doc).filter((thread) => thread.resolved !== true).length,
     ...(meta.kind === "decision" ? {} : { code_check: meta.code_check ?? [] }),
   };
@@ -507,11 +517,12 @@ export function documentStubFields(doc: Y.Doc, authoritativeUuid?: string) {
 
 /**
  * Repair a hydrated document's cache without reviving ordinary archives or
- * permanently deleted UUIDs. Decision caches still repair while archived.
+ * permanently deleted UUIDs. Decision and memory caches still repair while archived.
  * Call only after the caller's directory sync and write gates admit the repair.
  * changedAt is the authored change time, or null for receipt, replay or restore;
  * now supplies createdAt backfill independently of a delayed authored stamp.
  */
+// known limit: older writers erase memory stub scope until a current replica opens the room; revisit when all supported clients preserve it.
 export function repairDirectoryStub(
   doc: Y.Doc,
   directory: Y.Doc,
@@ -522,7 +533,7 @@ export function repairDirectoryStub(
   if (meta.uuid === "" || isDirectoryEntryDeleted(directory, uuid)) return;
   const stored = withResolvedUpdatedAt(readStored(getDirectoryMap(directory).get(uuid)), recordedUpdatedAt(directory, uuid));
   const stub = stored === null ? null : toEntry(uuid, stored, directory, false, false);
-  if (stub?.deleted === true && meta.kind !== "decision") return;
+  if (stub?.deleted === true && meta.kind !== "decision" && meta.kind !== "memory") return;
 
   const fields = documentStubFields(doc, uuid);
   const metaChanged = directoryStubDiffers(stub, meta, fields);
@@ -574,6 +585,12 @@ function cacheRelatedPages(dirDoc: Y.Doc, entry: DirectoryUpsert, next: StoredEn
   if (first !== undefined) next.governs = first;
 }
 
+function memoryScope(kind: DocumentKind | undefined, entry: DirectoryUpsert, existing: StoredEntry | null) {
+  return readMemoryFields(kind,
+    entry.agent === undefined ? existing?.agent : entry.agent,
+    entry.repository === undefined ? existing?.repository : entry.repository);
+}
+
 /**
  * Upserts on create/rename/retag retain observed tombstones. An offline upsert
  * that has not seen an archive can win the whole-entry conflict and resurrect
@@ -583,6 +600,12 @@ export function upsertDirectoryEntry(
   dirDoc: Y.Doc,
   entry: DirectoryUpsert,
 ): void {
+  if (entry.agent !== undefined && entry.agent !== null && normalizeMemoryAgent(entry.agent) === null) {
+    throw new Error("Invalid memory agent");
+  }
+  if (entry.repository !== undefined && entry.repository !== null && normalizeMemoryRepository(entry.repository) === null) {
+    throw new Error("Invalid memory repository");
+  }
   if (isDirectoryEntryDeleted(dirDoc, entry.uuid)) return;
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
@@ -628,6 +651,7 @@ export function upsertDirectoryEntry(
       ...(description === undefined ? {} : { description }),
       ...(kind === undefined ? {} : { kind }),
       ...(status === undefined ? {} : { status }),
+      ...memoryScope(kind, entry, existing),
       ...(openThreadCount === undefined ? {} : { openThreadCount }),
       ...(codeCheck === undefined ? {} : { code_check: codeCheck }),
       ...(kind === "decision" ? readDecisionFields(cache) : {}),
@@ -772,6 +796,7 @@ function toEntry(uuid: string, stored: StoredEntry, dirDoc: Y.Doc, recordArchive
       : { description: stored.description }),
     ...(stored.kind === undefined ? {} : { kind: stored.kind }),
     ...(stored.status === undefined ? {} : { status: stored.status }),
+    ...readMemoryFields(stored.kind, stored.agent, stored.repository),
     ...(stored.openThreadCount === undefined ? {} : { openThreadCount: stored.openThreadCount }),
     ...(stored.kind === "decision" || stored.code_check === undefined ? {} : { code_check: stored.code_check }),
     ...decisionFields,

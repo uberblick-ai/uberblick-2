@@ -20,6 +20,10 @@ const lifecycle = {
   kind: z.enum(DOCUMENT_KINDS).optional(),
   status: status.optional(),
 };
+const memoryScope = {
+  agent: z.string().optional().describe("Memory's optional agent name; absent means every agent."),
+  repository: z.string().optional().describe("Memory's optional lowercase owner/name repository; absent means the whole workspace."),
+};
 const decisionAuthority = {
   agentStance: z.boolean().optional(),
   decidedBy: z.string().optional(),
@@ -79,6 +83,10 @@ const searchHit = z.union([
   }).strict(),
   z.object({
     ...searchHitFields,
+    kind: z.literal("memory").describe("An agent memory."),
+  }).strict(),
+  z.object({
+    ...searchHitFields,
     kind: z.literal("decision").describe("A decision record."),
     state: z.enum(["in-force", "superseded", "open", "rejected", "withdrawn", "conflict"])
       .describe("Resolved from current topic records: in-force is the current answer; superseded is a replaced answer; conflict marks competing approved answers; open, rejected and withdrawn are proposal states."),
@@ -132,6 +140,10 @@ const listDecision = listEntry.extend({
   inForce: z.string().nullable().optional().describe("Topic rows: UUID of the record in force, or null."),
   pending: z.array(z.string()).optional().describe("Topic rows: UUIDs of pending records."),
   conflicts: z.array(z.string()).optional().describe("Topic rows: UUIDs of conflicting decided records."),
+}).strict();
+const listMemory = listEntry.extend({
+  kind: z.literal("memory"),
+  ...memoryScope,
 }).strict();
 const pageDecision = listDecision.omit({ pinned: true }).extend({
   ...topicRecords,
@@ -437,6 +449,7 @@ export const outputSchemas = {
     description: z.string(),
     tags,
     ...lifecycle,
+    ...memoryScope,
     related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
@@ -459,6 +472,7 @@ export const outputSchemas = {
     tags,
     links: z.array(z.string()),
     ...lifecycle,
+    ...memoryScope,
     related: z.array(z.string()).optional().describe("All related regular page UUIDs, fixed at creation."),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
@@ -486,13 +500,26 @@ export const outputSchemas = {
     workspace: z.string(),
     complete: z.boolean().describe("Whether the hub has delivered the whole document directory to this replica."),
     directoryHint: z.string().optional().describe("Why documents may be missing; present only when complete is false."),
-    docs: z.array(z.union([listEntry, listDecision])),
+    docs: z.array(z.union([listEntry, listDecision, listMemory])),
+    hub,
+  }).strict(),
+  get_memories: z.object({
+    workspace: z.string(),
+    complete: z.boolean().describe("Whether the hub has delivered the whole document directory to this replica."),
+    directoryHint: z.string().optional().describe("Why memories may be missing; present only when complete is false."),
+    memories: z.array(z.object({
+      uuid,
+      title: z.string(),
+      description,
+      ...memoryScope,
+      updatedAt: listEntry.shape.updatedAt,
+    }).strict()),
     hub,
   }).strict(),
   search: z.object({
     query: z.string(),
     tag: z.union([z.string(), z.array(z.string())]).optional(),
-    kind: z.enum(["regular", "decision"]).optional(),
+    kind: z.enum(["regular", "decision", "memory"]).optional(),
     hits: z.array(searchHit),
   }).strict(),
   backlinks: z.object({
@@ -514,6 +541,8 @@ export const outputSchemas = {
   delete_block: z.object({ uuid, blockId: z.string(), ...documentDurability, ...contentReview }).strict(),
   set_metadata: z.object({
     uuid,
+    kind: z.literal("memory").optional(),
+    ...memoryScope,
     ...documentDurability,
     rooms: z.array(touchedRoom).optional().describe("Independently persisted document, topic-title and directory rooms when a rename targets another record; top-level synced is their conjunction."),
     title: z.string(),

@@ -301,6 +301,11 @@ export function createToolContext(replicas: Replicas, work: ServerWork, help = n
       ...(entry.openThreadCount === undefined ? {} : { openThreadCount: entry.openThreadCount }),
       ...(entry.deleted === true ? { deleted: true as const } : {}),
       ...(pinned === undefined ? {} : { pinned }),
+      ...(entry.kind === "memory" ? {
+        kind: "memory" as const,
+        ...(entry.agent === undefined ? {} : { agent: entry.agent }),
+        ...(entry.repository === undefined ? {} : { repository: entry.repository }),
+      } : {}),
       ...(entry.kind === "decision" ? {
         kind: "decision" as const,
         status: entry.status,

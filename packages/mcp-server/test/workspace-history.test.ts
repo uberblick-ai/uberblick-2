@@ -273,10 +273,13 @@ it("keeps foreground revision reads independent of a stalled mirror and fences a
     await waitUntil("the background snapshot reply to be held before cache publication", () => held);
     expect(ready(cache.readSnapshot(token, live.uuid, latest.id))).toBeNull();
 
+    // The reply stays held until after these reads, so any bound catches waiting on it.
+    // Each first read also starts that process's cache worker, which is slow on a loaded runner.
+    const independentRead = { timeoutMs: 20_000 };
     for (const rig of [reader, follower]) {
-      const { revisions } = await readDocumentHistory(rig.instance.replicas, live.uuid, { timeoutMs: 2_000 });
+      const { revisions } = await readDocumentHistory(rig.instance.replicas, live.uuid, independentRead);
       expect(revisions.some(revision => revision.id === latest.id)).toBe(true);
-      const { doc: selected } = await readDocumentRevision(rig.instance.replicas, live.uuid, latest.id, { timeoutMs: 2_000 });
+      const { doc: selected } = await readDocumentRevision(rig.instance.replicas, live.uuid, latest.id, independentRead);
       try { expect(getMeta(selected).title).toBe("Foreground reads this state"); }
       finally { selected.destroy(); }
     }

@@ -1,0 +1,74 @@
+import { randomUUID } from "node:crypto";
+import { afterEach, expect, it } from "vitest";
+import { getDirectoryEntry, getDirectoryMap, getMeta, initDoc, setKind, setMemoryAgent, setMemoryRepository } from "@uberblick/schema";
+import { startServer } from "./core-helpers.js";
+import type { Rig } from "./core-helpers.js";
+
+let rig: Rig | undefined;
+afterEach(async () => { await rig?.close(); rig = undefined; });
+
+it("creates memories through the MCP surface and keeps them separate from regular pages", async () => {
+  rig = await startServer();
+  const { uuid } = await rig.ok("create_doc", { title: "Memory", description: "An agent note.", kind: "memory" });
+  expect((await rig.ok("list_docs", { kind: "memory" })).docs).toEqual([
+    expect.objectContaining({ uuid, kind: "memory" }),
+  ]);
+  expect((await rig.ok("search", { query: "memory", kind: "memory" })).hits).toEqual([
+    expect.objectContaining({ uuid, kind: "memory" }),
+  ]);
+  expect((await rig.ok("list_docs")).docs).toEqual([]);
+});
+
+it("reads and edits an existing memory without losing its metadata", async () => {
+  rig = await startServer();
+  const uuid = randomUUID();
+  const replica = rig.instance.replicas.replica(uuid);
+  replica.doc.transact(() => {
+    initDoc(replica.doc, { uuid, title: "Memory", description: "A scoped agent note." });
+    setKind(replica.doc, "memory");
+    setMemoryAgent(replica.doc, "implementer");
+    setMemoryRepository(replica.doc, "uberblick-ai/uberblick-2");
+  });
+  expect(await rig.ok("get_doc", { uuid })).toMatchObject({
+    uuid, kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2", blocks: [],
+  });
+  expect((await rig.ok("list_docs", { kind: "memory" })).docs).toEqual([
+    expect.objectContaining({ uuid, title: "Memory", pinned: false, kind: "memory" }),
+  ]);
+  expect((await rig.ok("list_docs")).docs).toEqual([]);
+  await rig.ok("set_metadata", { uuid, title: "Updated memory" });
+  const inserted = await rig.ok("insert_block", { uuid, after_block_id: null, blocks: [{ type: "paragraph", text: "Keep this note." }] });
+  expect(inserted.applied).toBe(true);
+  expect(getMeta(replica.doc)).toMatchObject({
+    kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2", title: "Updated memory",
+  });
+  expect(await rig.call("set_status", { uuid, status: "open" })).toMatchObject({
+    isError: true, payload: { error: "invalid_document_lifecycle" },
+  });
+  expect((await rig.ok("get_doc", { uuid })).blocks).toEqual([
+    expect.objectContaining({ type: "paragraph", text: "Keep this note." }),
+  ]);
+});
+
+it("repairs an archived memory's legacy stub when its room arrives without making it discoverable", async () => {
+  rig = await startServer();
+  const uuid = randomUUID();
+  const title = "ArchivedMemory";
+  const directory = rig.instance.replicas.directory().doc;
+  getDirectoryMap(directory).set(uuid, { uuid, title, tags: [], deleted: true });
+  const replica = rig.instance.replicas.replica(uuid);
+  replica.doc.transact(() => {
+    initDoc(replica.doc, { uuid, title });
+    setKind(replica.doc, "memory");
+    setMemoryAgent(replica.doc, "implementer");
+    setMemoryRepository(replica.doc, "uberblick-ai/uberblick-2");
+  });
+  const scope = { kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2" };
+  expect(getDirectoryEntry(directory, uuid)).toMatchObject({ ...scope, deleted: true });
+  expect((await rig.ok("list_docs")).docs).toEqual([]);
+  expect((await rig.ok("search", { query: title })).hits).toEqual([]);
+  await rig.ok("restore_doc", { uuid });
+  expect(getDirectoryEntry(directory, uuid)).toMatchObject(scope);
+  expect(getDirectoryEntry(directory, uuid)?.deleted).not.toBe(true);
+  expect(await rig.ok("get_doc", { uuid })).toMatchObject(scope);
+});

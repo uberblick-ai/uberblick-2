@@ -1,10 +1,15 @@
 /** Real search, client convergence, current-answer navigation and browser history. */
 
 import { devices, expect, test } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import * as Y from "yjs";
+import { appendBlock, EXAMPLE_TAGS, initDoc, setKind, setMemoryAgent, setMemoryRepository, setTags } from "@uberblick/schema";
 import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import type { Locator, Page } from "@playwright/test";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { expectMcp } from "./settle.js";
+import { renderedText } from "./contrast-helpers.js";
 
 const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-document-sidebar" } });
 
@@ -116,6 +121,99 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   await page.getByRole("tab", { name: /^Decisions/ }).click();
   await page.getByRole("combobox", { name: "Decision state" }).selectOption("not-yet-decided");
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(1);
+});
+
+test("memories have their own tab and scope, keep list state on Back and remain editable @webkit", async ({ browser }, testInfo) => {
+  const uuid = randomUUID();
+  const title = docTitle("Memory compatibility");
+  const source = new Y.Doc();
+  try {
+    initDoc(source, { uuid, title, description: "A schema-created memory." });
+    setKind(source, "memory");
+    setMemoryAgent(source, "implementer");
+    setMemoryRepository(source, "uberblick-ai/uberblick-2");
+    setTags(source, EXAMPLE_TAGS.filter((tag) => tag.name === "mcp").map((tag) => tag.id));
+    appendBlock(source, { type: "paragraph", text: "A note to edit." });
+    await harness().seedDocument(source);
+  } finally { source.destroy(); }
+  const page = await openApp(browser, `/${harness().workspace}/all`, { readySelector: ".ub-docs-heading" });
+  await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
+  const row = page.locator(".ub-docs-row", { hasText: title });
+  const memories = page.getByRole("tab", { name: /^Memories/ });
+  await activateControl(memories);
+  await expect(row).toBeVisible();
+  await activateControl(page.getByRole("tab", { name: /^Documents/ }));
+  await expect(row).toHaveCount(0);
+  await activateControl(memories);
+  await expect(row).toBeVisible();
+  await expect(row.locator(".ub-memory-scope")).toHaveText("Agent: implementer · Repository: uberblick-ai/uberblick-2");
+  await expect(row.locator(".ub-lifecycle-badge")).toHaveCount(0);
+  const total = await memories.textContent();
+  const search = page.getByRole("searchbox", { name: "Search", exact: true });
+  await search.fill(title);
+  await expect(listedTitles(page)).toHaveText([title]);
+  await activateControl(page.getByRole("button", { name: "Filter by tags" }));
+  await activateControl(page.getByRole("listbox", { name: "Tags", exact: true }).getByRole("option", { name: "mcp", exact: true }));
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox", { name: "Tags", exact: true })).toBeHidden();
+  await activateControl(page.getByRole("button", { name: "Title", exact: true }));
+  await expect(page.getByRole("columnheader", { name: /Title/ })).toHaveAttribute("aria-sort", "ascending");
+  await expect(memories).toHaveText(total ?? "");
+  await page.evaluate(() => document.fonts.ready);
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(colorScheme === "dark");
+    const bounds = await row.locator(".ub-memory-scope").evaluate(element => {
+      const scope = element.getBoundingClientRect();
+      const cell = element.closest("th")?.getBoundingClientRect();
+      return { left: scope.left, right: scope.right, cellLeft: cell?.left, cellRight: cell?.right, clipped: element.scrollWidth > element.clientWidth };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(bounds.cellLeft ?? 0);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.cellRight ?? 0);
+    expect(bounds.clipped).toBe(false);
+    const paint = await renderedText(page, ".ub-memory-scope");
+    expect(paint.length).toBeGreaterThan(0);
+    for (const reading of paint) expect(reading.ratio).toBeGreaterThanOrEqual(4.5);
+  }
+  if (testInfo.project.name === "chromium") {
+    const apple = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.platform));
+    await page.keyboard.press(apple ? "Meta+k" : "Control+k");
+    const palette = page.getByRole("dialog", { name: "Command palette", exact: true });
+    await palette.getByRole("combobox", { name: "Search documents and decisions", exact: true }).fill(title);
+    await expect(palette.getByRole("option", { name: `${title} Document`, exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+  await activateControl(row.locator(".ub-docs-open"));
+  await expect(editor(page)).toHaveText("A note to edit.");
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveCount(0);
+  await expect(page.locator(".ub-memory-scope")).toHaveText("Agent: implementer · Repository: uberblick-ai/uberblick-2");
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+    expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(colorScheme === "dark");
+    const scope = await page.locator(".ub-memory-scope").boundingBox();
+    const heading = await page.locator("textarea.ub-title").boundingBox();
+    expect(scope).not.toBeNull();
+    expect(heading).not.toBeNull();
+    expect((scope?.y ?? 0) + (scope?.height ?? 0)).toBeLessThanOrEqual(heading?.y ?? 0);
+    const copy = await page.getByRole("button", { name: "Copy link" }).boundingBox();
+    expect(copy).not.toBeNull();
+    expect((scope?.x ?? 0) + (scope?.width ?? 0)).toBeLessThanOrEqual(copy?.x ?? 0);
+    const paint = await renderedText(page, ".ub-memory-scope");
+    expect(paint.length).toBeGreaterThan(0);
+    for (const reading of paint) expect(reading.ratio).toBeGreaterThanOrEqual(4.5);
+  }
+  await editor(page).fill("An edited note.");
+  const reader = agent().open({ name: "memory-compatibility-e2e" });
+  await expectMcp(() => reader.call<{ kind: string; agent: string; repository: string; blocks: Array<{ text: string }> }>("get_doc", { uuid }), (doc) => {
+    expect(doc).toMatchObject({ kind: "memory", agent: "implementer", repository: "uberblick-ai/uberblick-2" });
+    expect(doc.blocks.map((block) => block.text)).toEqual(["An edited note."]);
+  });
+  await page.goBack();
+  await expect(memories).toHaveAttribute("aria-selected", "true");
+  await expect(search).toHaveValue(title);
+  await expect(page.getByRole("button", { name: "Filter by tags" })).toContainText("mcp");
+  await expect(page.getByRole("columnheader", { name: /Title/ })).toHaveAttribute("aria-sort", "ascending");
+  await expect(listedTitles(page)).toHaveText([title]);
 });
 
 test("the list and palette search fragments and block languages through the serving replica", async ({ browser }) => {

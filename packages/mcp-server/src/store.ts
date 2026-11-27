@@ -86,7 +86,7 @@ export interface IndexedDoc {
   tagNames?: readonly string[];
   /** Code block languages and the fence names of chart and terminal blocks. */
   blockLanguages?: readonly string[];
-  kind?: "regular" | "decision";
+  kind?: "regular" | "decision" | "memory";
   /** The document's description, or the empty string when it has none. */
   description: string;
   /** Outbound links, by target document UUID. */
@@ -101,7 +101,7 @@ export interface SearchHit {
   uuid: string;
   title: string;
   tags: string[];
-  kind: "regular" | "decision";
+  kind: "regular" | "decision" | "memory";
   /** The document's description, or null when it has none. */
   description: string | null;
   /** Excerpt from a matching field, or the title when there is no excerpt. */
@@ -524,7 +524,7 @@ export class MirrorStore {
     markPending: Prepared<[string, number]>;
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
-    advanceIndex: Prepared<[string, number, number, number, number]>;
+    advanceIndex: Prepared<[string, number, number, number, number, string]>;
     staleIndex: Prepared<[string, number, number, number, number]>;
     putDoc: Prepared<[string, string, string, string]>;
     hasDoc: Prepared<[string]>;
@@ -700,6 +700,7 @@ export class MirrorStore {
           "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq " +
           "OR doc_index_seq.directory_through_seq < excluded.directory_through_seq " +
           "OR doc_index_seq.github_refs_indexed = 0 " +
+          "OR NOT EXISTS (SELECT 1 FROM doc_index d WHERE d.uuid = excluded.uuid AND d.kind = ?) " +
           // An older peer can replace the row using only the original columns.
           "OR NOT EXISTS (SELECT 1 FROM docs_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
           "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL " +
@@ -899,6 +900,7 @@ export class MirrorStore {
           catalogThroughSeq,
           directoryThroughSeq,
           readsDirectory,
+          doc.kind ?? "regular",
         ).changes > 0;
       if (!written) {
         return this.statements.staleIndex.get(doc.uuid, throughSeq, catalogThroughSeq, readsDirectory, directoryThroughSeq) === undefined;
@@ -1200,7 +1202,7 @@ export class MirrorStore {
   /**
    * Derive from contiguous document, settings and directory cuts; stale input
    * must not replace newer rows. Commit cuts, metadata and dependents together;
-   * allow equal-cut replacements only for incomplete derived rows.
+   * allow equal-cut replacements only for incomplete or misclassified derived rows.
    * False means a newer stored source cut refused this derivation; retry later.
    */
   indexDoc(
@@ -1289,7 +1291,7 @@ export class MirrorStore {
     query: string,
     limit: number,
     tag?: string | readonly string[],
-    kind?: "regular" | "decision",
+    kind?: "regular" | "decision" | "memory",
   ): SearchHit[] {
     const match = ftsQuery(query);
     if (match === null) {
@@ -1307,7 +1309,7 @@ export class MirrorStore {
       description: string;
       snippet: string;
       tags: string | null;
-      kind: "regular" | "decision";
+      kind: "regular" | "decision" | "memory";
     }[];
     return rows.map((row) => ({
       uuid: row.uuid,

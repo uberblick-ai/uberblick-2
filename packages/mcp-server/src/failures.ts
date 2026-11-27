@@ -58,6 +58,22 @@ interface Recovery {
  * when the unchanged call cannot succeed after a transient condition passes.
  */
 const RECOVERIES: Record<string, Recovery> = {
+  memory_scope_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Omit agent and repository on this document, or address or create a memory with kind: memory. Nothing was written.",
+  },
+  memory_field_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Omit status, related, supersedes, answer and discussion when creating a memory. Nothing was created.",
+  },
+  invalid_memory_agent: {
+    recoveryClass: "manual",
+    guidance: "Use a lowercase agent name without surrounding whitespace. On a memory write, a blank string clears the agent; in get_memories, omit the filter to leave agents unfiltered. Nothing was written.",
+  },
+  invalid_memory_repository: {
+    recoveryClass: "manual",
+    guidance: "Use a repository as owner/name. On a memory write, a blank string clears the repository; in get_memories, omit the filter to leave repositories unfiltered. Nothing was written.",
+  },
   insufficient_scope: {
     recoveryClass: "manual",
     guidance: "Authorize this connection with docs:read docs:write before repeating the call. Nothing was written.",

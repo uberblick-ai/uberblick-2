@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useRoomStatus } from "../hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
+import { MemoryScope } from "./MemoryScope.js";
 import { PickerList } from "../PickerList.js";
 import { shareUrl } from "../route.js";
 import { useTagCatalog } from "../tags.js";
@@ -386,6 +387,7 @@ export function DocMetaLine({
       {meta !== null && meta.uuid !== "" && (
         <>
           <LifecycleBadge kind={meta.kind} />
+          <MemoryScope kind={meta.kind} agent={meta.agent} repository={meta.repository} />
           <TagStrip
             ydoc={connection.ydoc}
             tags={meta.tags}
