@@ -17,9 +17,12 @@ import type { TokenClaims, TokenScope } from "@uberblick/schema/token";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
 import { type InitLock, tryAcquireLock } from "@uberblick/mcp-server/init-lock";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
+import { ensureWorkspaceBinding } from "@uberblick/mcp-server/workspace-registry";
+import { type HistoryRefresherRole, tryAcquireHistoryRefresherRole } from "../../mcp-server/src/history-refresher-role.js";
+import { MirrorStore } from "../../mcp-server/src/store.js";
 import { SESSION_HEADER } from "../src/open-session.js";
 import { probeHubState } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
@@ -94,6 +97,7 @@ export async function cleanUp(): Promise<void> {
       children.splice(0),
       hubs.splice(0).map((hub) => () => hub.stop()),
       listeners.splice(0),
+      historyRoles.splice(0).map((role) => () => role.close()),
       [removeTempDirs],
     );
   } finally {
@@ -103,6 +107,23 @@ export async function cleanUp(): Promise<void> {
 }
 
 // --- fixtures ----------------------------------------------------------------
+
+const historyRoles: HistoryRefresherRole[] = [];
+
+/**
+ * Keep the `ub open` started next from running its background history mirror.
+ * The mirror publishes the hub's catalog to the cache that foreground reads
+ * return, so a test answering revision requests itself must be their only source.
+ * The role lock needs the replica to exist, and an existing replica needs its hub record.
+ */
+export async function holdHistoryRefresherRole(box: Sandbox, hubUrl: string): Promise<void> {
+  await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+  const databasePath = defaultWorkspaceDatabasePath(WORKSPACE, box.env);
+  new MirrorStore(databasePath, WORKSPACE).close();
+  const role = tryAcquireHistoryRefresherRole(databasePath);
+  if (role === null) throw new Error("The fixture could not hold the background history role.");
+  historyRoles.push(role);
+}
 
 
 /**

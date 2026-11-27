@@ -15,7 +15,7 @@ import { localBrowserKey } from "../src/browser-key.js";
 import { pointAt, waitUntil } from "./helpers.js";
 import {
   WORKSPACE, authMessage, bearer, cleanUp, configured, freePort,
-  getWithHost, holdDefaultHub, hubs, open,
+  getWithHost, holdDefaultHub, holdHistoryRefresherRole, hubs, open,
 } from "./open-fixtures.js";
 
 afterEach(cleanUp);
@@ -34,6 +34,8 @@ describe("ub open automatic revisions", () => {
     const { replacedAt: _replaced, ...record } = issued.record;
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: person,
       credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
+    // A mirror publication of the real catalog could replace the intercepted legacy list.
+    await holdHistoryRefresherRole(box, endpoint);
     const app = await open(box, ["--port", String(await freePort())], env);
     const uuid = "7a819902-f86e-45d1-84d3-58d8f979a503";
     const token = await authMessage(localBrowserKey(WORKSPACE, box.env));
