@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { copyFileSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, symlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -61,6 +62,25 @@ async function start(
 async function stop(hub: TeamHub): Promise<void> {
   hubs.splice(hubs.indexOf(hub), 1);
   await hub.stop();
+}
+
+/**
+ * A port a hub bound and released again. It lies below the ephemeral ranges
+ * and the CLI and MCP rigs' picks (13379, 16000–31999), so a parallel test's
+ * `listen(0)` cannot take it while it is released.
+ */
+async function releasedPort(): Promise<number> {
+  const offset = randomInt(2_000);
+  for (let tried = 0; tried < 100; tried += 1) {
+    const port = 14_000 + ((offset + tried) % 2_000);
+    try {
+      await stop(await start(tempDatabasePath(), undefined, { port }));
+      return port;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes("EADDRINUSE"))) throw error;
+    }
+  }
+  throw new Error("no free hub port below the ephemeral range");
 }
 
 function read<T>(databasePath: string, inspect: (database: DatabaseSync) => T): T {
@@ -274,9 +294,7 @@ describe("released database startup", () => {
     const databasePath = legacyDatabase("1.10.0");
     const original = readFileSync(databasePath);
     const records: HubLogRecord[] = [];
-    const probe = await start(tempDatabasePath());
-    const port = probe.port;
-    await stop(probe);
+    const port = await releasedPort();
 
     for (let attempt = 0; attempt < 3; attempt++) {
       await expect(start(databasePath, "1.9.99", { port, log: record => { records.push(record); } }))
@@ -411,9 +429,7 @@ describe("released database startup", () => {
     const databasePath = legacyDatabase();
     const original = readFileSync(databasePath);
     const records: HubLogRecord[] = [];
-    const probe = await start(tempDatabasePath());
-    const port = probe.port;
-    await stop(probe);
+    const port = await releasedPort();
 
     filesystem.failPublish = true;
     await expect(start(databasePath, "1.2.3", { port, log: record => { records.push(record); } }))
