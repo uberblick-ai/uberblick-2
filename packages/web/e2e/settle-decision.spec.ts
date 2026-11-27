@@ -126,6 +126,10 @@ test("the state menu and confirmation work by desktop keyboard and pointer or iP
   await expect(menu).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await activateControl(trigger, { touch });
+  await expect(menu).toBeVisible();
+  // Radix arms outside-press dismissal on a zero-delay timer after the menu
+  // mounts; a later timer runs after it, so the press below finds the listener.
+  await page.evaluate(() => new Promise(resolve => { setTimeout(resolve, 0); }));
   if (touch) await page.touchscreen.tap(3, 3);
   else await page.mouse.click(3, 3);
   await expect(menu).toHaveCount(0);
