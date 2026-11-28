@@ -5,6 +5,32 @@ first. The first paragraph of each release is its summary; uberblick.ai shows
 the five newest. Upgrade steps appear only when a release needs more than
 updating the client and the hub.
 
+## v0.4.19 — 2026-11-27
+
+Agent memories get their own kind, a Memories tab and a `get_memories` index, and pages gain footnotes, data values inside sentences and more chart and table views.
+
+### Added
+
+- Agent memories: a document kind of their own, which can name one agent and one repository. A memory keeps that scope through sync, history, archive and restore. Clients from before this release read and edit memories as ordinary pages without losing their scope (#2739).
+- `get_memories` gives an agent the memories for its agent name and repository, plus the general ones, in one call. `create_doc` and `set_metadata` write memories and their scope, and `list_docs` and `search` keep memories apart from regular pages (#2740).
+- A Memories tab in All documents, after Decisions. Each memory row shows its agent, or All agents, and its repository; an open memory shows them above its title (#2741).
+- Footnotes: numbered references and notes that survive Markdown import and export and MCP reads and writes (#2723). In the web app, notes link back to each reference, following one opens folded sections, and `[^` adds a footnote in one Undo step (#2724).
+- Values from document data inside sentences with `:value{…}`. They are formatted like table cells, redraw live, and select, move and delete as one unit (#2729).
+- Dot and dumbbell plots over named categories (#2712).
+- Bar and dot charts can colour their categories by a `group` field, with a group legend (#2714).
+- Data tables can shade number cells as a heat map on one shared scale (#2715).
+- Scatter plots can draw reference lines on either axis and an x = y diagonal (#2716).
+- Charts and data tables can show only the records of a collection that match a `filter` (#2717).
+
+### Improved
+
+- MCP decisions help explains status changes and re-approval (#2736).
+
+### Fixed
+
+- Reference lines stay visible across the bars of category bar charts, in both orientations (#2738).
+- Commenting on a chart's source names category bar charts "Bar chart N" and dot plots "Dot plot N" instead of "Line chart N" (#2738).
+
 ## v0.4.18 — 2026-11-15
 
 Charts, tables and Markdown: bar charts over named categories, notes on line-chart points, in-cell bars in data tables, checklists people and agents can tick, and web addresses that become links as you write.
